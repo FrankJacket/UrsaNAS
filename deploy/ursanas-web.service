@@ -1,0 +1,23 @@
+[Unit]
+Description=UrsaNAS interface web (sans privilèges)
+After=ursanas-agent.service
+Requires=ursanas-agent.service
+
+[Service]
+Type=simple
+User=ursanas
+Group=ursanas
+Environment=Agent__SocketPath=/run/ursanas/agent.sock
+Environment=ASPNETCORE_URLS=http://0.0.0.0:8080
+Environment=DataDir=/var/lib/ursanas-web
+StateDirectory=ursanas-web
+WorkingDirectory=/opt/ursanas/web
+ExecStart=/opt/ursanas/web/Nas.Web
+Restart=on-failure
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

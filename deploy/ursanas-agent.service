@@ -1,0 +1,22 @@
+[Unit]
+Description=UrsaNAS agent (privilégié, socket local uniquement)
+After=network.target zfs.target
+
+[Service]
+Type=simple
+User=root
+Group=ursanas
+RuntimeDirectory=ursanas
+RuntimeDirectoryMode=0750
+StateDirectory=ursanas
+Environment=Agent__SocketPath=/run/ursanas/agent.sock
+Environment=DOTNET_BUNDLE_EXTRACT_BASE_DIR=/var/lib/ursanas/.net
+ExecStart=/opt/ursanas/agent/Nas.Agent
+Restart=on-failure
+UMask=0007
+NoNewPrivileges=true
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,41 @@
+using Dapper;
+using Microsoft.Data.Sqlite;
+
+namespace Nas.Web.Data;
+
+public class Db
+{
+    readonly string _cs;
+    public string DataDir { get; }
+
+    public Db(IConfiguration cfg)
+    {
+        DataDir = Path.GetFullPath(cfg["DataDir"] ?? "data");
+        Directory.CreateDirectory(DataDir);
+        _cs = $"Data Source={Path.Combine(DataDir, "ursanas.db")}";
+    }
+
+    public SqliteConnection Open()
+    {
+        var c = new SqliteConnection(_cs);
+        c.Open();
+        return c;
+    }
+
+    /// <summary>Crée le schéma ; les évolutions ultérieures passent par <see cref="AddColumn"/> pour migrer les bases existantes.</summary>
+    public void Init()
+    {
+        using var c = Open();
+        c.Execute("PRAGMA journal_mode=WAL;");
+        c.Execute("""
+        CREATE TABLE IF NOT EXISTS AuditLog(Id INTEGER PRIMARY KEY AUTOINCREMENT, At TEXT NOT NULL, Actor TEXT NOT NULL, Action TEXT NOT NULL, Detail TEXT);
+        CREATE INDEX IF NOT EXISTS IX_AuditLog_At ON AuditLog(At);
+        """);
+    }
+
+    static void AddColumn(SqliteConnection c, string table, string column, string ddl)
+    {
+        if (!c.Query<string>($"SELECT name FROM pragma_table_info('{table}')").Contains(column))
+            c.Execute($"ALTER TABLE {table} ADD COLUMN {column} {ddl}");
+    }
+}

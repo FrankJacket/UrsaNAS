@@ -1,0 +1,20 @@
+@page "/journal"
+@inherits AutoRefreshBase
+@inject Repo Repo
+
+<MudText Typo="Typo.h4" Class="mb-4">Journal</MudText>
+<MudTable Items="rows" Hover="true" Dense="true">
+    <HeaderContent><MudTh>Date</MudTh><MudTh>Auteur</MudTh><MudTh>Action</MudTh><MudTh>Détail</MudTh></HeaderContent>
+    <RowTemplate>
+        <MudTd>@Fmt.Dt(context.At)</MudTd>
+        <MudTd>@context.Actor</MudTd>
+        <MudTd>@context.Action</MudTd>
+        <MudTd>@context.Detail</MudTd>
+    </RowTemplate>
+    <NoRecordsContent><MudText Class="pa-4">Aucune entrée.</MudText></NoRecordsContent>
+</MudTable>
+
+@code {
+    List<AuditRow> rows = new();
+    protected override async Task LoadAsync() => rows = await Repo.GetAuditAsync();
+}

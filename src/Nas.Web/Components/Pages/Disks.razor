@@ -1,0 +1,44 @@
+@page "/"
+@page "/disks"
+@inherits AutoRefreshBase
+@inject AgentClient Agent
+
+<MudText Typo="Typo.h4" Class="mb-4">Disques</MudText>
+@if (error is not null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">@error</MudAlert>
+}
+<MudTable Items="disks" Hover="true" Dense="true" Loading="@(!loaded)">
+    <HeaderContent>
+        <MudTh>Disque</MudTh><MudTh>Taille</MudTh><MudTh>Modèle</MudTh><MudTh>Série</MudTh><MudTh>Type</MudTh><MudTh>Monté sur</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd>@context.Path</MudTd>
+        <MudTd>@Fmt.Size(context.SizeBytes)</MudTd>
+        <MudTd>@context.Model</MudTd>
+        <MudTd>@context.Serial</MudTd>
+        <MudTd>@(context.Rotational switch { true => "HDD", false => "SSD", null => "?" })</MudTd>
+        <MudTd>@(context.MountPoints.Count > 0 ? string.Join(", ", context.MountPoints) : "—")</MudTd>
+    </RowTemplate>
+    <NoRecordsContent><MudText Class="pa-4">Aucun disque détecté.</MudText></NoRecordsContent>
+</MudTable>
+
+@code {
+    IReadOnlyList<DiskInfo> disks = [];
+    string? error;
+    bool loaded;
+
+    protected override async Task LoadAsync()
+    {
+        try
+        {
+            disks = await Agent.GetDisksAsync();
+            error = null;
+        }
+        catch (HttpRequestException)
+        {
+            error = "Agent injoignable : le service ursanas-agent est-il démarré ?";
+        }
+        loaded = true;
+    }
+}

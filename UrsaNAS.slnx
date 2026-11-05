@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Nas.Agent/Nas.Agent.csproj" />
+    <Project Path="src/Nas.Contracts/Nas.Contracts.csproj" />
+    <Project Path="src/Nas.Web/Nas.Web.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Nas.Agent.Tests/Nas.Agent.Tests.csproj" />
+  </Folder>
+</Solution>
