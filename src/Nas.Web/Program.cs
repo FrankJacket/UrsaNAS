@@ -10,6 +10,7 @@ b.Services.AddMudServices();
 b.Services.AddScoped<ThemeState>();
 b.Services.AddSingleton<Db>();
 b.Services.AddSingleton<Repo>();
+b.Services.AddScoped<NasOperations>();
 
 // L'interface ne touche jamais au système : elle parle à l'agent par socket Unix (ou par URL en développement).
 var socketPath = b.Configuration["Agent:SocketPath"];

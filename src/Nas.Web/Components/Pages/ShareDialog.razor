@@ -1,0 +1,62 @@
+@inject NasOperations Ops
+
+@* Création ou modification d'un partage. Le dossier est toujours /srv/nas/<nom> et ne se choisit pas. *@
+<MudDialog>
+    <DialogContent>
+        @if (error is not null)
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-3">@error</MudAlert>
+        }
+        <MudTextField @bind-Value="name" Label="Nom du partage" Immediate="true" Disabled="@(busy || Existing is not null)" AutoFocus="@(Existing is null)"
+                      HelperText="@($"Dossier : /srv/nas/{name}")" />
+        <MudTextField @bind-Value="comment" Label="Description" Disabled="busy" />
+        <MudSelect T="string" Label="Utilisateurs autorisés" MultiSelection="true" @bind-SelectedValues="selected" Disabled="busy"
+                   HelperText="@(Users.Count == 0 ? "Crée d'abord un utilisateur." : null)">
+            @foreach (var u in Users)
+            {
+                <MudSelectItem T="string" Value="@u">@u</MudSelectItem>
+            }
+        </MudSelect>
+        <MudSwitch T="bool" @bind-Value="readOnly" Label="Lecture seule" Color="Color.Primary" Disabled="busy" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => Dialog.Cancel()" Disabled="busy">Annuler</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save" Disabled="busy">@(busy ? "Application…" : "Enregistrer")</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance Dialog { get; set; } = default!;
+    [Parameter] public ShareDef? Existing { get; set; }
+    [Parameter, EditorRequired] public IReadOnlyList<string> Users { get; set; } = [];
+
+    string name = "", comment = "";
+    bool readOnly;
+    IReadOnlyCollection<string> selected = [];
+    string? error;
+    bool busy;
+
+    protected override void OnInitialized()
+    {
+        if (Existing is null) return;
+        name = Existing.Name;
+        comment = Existing.Comment;
+        readOnly = Existing.ReadOnly;
+        selected = Existing.ValidUsers.ToList();
+    }
+
+    async Task Save()
+    {
+        error = null;
+        busy = true;
+        try
+        {
+            await Ops.SaveShareAsync(new ShareDef(name.Trim(), comment.Trim(), readOnly, selected.OrderBy(u => u, StringComparer.Ordinal).ToList()), isNew: Existing is null);
+            Dialog.Close(DialogResult.Ok(true));
+            return;
+        }
+        catch (AgentException e) { error = e.Message; }
+        catch (HttpRequestException) { error = "Agent injoignable."; }
+        busy = false;
+    }
+}

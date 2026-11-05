@@ -1,0 +1,85 @@
+@page "/shares"
+@inherits AutoRefreshBase
+@inject Repo Repo
+@inject AgentClient Agent
+@inject NasOperations Ops
+@inject IDialogService Dialogs
+@inject ISnackbar Snack
+
+<MudText Typo="Typo.h4" Class="mb-4">Partages</MudText>
+<MudStack Row="true" Class="mb-4">
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.CreateNewFolder" OnClick="Add">Ajouter un partage</MudButton>
+    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Sync" OnClick="Reapply">Réappliquer</MudButton>
+</MudStack>
+<MudTable Items="shares" Hover="true" Dense="true" Loading="@(!loaded)">
+    <HeaderContent><MudTh>Nom</MudTh><MudTh>Dossier</MudTh><MudTh>Accès</MudTh><MudTh>Utilisateurs</MudTh><MudTh>Description</MudTh><MudTh></MudTh></HeaderContent>
+    <RowTemplate>
+        <MudTd>@context.Name</MudTd>
+        <MudTd><code>/srv/nas/@context.Name</code></MudTd>
+        <MudTd><MudChip T="string" Size="Size.Small" Color="@(context.ReadOnly ? Color.Default : Color.Success)">@(context.ReadOnly ? "Lecture seule" : "Lecture/écriture")</MudChip></MudTd>
+        <MudTd>@string.Join(", ", context.ValidUsers)</MudTd>
+        <MudTd>@context.Comment</MudTd>
+        <MudTd Style="text-align:right">
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Edit" OnClick="() => Edit(context)">Modifier</MudButton>
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="() => Delete(context)">Supprimer</MudButton>
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent><MudText Class="pa-4">Aucun partage.</MudText></NoRecordsContent>
+</MudTable>
+
+@code {
+    List<ShareDef> shares = new();
+    bool loaded;
+
+    protected override async Task LoadAsync()
+    {
+        shares = await Repo.GetSharesAsync();
+        loaded = true;
+    }
+
+    static readonly DialogOptions Options = new() { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true, BackdropClick = false };
+
+    async Task<IReadOnlyList<string>?> UserNames()
+    {
+        try { return (await Agent.GetUsersAsync()).Select(u => u.Name).ToList(); }
+        catch (HttpRequestException) { Snack.Add("Agent injoignable.", Severity.Error); return null; }
+    }
+
+    async Task Add() => await ShowDialog(null, "Nouveau partage");
+    async Task Edit(ShareDef s) => await ShowDialog(s, $"Modifier {s.Name}");
+
+    async Task ShowDialog(ShareDef? existing, string title)
+    {
+        if (await UserNames() is not { } users) return;
+        var parameters = new DialogParameters<ShareDialog> { { x => x.Existing, existing }, { x => x.Users, users } };
+        var dialog = await Dialogs.ShowAsync<ShareDialog>(title, parameters, Options);
+        if (await dialog.Result is { Canceled: false })
+        {
+            Snack.Add("Partage enregistré.", Severity.Success);
+            await LoadAsync();
+        }
+    }
+
+    async Task Delete(ShareDef s)
+    {
+        var ok = await Dialogs.ShowMessageBoxAsync($"Supprimer le partage {s.Name} ?",
+            $"Le partage n'est plus accessible en réseau. Les fichiers restent dans /srv/nas/{s.Name}.",
+            yesText: "Supprimer", cancelText: "Annuler");
+        if (ok != true) return;
+        await Run(() => Ops.DeleteShareAsync(s.Name), $"Partage {s.Name} supprimé.");
+    }
+
+    async Task Reapply() => await Run(Ops.ReapplySharesAsync, "Partages réappliqués.");
+
+    async Task Run(Func<Task> action, string success)
+    {
+        try
+        {
+            await action();
+            Snack.Add(success, Severity.Success);
+            await LoadAsync();
+        }
+        catch (AgentException e) { Snack.Add(e.Message, Severity.Error); }
+        catch (HttpRequestException) { Snack.Add("Agent injoignable.", Severity.Error); }
+    }
+}

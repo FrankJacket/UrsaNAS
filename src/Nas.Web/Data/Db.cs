@@ -30,6 +30,7 @@ public class Db
         c.Execute("""
         CREATE TABLE IF NOT EXISTS AuditLog(Id INTEGER PRIMARY KEY AUTOINCREMENT, At TEXT NOT NULL, Actor TEXT NOT NULL, Action TEXT NOT NULL, Detail TEXT);
         CREATE INDEX IF NOT EXISTS IX_AuditLog_At ON AuditLog(At);
+        CREATE TABLE IF NOT EXISTS Shares(Name TEXT PRIMARY KEY COLLATE NOCASE, Comment TEXT NOT NULL DEFAULT '', ReadOnly INTEGER NOT NULL DEFAULT 0, ValidUsers TEXT NOT NULL); -- ValidUsers : noms séparés par des espaces
         """);
     }
 

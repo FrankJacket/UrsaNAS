@@ -1,0 +1,116 @@
+using System.Text;
+using Nas.Contracts;
+
+namespace Nas.Agent.Services;
+
+/// <summary>Génère le fichier de configuration Samba des partages gérés par UrsaNAS.</summary>
+public static class ShareConf
+{
+    public static string Render(IReadOnlyList<ShareDef> shares, string shareRoot)
+    {
+        var sb = new StringBuilder();
+        sb.Append("; Généré par UrsaNAS. Ne pas modifier à la main : ce fichier est réécrit à chaque changement.\n");
+        foreach (var s in shares)
+        {
+            sb.Append('\n').Append('[').Append(s.Name).Append("]\n");
+            if (!string.IsNullOrWhiteSpace(s.Comment)) sb.Append("   comment = ").Append(s.Comment.Trim().Replace("%", "%%")).Append('\n');
+            sb.Append("   path = ").Append(PathFor(shareRoot, s.Name)).Append('\n');
+            sb.Append("   read only = ").Append(s.ReadOnly ? "yes" : "no").Append('\n');
+            sb.Append("   guest ok = no\n");
+            sb.Append("   browseable = yes\n");
+            sb.Append("   valid users = ").Append(string.Join(' ', s.ValidUsers)).Append('\n');
+            sb.Append("   create mask = 0660\n");
+            sb.Append("   directory mask = 2770\n");
+        }
+        return sb.ToString();
+    }
+
+    public static string PathFor(string shareRoot, string name) => shareRoot.TrimEnd('/') + "/" + name;
+
+    /// <summary>
+    /// Place la ligne <c>include</c> à la FIN de smb.conf. Samba traite un include à l'endroit où il apparaît :
+    /// placé dans [global], les sections du fichier inclus couperaient [global] en deux et les réglages qui suivent
+    /// tomberaient dans le dernier partage. Une ligne mal placée (version précédente) est déplacée.
+    /// Renvoie le texte inchangé quand l'include est déjà la dernière ligne.
+    /// </summary>
+    public static string EnsureInclude(string smbConf, string includePath)
+    {
+        var line = $"include = {includePath}";
+        var lines = smbConf.Replace("\r\n", "\n").Split('\n').ToList();
+        while (lines.Count > 0 && lines[^1].Trim().Length == 0) lines.RemoveAt(lines.Count - 1);
+
+        if (lines.Count > 0 && lines[^1].Trim() == line && lines.Count(l => l.Contains(includePath, StringComparison.Ordinal)) == 1)
+            return smbConf; // déjà en place, au bon endroit
+
+        lines.RemoveAll(l => l.Contains(includePath, StringComparison.Ordinal));
+        while (lines.Count > 0 && lines[^1].Trim().Length == 0) lines.RemoveAt(lines.Count - 1);
+        lines.Add("");
+        lines.Add("; Partages gérés par UrsaNAS (doit rester la dernière ligne)");
+        lines.Add(line);
+        return string.Join('\n', lines) + "\n";
+    }
+}
+
+/// <summary>
+/// Applique la liste complète des partages : crée les dossiers, écrit <c>ursanas.conf</c>, le valide avec
+/// <c>testparm</c> (retour arrière si Samba le refuse) puis recharge Samba. Les dossiers des partages supprimés
+/// ne sont jamais effacés : les données restent sur le disque.
+/// </summary>
+public sealed class ShareService(ICommandRunner run, UserService users, IConfiguration cfg)
+{
+    string ConfigDir => cfg["Samba:ConfigDir"] ?? "/etc/samba";
+    string ShareRoot => cfg["Samba:ShareRoot"] ?? "/srv/nas";
+    string ConfPath => Path.Combine(ConfigDir, "ursanas.conf");
+    string MainConfPath => Path.Combine(ConfigDir, "smb.conf");
+
+    public async Task ApplyAsync(IReadOnlyList<ShareDef> shares, CancellationToken ct = default)
+    {
+        var known = (await users.ListAsync(ct)).Select(u => u.Name).ToHashSet();
+        if (Rules.ValidateShares(shares, known) is { } error) throw new OperationException(error);
+
+        await EnsureIncludeAsync(ct);
+
+        // Le dossier racine doit être traversable par tous les utilisateurs : l'unité systemd de l'agent a un UMask 0007,
+        // sans cette étape il serait en 0770 et personne d'autre que root ne pourrait atteindre un partage.
+        Directory.CreateDirectory(ShareRoot);
+        Check(await run.RunAsync("chmod", ["0755", ShareRoot], ct: ct), "chmod");
+
+        foreach (var s in shares)
+        {
+            var dir = ShareConf.PathFor(ShareRoot, s.Name);
+            Directory.CreateDirectory(dir);
+            Check(await run.RunAsync("chgrp", [UserService.Group, dir], ct: ct), "chgrp");
+            Check(await run.RunAsync("chmod", ["2770", dir], ct: ct), "chmod");
+        }
+
+        var previous = File.Exists(ConfPath) ? await File.ReadAllTextAsync(ConfPath, ct) : null;
+        await File.WriteAllTextAsync(ConfPath, ShareConf.Render(shares, ShareRoot), ct);
+
+        var test = await run.RunAsync("testparm", ["-s", MainConfPath], ct: ct);
+        if (test.ExitCode != 0)
+        {
+            if (previous is null) File.Delete(ConfPath); else await File.WriteAllTextAsync(ConfPath, previous, ct);
+            throw new OperationException("Samba refuse la configuration : " + (string.IsNullOrWhiteSpace(test.StdErr) ? test.StdOut : test.StdErr).Trim());
+        }
+
+        Check(await run.RunAsync("smbcontrol", ["all", "reload-config"], ct: ct), "Rechargement de Samba");
+    }
+
+    async Task EnsureIncludeAsync(CancellationToken ct)
+    {
+        var main = await File.ReadAllTextAsync(MainConfPath, ct);
+        var updated = ShareConf.EnsureInclude(main, ConfPath);
+        if (updated == main) return;
+
+        var backup = MainConfPath + ".ursanas-bak";
+        if (!File.Exists(backup)) File.Copy(MainConfPath, backup);
+        if (!File.Exists(ConfPath)) await File.WriteAllTextAsync(ConfPath, "", ct); // l'include doit pointer vers un fichier existant
+        await File.WriteAllTextAsync(MainConfPath, updated, ct);
+    }
+
+    static void Check(CommandResult r, string what)
+    {
+        if (r.ExitCode == 0) return;
+        throw new OperationException($"{what} a échoué ({r.ExitCode}) : {r.StdErr.Trim()}");
+    }
+}
