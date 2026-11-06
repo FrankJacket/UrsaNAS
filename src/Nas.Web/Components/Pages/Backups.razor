@@ -1,0 +1,269 @@
+@page "/backups"
+@inherits AutoRefreshBase
+@inject BackupRepo Jobs
+@inject BackupOperations Ops
+@inject AgentClient Agent
+@inject IDialogService Dialogs
+@inject ISnackbar Snack
+
+<MudText Typo="Typo.h4" Class="mb-4">@L["Backups"]</MudText>
+
+<MudAlert Severity="Severity.Info" Class="mb-4">
+    @L["A backup is a readable copy of your files on an external disk, not a restorable image: permissions and ACLs are not kept. Mount the disk on the NAS first (under /mnt or /media), then initialise it once for each job."]
+</MudAlert>
+
+@if (agentError is not null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">@agentError</MudAlert>
+}
+
+<MudStack Row="true" Class="mb-4">
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="() => Edit(null)">@L["New backup job"]</MudButton>
+</MudStack>
+
+@if (loaded && jobs.Count == 0)
+{
+    <MudText Class="pa-4">@L["No backup job yet."]</MudText>
+}
+
+<MudGrid>
+    @foreach (var j in jobs)
+    {
+        var job = j;
+        var run = runs.GetValueOrDefault(job.Id);
+        var running = run is { Result: null };
+        var disk = disks.GetValueOrDefault(job.Id);
+        var last = lastRuns.GetValueOrDefault(job.Id);
+        <MudItem xs="12" lg="6">
+            <MudCard Outlined="true">
+                <MudCardHeader>
+                    <CardHeaderContent>
+                        <MudText Typo="Typo.h6">@job.Name @if (!job.Enabled) { <MudChip T="string" Size="Size.Small" Class="ml-2">@L["Disabled"]</MudChip> }</MudText>
+                        <MudText Typo="Typo.body2"><code>/@job.Share@(job.IncludeList().Length > 0 ? " (" + string.Join(", ", job.IncludeList()) + ")" : "")</code> → <code>@job.TargetDir/@job.DestFolder</code></MudText>
+                    </CardHeaderContent>
+                    <CardHeaderActions>
+                        <MudChip T="string" Size="Size.Small" Color="@DiskColor(disk)">@DiskText(disk)</MudChip>
+                    </CardHeaderActions>
+                </MudCardHeader>
+                <MudCardContent>
+                    <MudText Typo="Typo.body2">@ScheduleText(job)@(job.Snapshot ? " · " + L["ZFS snapshot"] : "")@(disk is { State: BackupDiskState.Connected } ? " · " + L["{0} free of {1}", Fmt.Size(disk.FreeBytes, L.Lang), Fmt.Size(disk.TotalBytes, L.Lang)] : "")</MudText>
+
+                    @if (running)
+                    {
+                        <MudText Typo="Typo.body2" Class="mt-3"><b>@(run!.Queued ? L["Waiting for another job…"] : L.Translate(run.Phase))</b></MudText>
+                        <MudProgressLinear Value="@Percent(job, run)" Indeterminate="@(Percent(job, run) <= 0)" Color="Color.Primary" Class="my-2" />
+                        <MudText Typo="Typo.caption" Class="d-block">
+                            @L["{0} copied, {1} unchanged, {2} removed, {3} errors", run.Copied, run.Unchanged, run.Deleted, run.Errors]
+                            · @Fmt.Size(run.BytesCopied, L.Lang)@Speed(run)
+                        </MudText>
+                        @if (run.CurrentFile is { Length: > 0 })
+                        {
+                            <MudText Typo="Typo.caption" Class="d-block" Style="overflow-wrap:anywhere">@run.CurrentFile</MudText>
+                        }
+                    }
+                    else if (last is not null)
+                    {
+                        <MudText Typo="Typo.body2" Class="mt-3">
+                            @L["Last copy"] : <MudChip T="string" Size="Size.Small" Color="@StatusColor(last.Status)">@StatusText(last.Status)</MudChip>
+                            @Fmt.Dt(last.StartedUtc)
+                        </MudText>
+                        <MudText Typo="Typo.caption" Class="d-block">
+                            @L["{0} copied, {1} unchanged, {2} removed, {3} errors", last.Copied, last.Unchanged, last.Deleted, last.Errors]
+                            @if (!string.IsNullOrWhiteSpace(last.Message)) { <span> — @L.Translate(last.Message)</span> }
+                        </MudText>
+                    }
+                    else
+                    {
+                        <MudText Typo="Typo.body2" Class="mt-3">@L["Never run."]</MudText>
+                    }
+                    @if (disk is { State: BackupDiskState.OtherDisk })
+                    {
+                        <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">@L["The disk found there is not the one this job was set up with. Use “Use this disk” if you replaced it."]</MudAlert>
+                    }
+                </MudCardContent>
+                <MudCardActions>
+                    @if (running)
+                    {
+                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Stop" OnClick="() => Cancel(job)">@L["Cancel"]</MudButton>
+                    }
+                    else
+                    {
+                        <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="() => RunNow(job)"
+                                   Disabled="@(disk is not { State: BackupDiskState.Connected })">@L["Run now"]</MudButton>
+                    }
+                    @if (disk is { State: BackupDiskState.NotInitialised or BackupDiskState.OtherDisk })
+                    {
+                        <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Usb" OnClick="() => InitDisk(job)">@(disk.State == BackupDiskState.OtherDisk ? L["Use this disk"] : L["Initialise the disk"])</MudButton>
+                    }
+                    <MudSpacer />
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Edit" OnClick="() => Edit(job)" Disabled="running">@L["Edit"]</MudButton>
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="() => Delete(job)" Disabled="running">@L["Delete"]</MudButton>
+                </MudCardActions>
+            </MudCard>
+        </MudItem>
+    }
+</MudGrid>
+
+<MudText Typo="Typo.h5" Class="mt-8 mb-2">@L["History"]</MudText>
+<MudTable Items="history" Hover="true" Dense="true" T="BackupRunRow" OnRowClick="ShowRun" RowStyle="cursor:pointer">
+    <HeaderContent><MudTh>@L["Started"]</MudTh><MudTh>@L["Job"]</MudTh><MudTh>@L["Trigger"]</MudTh><MudTh>@L["Result"]</MudTh><MudTh>@L["Copied"]</MudTh><MudTh>@L["Errors"]</MudTh><MudTh>@L["Duration"]</MudTh></HeaderContent>
+    <RowTemplate>
+        <MudTd>@Fmt.Dt(context.StartedUtc)</MudTd>
+        <MudTd>@context.JobName</MudTd>
+        <MudTd>@L.Translate(context.Reason)</MudTd>
+        <MudTd><MudChip T="string" Size="Size.Small" Color="@StatusColor(context.Status)">@StatusText(context.Status)</MudChip></MudTd>
+        <MudTd>@context.Copied (@Fmt.Size(context.BytesCopied, L.Lang))</MudTd>
+        <MudTd>@context.Errors</MudTd>
+        <MudTd>@(context.EndedUtc is { } e ? Duration(e - context.StartedUtc) : "—")</MudTd>
+    </RowTemplate>
+    <NoRecordsContent><MudText Class="pa-4">@L["No copy yet."]</MudText></NoRecordsContent>
+</MudTable>
+
+@code {
+    List<BackupJobRow> jobs = new();
+    Dictionary<int, BackupRunStatus> runs = new();
+    Dictionary<int, BackupDiskStatus> disks = new();
+    Dictionary<int, BackupRunRow> lastRuns = new();
+    List<BackupRunRow> history = new();
+    string? agentError;
+    bool loaded;
+
+    protected override TimeSpan Interval => TimeSpan.FromSeconds(3);
+
+    protected override async Task LoadAsync()
+    {
+        jobs = await Jobs.GetJobsAsync();
+        history = await Jobs.GetRunsAsync(limit: 50);
+        var finished = new Dictionary<int, BackupRunRow>();
+        foreach (var j in jobs)
+            if (await Jobs.LastFinishedRunAsync(j.Id) is { } r) finished[j.Id] = r;
+        lastRuns = finished;
+        try
+        {
+            runs = (await Agent.GetBackupRunsAsync()).ToDictionary(r => r.JobId);
+            var d = new Dictionary<int, BackupDiskStatus>();
+            foreach (var j in jobs) d[j.Id] = await Agent.CheckBackupDiskAsync(j.TargetDir, j.TargetId);
+            disks = d;
+            agentError = null;
+        }
+        catch (AgentException e) { agentError = L.Translate(e.Message); }
+        catch (HttpRequestException) { agentError = L["Agent unreachable."]; }
+        loaded = true;
+    }
+
+    static readonly DialogOptions Wide = new() { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseButton = true, BackdropClick = false };
+
+    async Task Edit(BackupJobRow? job)
+    {
+        var parameters = new DialogParameters<BackupJobDialog> { { x => x.Existing, job } };
+        var dialog = await Dialogs.ShowAsync<BackupJobDialog>(job is null ? L["New backup job"] : L["Edit {0}", job.Name], parameters, Wide);
+        if (await dialog.Result is { Canceled: false })
+        {
+            Snack.Add(L["Job saved."], Severity.Success);
+            await LoadAsync();
+        }
+    }
+
+    async Task Delete(BackupJobRow job)
+    {
+        var ok = await Dialogs.ShowMessageBoxAsync(L["Delete job {0}?", job.Name],
+            L["The job and its history are removed. Files already copied stay on the disk."], yesText: L["Delete"], cancelText: L["Cancel"]);
+        if (ok == true) await Run(() => Ops.DeleteJobAsync(job.Id), L["Job deleted."]);
+    }
+
+    async Task RunNow(BackupJobRow job) => await Run(() => Ops.RunNowAsync(job.Id), L["Backup started."]);
+    async Task Cancel(BackupJobRow job) => await Run(() => Ops.CancelAsync(job.Id), L["Cancelling…"]);
+
+    async Task InitDisk(BackupJobRow job)
+    {
+        var info = "";
+        try
+        {
+            var t = (await Agent.GetBackupTargetsAsync()).FirstOrDefault(t => t.Dir == job.TargetDir);
+            if (t is not null)
+                info = " " + L["({0}, {1}, {2} free of {3})", t.Device ?? "?", t.FileSystem ?? "?", Fmt.Size(t.FreeBytes, L.Lang), Fmt.Size(t.TotalBytes, L.Lang)];
+        }
+        catch (Exception e) when (e is AgentException or HttpRequestException) { }
+        var ok = await Dialogs.ShowMessageBoxAsync(L["Use {0} as the backup disk?", job.TargetDir],
+            L["Check that this is your backup disk and not the NAS system disk{0}. A small marker file is written at its root; nothing else is changed.", info],
+            yesText: L["Use this disk"], cancelText: L["Cancel"]);
+        if (ok == true) await Run(() => Ops.InitDiskAsync(job.Id), L["Disk initialised."]);
+    }
+
+    async Task ShowRun(TableRowClickEventArgs<BackupRunRow> e)
+    {
+        var r = e.Item!;
+        var text = string.Join("\n\n", new[] { r.Message is { Length: > 0 } m ? L.Translate(m) : null, r.Details }.Where(s => !string.IsNullOrWhiteSpace(s)));
+        await Dialogs.ShowMessageBoxAsync($"{r.JobName} — {Fmt.Dt(r.StartedUtc)}",
+            text.Length > 0 ? text : L["Nothing to report."], yesText: L["Close"]);
+    }
+
+    async Task Run(Func<Task> action, string success)
+    {
+        try
+        {
+            await action();
+            Snack.Add(success, Severity.Success);
+            await LoadAsync();
+        }
+        catch (AgentException e) { Snack.Add(L.Translate(e.Message), Severity.Error); }
+        catch (HttpRequestException) { Snack.Add(L["Agent unreachable."], Severity.Error); }
+    }
+
+    static double Percent(BackupJobRow job, BackupRunStatus run) =>
+        job.EstimatedFiles > 0 && !run.Queued ? Math.Min(99, 100.0 * run.FilesSeen / job.EstimatedFiles) : 0;
+
+    string Speed(BackupRunStatus run)
+    {
+        if (run.RunStartedUtc is not { } start) return "";
+        var secs = (DateTime.UtcNow - start).TotalSeconds;
+        return secs > 5 && run.BytesCopied > 0 ? " · " + Fmt.Rate(run.BytesCopied / secs, L.Lang) : "";
+    }
+
+    string ScheduleText(BackupJobRow j) => j.ScheduleMode switch
+    {
+        BackupSchedule.Daily => L["Every day at {0}", j.DailyTime],
+        BackupSchedule.OnPlug => L["Whenever the disk is connected"],
+        _ => L["Manual only"],
+    };
+
+    string DiskText(BackupDiskStatus? d) => d?.State switch
+    {
+        BackupDiskState.Connected => L["Disk connected"],
+        BackupDiskState.NotInitialised => L["Disk not initialised"],
+        BackupDiskState.OtherDisk => L["Another disk"],
+        BackupDiskState.Missing => L["Disk absent"],
+        _ => "…",
+    };
+
+    static Color DiskColor(BackupDiskStatus? d) => d?.State switch
+    {
+        BackupDiskState.Connected => Color.Success,
+        BackupDiskState.Missing => Color.Default,
+        null => Color.Default,
+        _ => Color.Warning,
+    };
+
+    string StatusText(string s) => s switch
+    {
+        "Success" => L["Success"],
+        "CompletedWithErrors" => L["With errors"],
+        "Failed" => L["Failed"],
+        "Cancelled" => L["Cancelled"],
+        "Interrupted" => L["Interrupted"],
+        "Running" => L["Running"],
+        _ => s,
+    };
+
+    static Color StatusColor(string s) => s switch
+    {
+        "Success" => Color.Success,
+        "CompletedWithErrors" => Color.Warning,
+        "Failed" => Color.Error,
+        "Running" => Color.Info,
+        _ => Color.Default,
+    };
+
+    static string Duration(TimeSpan t) =>
+        t.TotalHours >= 1 ? $"{(int)t.TotalHours} h {t.Minutes:00} min" : t.TotalMinutes >= 1 ? $"{t.Minutes} min {t.Seconds:00} s" : $"{Math.Max(0, t.Seconds)} s";
+}

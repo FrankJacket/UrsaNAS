@@ -270,7 +270,7 @@ public sealed class AclService(ICommandRunner run, UserService users, GroupServi
     }
 
     /// <summary>Dossier d'un partage tel que Samba le connaît (la configuration générée fait foi).</summary>
-    async Task<string> SharePathAsync(string share, CancellationToken ct)
+    public async Task<string> SharePathAsync(string share, CancellationToken ct)
     {
         var r = await run.RunAsync("testparm", ["-s", "--section-name=" + share, "--parameter-name=path"], ct: ct);
         var path = r.StdOut.Trim();

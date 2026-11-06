@@ -32,6 +32,34 @@ public class AgentClient(HttpClient http)
     public async Task SetServiceAsync(string name, bool enabled, CancellationToken ct = default) =>
         await EnsureOkAsync(await http.PutAsJsonAsync($"services/{Uri.EscapeDataString(name)}", new SetServiceRequest(enabled), ct), ct);
 
+    // ---- Sauvegardes
+    public Task<IReadOnlyList<BackupTarget>> GetBackupTargetsAsync(CancellationToken ct = default) => GetListAsync<BackupTarget>("backup/targets", ct);
+
+    public async Task<BackupDiskStatus> CheckBackupDiskAsync(string dir, string? id, CancellationToken ct = default)
+    {
+        using var r = await http.GetAsync($"backup/disk?dir={Uri.EscapeDataString(dir)}&id={Uri.EscapeDataString(id ?? "")}", ct);
+        await EnsureOkAsync(r, ct);
+        return await r.Content.ReadFromJsonAsync<BackupDiskStatus>(ct) ?? new(BackupDiskState.Missing, 0, 0);
+    }
+
+    public async Task<string> InitBackupDiskAsync(string dir, CancellationToken ct = default)
+    {
+        using var r = await http.PostAsJsonAsync("backup/disk/init", new InitDiskRequest(dir), ct);
+        await EnsureOkAsync(r, ct);
+        return (await r.Content.ReadFromJsonAsync<InitDiskResult>(ct))?.TargetId ?? throw new AgentException(Msg.F("The agent answered {0}.", 204));
+    }
+
+    public Task<IReadOnlyList<BackupRunStatus>> GetBackupRunsAsync(CancellationToken ct = default) => GetListAsync<BackupRunStatus>("backup/runs", ct);
+
+    public async Task StartBackupAsync(BackupJobDef job, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PostAsJsonAsync("backup/runs", job, ct), ct);
+
+    public async Task CancelBackupAsync(int jobId, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PostAsync($"backup/runs/{jobId}/cancel", null, ct), ct);
+
+    public async Task AcknowledgeBackupAsync(int jobId, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.DeleteAsync($"backup/runs/{jobId}", ct), ct);
+
     // ---- Groupes et permissions avancées
     public Task<IReadOnlyList<NasGroup>> GetGroupsAsync(CancellationToken ct = default) => GetListAsync<NasGroup>("groups", ct);
 

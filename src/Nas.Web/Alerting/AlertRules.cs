@@ -4,7 +4,7 @@ using Nas.Web.Data;
 namespace Nas.Web.Alerting;
 
 /// <summary>Ce que l'interface a pu observer lors d'un contrôle. <c>null</c> = on n'a pas pu le savoir (agent muet, ZFS absent).</summary>
-public sealed record HealthSnapshot(bool AgentReachable, IReadOnlyList<PoolInfo>? Pools, IReadOnlyList<SmartInfo>? Smart);
+public sealed record HealthSnapshot(bool AgentReachable, IReadOnlyList<PoolInfo>? Pools, IReadOnlyList<SmartInfo>? Smart, IReadOnlyList<BackupHealth>? Backups = null);
 
 /// <summary>Un problème constaté. <c>Code</c> l'identifie de façon stable d'un contrôle à l'autre (ex. <c>pool:tank:health</c>).</summary>
 public sealed record Candidate(string Code, string Severity, string Title, string Detail);
@@ -17,7 +17,10 @@ public static class AlertRules
     static readonly HashSet<string> BadDeviceStates = new(StringComparer.Ordinal)
         { "UNAVAIL", "FAULTED", "OFFLINE", "REMOVED", "DEGRADED" };
 
-    public static List<Candidate> Evaluate(HealthSnapshot s)
+    /// <summary>Jours sans copie réussie au-delà desquels une sauvegarde planifiée est signalée.</summary>
+    public const int BackupStaleDays = 3;
+
+    public static List<Candidate> Evaluate(HealthSnapshot s, DateTime? nowUtc = null)
     {
         var result = new List<Candidate>();
         if (!s.AgentReachable)
@@ -53,6 +56,19 @@ public static class AlertRules
                     result.Add(new($"pool:{p.Name}:space", pct >= 95 ? Critical : Warning, Msg.F("Pool {0}: {1}% full", p.Name, pct.ToString("0")),
                         "A nearly full pool slows down and may refuse writes: free up space or add disks."));
             }
+        }
+
+        foreach (var b in (s.Backups ?? []).Where(b => b.Enabled))
+        {
+            if (b.LastStatus is "Failed")
+                result.Add(new($"backup:{b.JobId}:failed", Critical, Msg.F("Backup {0}: the last copy failed", b.Name), "Open the Backups page to read the error."));
+            else if (b.LastStatus is "CompletedWithErrors")
+                result.Add(new($"backup:{b.JobId}:failed", Warning, Msg.F("Backup {0}: some files were not copied", b.Name), "Open the Backups page to see which files."));
+
+            var since = b.LastSuccessUtc ?? b.CreatedUtc;
+            if (b.ScheduleMode != BackupSchedule.Manual && (nowUtc ?? DateTime.UtcNow) - since > TimeSpan.FromDays(BackupStaleDays))
+                result.Add(new($"backup:{b.JobId}:stale", Warning, Msg.F("Backup {0}: no successful copy for {1} days", b.Name, BackupStaleDays),
+                    "Check that the backup disk is connected."));
         }
 
         foreach (var d in s.Smart ?? [])

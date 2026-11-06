@@ -1,0 +1,168 @@
+@inject BackupOperations Ops
+@inject AgentClient Agent
+@inject Repo Repo
+@inject IDialogService Dialogs
+
+@* Création ou modification d'un travail de sauvegarde. *@
+<MudDialog>
+    <DialogContent>
+        @if (error is not null)
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-3">@error</MudAlert>
+        }
+        <MudTextField @bind-Value="job.Name" Label="@L["Job name"]" Immediate="true" Disabled="busy" AutoFocus="@(job.Id == 0)" />
+
+        <MudText Typo="Typo.subtitle2" Class="mt-4">@L["What to back up"]</MudText>
+        <MudSelect T="string" Value="job.Share" ValueChanged="OnShareChanged" Label="@L["Share"]" Disabled="busy"
+                   HelperText="@(shares.Count == 0 ? L["Create a share first."] : null)">
+            @foreach (var s in shares)
+            {
+                <MudSelectItem T="string" Value="@s.Name">@s.Name@(s.Dataset is null ? "" : " (ZFS)")</MudSelectItem>
+            }
+        </MudSelect>
+        <div class="mt-2">
+            @foreach (var f in includes)
+            {
+                var folder = f;
+                <MudChip T="string" Size="Size.Small" OnClose="() => includes.Remove(folder)">/@job.Share/@folder</MudChip>
+            }
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.CreateNewFolder" OnClick="AddFolder" Disabled="@(busy || string.IsNullOrEmpty(job.Share))">@L["Choose a folder"]</MudButton>
+        </div>
+        <MudText Typo="Typo.caption" Class="d-block">@L["No folder chosen: the whole share is copied."]</MudText>
+        <MudSwitch T="bool" @bind-Value="job.Snapshot" Label="@L["Copy from a ZFS snapshot"]" Color="Color.Primary" Disabled="@(busy || !HasDataset)" />
+        <MudText Typo="Typo.caption" Class="d-block">@(HasDataset
+            ? L["A snapshot freezes the share during the copy, so files that change (databases, virtual disks) are copied consistently."]
+            : L["Only available for a share stored on a ZFS dataset. Without a snapshot, files that change during the copy may be copied in an inconsistent state."])</MudText>
+
+        <MudText Typo="Typo.subtitle2" Class="mt-4">@L["Where to copy"]</MudText>
+        <MudSelect T="string" @bind-Value="job.TargetDir" Label="@L["Backup disk"]" Disabled="busy"
+                   HelperText="@(targets.Count == 0 ? L["No disk mounted under /mnt or /media. Plug the disk and mount it, then reopen this window."] : L["The disk must be mounted on the NAS first."])">
+            @foreach (var t in TargetChoices())
+            {
+                <MudSelectItem T="string" Value="@t.Dir">@Describe(t)</MudSelectItem>
+            }
+        </MudSelect>
+        <MudTextField @bind-Value="job.DestFolder" Label="@L["Folder on the disk"]" Disabled="busy" HelperText="@L["Several jobs can share one disk, each in its own folder."]" />
+
+        <MudText Typo="Typo.subtitle2" Class="mt-4">@L["When"]</MudText>
+        <MudSelect T="int" @bind-Value="job.ScheduleMode" Label="@L["Schedule"]" Disabled="busy">
+            <MudSelectItem T="int" Value="@BackupSchedule.Manual">@L["Manual only"]</MudSelectItem>
+            <MudSelectItem T="int" Value="@BackupSchedule.Daily">@L["Every day"]</MudSelectItem>
+            <MudSelectItem T="int" Value="@BackupSchedule.OnPlug">@L["Whenever the disk is connected"]</MudSelectItem>
+        </MudSelect>
+        @if (job.ScheduleMode == BackupSchedule.Daily)
+        {
+            <MudTextField @bind-Value="job.DailyTime" Label="@L["Time (HH:mm)"]" Disabled="busy" />
+        }
+        <MudSwitch T="bool" @bind-Value="job.Enabled" Label="@L["Enabled"]" Color="Color.Primary" Disabled="busy" />
+
+        <MudText Typo="Typo.subtitle2" Class="mt-4">@L["Options"]</MudText>
+        <MudSwitch T="bool" @bind-Value="job.MirrorDeletes" Label="@L["Remove from the copy what was deleted from the share"]" Color="Color.Primary" Disabled="busy" />
+        <MudNumericField T="int" @bind-Value="job.RetentionDays" Label="@L["Keep deleted and replaced files (days)"]" Min="0" Max="@BackupRules.MaxRetentionDays" HideSpinButtons="true" Disabled="busy"
+                         HelperText="@L["They go to a trash folder on the disk. 0 = delete right away."]" />
+        <MudSwitch T="bool" @bind-Value="job.Verify" Label="@L["Verify each copied file (slower)"]" Color="Color.Primary" Disabled="busy" />
+        <MudSwitch T="bool" @bind-Value="job.WindowsDisk" Label="@L["The disk is formatted NTFS or exFAT"]" Color="Color.Primary" Disabled="busy" />
+        <MudTextField @bind-Value="excludes" Label="@L["Files and folders to skip"]" Lines="4" Disabled="busy"
+                      HelperText="@L["One per line. * and ? are allowed. A name without a slash matches at any depth."]" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => Dialog.Cancel()" Disabled="busy">@L["Cancel"]</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save" Disabled="busy">@L["Save"]</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance Dialog { get; set; } = default!;
+    [Parameter] public BackupJobRow? Existing { get; set; }
+
+    BackupJobRow job = new();
+    List<ShareDef> shares = new();
+    IReadOnlyList<BackupTarget> targets = [];
+    List<string> includes = new();
+    string excludes = "";
+    string? error;
+    bool busy;
+
+    bool HasDataset => shares.FirstOrDefault(s => s.Name == job.Share)?.Dataset is not null;
+
+    protected override async Task OnInitializedAsync()
+    {
+        shares = await Repo.GetSharesAsync();
+        try { targets = await Agent.GetBackupTargetsAsync(); }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable."]; }
+
+        if (Existing is not null)
+        {
+            job = new BackupJobRow
+            {
+                Id = Existing.Id, Name = Existing.Name, Share = Existing.Share, TargetDir = Existing.TargetDir, TargetId = Existing.TargetId,
+                DestFolder = Existing.DestFolder, Enabled = Existing.Enabled, ScheduleMode = Existing.ScheduleMode, DailyTime = Existing.DailyTime,
+                MirrorDeletes = Existing.MirrorDeletes, RetentionDays = Existing.RetentionDays, Verify = Existing.Verify,
+                WindowsDisk = Existing.WindowsDisk, Snapshot = Existing.Snapshot, CreatedUtc = Existing.CreatedUtc,
+            };
+            includes = Existing.IncludeList().ToList();
+            excludes = Existing.Excludes;
+        }
+        else
+        {
+            job.Share = shares.FirstOrDefault()?.Name ?? "";
+            job.TargetDir = targets.FirstOrDefault()?.Dir ?? "";
+            excludes = job.Excludes;
+        }
+    }
+
+    /// <summary>Les disques montés, plus celui déjà enregistré dans le travail s'il n'est plus monté.</summary>
+    IEnumerable<BackupTarget> TargetChoices() =>
+        job.TargetDir.Length > 0 && targets.All(t => t.Dir != job.TargetDir)
+            ? targets.Prepend(new BackupTarget(job.TargetDir, null, null, 0, 0, null))
+            : targets;
+
+    string Describe(BackupTarget t)
+    {
+        var parts = new List<string> { t.Dir };
+        if (t.Device is not null) parts.Add(t.Device);
+        if (t.FileSystem is not null) parts.Add(t.FileSystem);
+        if (t.TotalBytes > 0) parts.Add(L["{0} free of {1}", Fmt.Size(t.FreeBytes, L.Lang), Fmt.Size(t.TotalBytes, L.Lang)]);
+        else parts.Add(L["not mounted"]);
+        return string.Join(" — ", parts);
+    }
+
+    void OnShareChanged(string share)
+    {
+        job.Share = share;
+        includes.Clear(); // les dossiers choisis appartenaient à l'autre partage
+        if (!HasDataset) job.Snapshot = false;
+    }
+
+    async Task AddFolder()
+    {
+        var parameters = new DialogParameters<FolderPickerDialog> { { x => x.Share, job.Share }, { x => x.Message, L["Folder to back up"] }, { x => x.ButtonText, "Add" } };
+        var dialog = await Dialogs.ShowAsync<FolderPickerDialog>(L["Choose a folder"], parameters, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true });
+        if (await dialog.Result is { Canceled: false, Data: string path })
+        {
+            if (path.Length == 0) { includes.Clear(); return; } // la racine : tout le partage
+            // Un dossier déjà couvert par un dossier choisi, ou qui en couvre d'autres, remplace ou est ignoré.
+            if (includes.Any(i => path == i || path.StartsWith(i + "/", StringComparison.Ordinal))) return;
+            includes.RemoveAll(i => i.StartsWith(path + "/", StringComparison.Ordinal));
+            includes.Add(path);
+        }
+    }
+
+    async Task Save()
+    {
+        error = null;
+        busy = true;
+        try
+        {
+            job.Includes = string.Join('\n', includes.OrderBy(i => i, StringComparer.Ordinal));
+            job.Excludes = excludes;
+            await Ops.SaveJobAsync(job);
+            Dialog.Close(DialogResult.Ok(job.Name));
+            return;
+        }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable."]; }
+        busy = false;
+    }
+}

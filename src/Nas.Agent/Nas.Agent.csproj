@@ -2,6 +2,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Nas.Contracts\Nas.Contracts.csproj" />
+    <!-- Moteur de copie d'Ursacopy (sous-module Git) : copie incrémentale, corbeille, journal contre le débranchement du disque. -->
+    <ProjectReference Include="..\..\external\Ursacopy\src\Ursacopy.Core\Ursacopy.Core.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

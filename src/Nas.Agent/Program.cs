@@ -50,6 +50,7 @@ public partial class Program
 
         builder.Services.AddSingleton<UserService>();
         builder.Services.AddSingleton<ProtocolService>();
+        builder.Services.AddSingleton<BackupService>();
         builder.Services.AddSingleton<ShareService>();
         builder.Services.AddSingleton<GroupService>();
         builder.Services.AddSingleton<AclService>();
@@ -99,6 +100,17 @@ public partial class Program
             Guard(async () => { await a.DeleteFolderAsync(share, path, file == true, ct); return Results.NoContent(); }));
         app.MapPost("/acl/reset", (ResetAclRequest r, AclService a, CancellationToken ct) =>
             Guard(async () => { await a.ResetTreeAsync(r.Share, r.Path, ct); return Results.NoContent(); }));
+
+        // Sauvegardes (moteur d'Ursacopy)
+        app.MapGet("/backup/targets", (BackupService b) => Read(() => Task.FromResult(Results.Ok(b.ListTargets()))));
+        app.MapGet("/backup/disk", (string dir, string? id, BackupService b) => Read(() => Task.FromResult(Results.Ok(b.CheckDisk(dir, id)))));
+        app.MapPost("/backup/disk/init", (InitDiskRequest r, BackupService b) =>
+            Read(() => Task.FromResult(Results.Ok(new InitDiskResult(b.InitDisk(r.TargetDir))))));
+        app.MapGet("/backup/runs", (BackupService b) => Results.Ok(b.Statuses()));
+        app.MapPost("/backup/runs", (BackupJobDef job, BackupService b) =>
+            Read(() => { b.Start(job); return Task.FromResult(Results.NoContent()); }));
+        app.MapPost("/backup/runs/{id:int}/cancel", (int id, BackupService b) => { b.Cancel(id); return Results.NoContent(); });
+        app.MapDelete("/backup/runs/{id:int}", (int id, BackupService b) => { b.Acknowledge(id); return Results.NoContent(); });
 
         app.MapGet("/smart", (SmartService s, CancellationToken ct) => Read(async () => Results.Ok(await s.ListAsync(ct))));
 

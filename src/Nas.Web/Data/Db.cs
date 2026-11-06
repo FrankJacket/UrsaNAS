@@ -42,6 +42,17 @@ public class Db
         AddColumn(c, "Shares", "Ftp", "TEXT NULL"); // JSON de FtpAccess ; NULL = pas accessible en FTP
         c.Execute("CREATE TABLE IF NOT EXISTS FolderAcls(Share TEXT NOT NULL COLLATE NOCASE, Path TEXT NOT NULL, Rules TEXT NOT NULL, PRIMARY KEY(Share, Path)); -- Rules : JSON de AclRule[]");
         AddColumn(c, "FolderAcls", "Inherit", "INTEGER NOT NULL DEFAULT 1"); // 0 = héritage rompu
+        c.Execute("""
+        CREATE TABLE IF NOT EXISTS BackupJobs(Id INTEGER PRIMARY KEY AUTOINCREMENT, Name TEXT NOT NULL, Share TEXT NOT NULL COLLATE NOCASE, Includes TEXT NOT NULL DEFAULT '',
+            TargetDir TEXT NOT NULL, TargetId TEXT NULL, DestFolder TEXT NOT NULL, Enabled INTEGER NOT NULL DEFAULT 1, ScheduleMode INTEGER NOT NULL DEFAULT 0,
+            DailyTime TEXT NOT NULL DEFAULT '02:00', MirrorDeletes INTEGER NOT NULL DEFAULT 1, RetentionDays INTEGER NOT NULL DEFAULT 30, Verify INTEGER NOT NULL DEFAULT 0,
+            WindowsDisk INTEGER NOT NULL DEFAULT 1, Excludes TEXT NOT NULL DEFAULT '', Snapshot INTEGER NOT NULL DEFAULT 0, CreatedUtc TEXT NOT NULL,
+            EstimatedFiles INTEGER NOT NULL DEFAULT 0, EstimatedBytes INTEGER NOT NULL DEFAULT 0); -- Includes, Excludes : une entrée par ligne
+        CREATE TABLE IF NOT EXISTS BackupRuns(Id INTEGER PRIMARY KEY AUTOINCREMENT, JobId INTEGER NOT NULL, JobName TEXT NOT NULL, StartedUtc TEXT NOT NULL, EndedUtc TEXT NULL,
+            Status TEXT NOT NULL, Reason TEXT NOT NULL DEFAULT '', FilesSeen INTEGER NOT NULL DEFAULT 0, Copied INTEGER NOT NULL DEFAULT 0, BytesCopied INTEGER NOT NULL DEFAULT 0,
+            Unchanged INTEGER NOT NULL DEFAULT 0, Deleted INTEGER NOT NULL DEFAULT 0, Errors INTEGER NOT NULL DEFAULT 0, Message TEXT NULL, Details TEXT NULL);
+        CREATE INDEX IF NOT EXISTS IX_BackupRuns_Job ON BackupRuns(JobId, Id);
+        """);
     }
 
     static void AddColumn(SqliteConnection c, string table, string column, string ddl)

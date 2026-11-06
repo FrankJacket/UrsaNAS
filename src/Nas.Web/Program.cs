@@ -56,6 +56,11 @@ b.Services.AddSingleton<AlertService>();
 b.Services.AddSingleton<AlertMonitor>();
 b.Services.AddHostedService(sp => sp.GetRequiredService<AlertMonitor>());
 
+b.Services.AddSingleton<BackupRepo>();
+b.Services.AddScoped<BackupCoordinator>();
+b.Services.AddScoped<BackupOperations>();
+b.Services.AddHostedService<BackupMonitor>();
+
 // L'interface ne touche jamais au système : elle parle à l'agent par socket Unix (ou par URL en développement).
 var socketPath = b.Configuration["Agent:SocketPath"];
 var agentUrl = b.Configuration["Agent:Url"];
