@@ -12,7 +12,7 @@
     <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Sync" OnClick="Reapply">@L["Reapply"]</MudButton>
 </MudStack>
 <MudTable Items="shares" Hover="true" Dense="true" Loading="@(!loaded)">
-    <HeaderContent><MudTh>@L["Name"]</MudTh><MudTh>@L["Folder"]</MudTh><MudTh>@L["Access"]</MudTh><MudTh>@L["Users"]</MudTh><MudTh>@L["Description"]</MudTh><MudTh></MudTh></HeaderContent>
+    <HeaderContent><MudTh>@L["Name"]</MudTh><MudTh>@L["Folder"]</MudTh><MudTh>@L["Access"]</MudTh><MudTh>@L["Protocols"]</MudTh><MudTh>@L["Users"]</MudTh><MudTh>@L["Description"]</MudTh><MudTh></MudTh></HeaderContent>
     <RowTemplate>
         <MudTd>@context.Name</MudTd>
         <MudTd>
@@ -25,6 +25,11 @@
         <MudTd>
             @if (context.Acl) { <MudChip T="string" Size="Size.Small" Color="Color.Primary" Href="@($"/permissions?share={context.Name}")">@L["Advanced permissions"]</MudChip> }
             else { <MudChip T="string" Size="Size.Small" Color="@(context.ReadOnly ? Color.Default : Color.Success)">@(context.ReadOnly ? L["Read-only"] : L["Read/write"])</MudChip> }
+        </MudTd>
+        <MudTd>
+            <MudChip T="string" Size="Size.Small">SMB</MudChip>
+            @if (context.Nfs is not null) { <MudChip T="string" Size="Size.Small" Color="Color.Info">NFS</MudChip> }
+            @if (context.Ftp is not null) { <MudChip T="string" Size="Size.Small" Color="Color.Info">FTP</MudChip> }
         </MudTd>
         <MudTd>@(context.Acl ? "—" : string.Join(", ", context.ValidUsers))</MudTd>
         <MudTd>@context.Comment</MudTd>

@@ -34,22 +34,31 @@
     <MudDrawer Open="true" Elevation="0" Variant="DrawerVariant.Persistent">
         <MudNavMenu>
             <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Dashboard">@L["Dashboard"]</MudNavLink>
-            <MudNavLink Href="/disks" Icon="@Icons.Material.Filled.Dns">@L["Disks"]</MudNavLink>
-            <MudNavLink Href="/pools" Icon="@Icons.Material.Filled.Layers">@L["ZFS pools"]</MudNavLink>
-            <MudNavLink Href="/datasets" Icon="@Icons.Material.Filled.FolderCopy">@L["Datasets"]</MudNavLink>
-            <MudNavLink Href="/users" Icon="@Icons.Material.Filled.People">@L["Users"]</MudNavLink>
-            <MudNavLink Href="/groups" Icon="@Icons.Material.Filled.Groups">@L["Groups"]</MudNavLink>
-            <MudNavLink Href="/shares" Icon="@Icons.Material.Filled.FolderShared">@L["Shares"]</MudNavLink>
-            <MudNavLink Href="/folders" Icon="@Icons.Material.Filled.Folder">@L["File Manager"]</MudNavLink>
-            <MudNavLink Href="/alerts" Icon="@Icons.Material.Filled.NotificationsActive">
-                @L["Alerts"]
-                @if (Alerts.Count > 0)
-                {
-                    <MudChip T="string" Size="Size.Small" Color="@(Alerts.CriticalCount > 0 ? Color.Error : Color.Warning)" Class="ml-2">@Alerts.Count</MudChip>
-                }
-            </MudNavLink>
-            <MudNavLink Href="/admins" Icon="@Icons.Material.Filled.AdminPanelSettings">@L["Administrators"]</MudNavLink>
-            <MudNavLink Href="/journal" Icon="@Icons.Material.Filled.History">@L["Journal"]</MudNavLink>
+            <MudNavGroup Title="@L["Storage"]" Icon="@Icons.Material.Filled.Storage" Expanded="false">
+                <MudNavLink Href="/disks" Icon="@Icons.Material.Filled.Dns">@L["Disks"]</MudNavLink>
+                <MudNavLink Href="/pools" Icon="@Icons.Material.Filled.Layers">@L["ZFS pools"]</MudNavLink>
+                <MudNavLink Href="/datasets" Icon="@Icons.Material.Filled.FolderCopy">@L["Datasets"]</MudNavLink>
+            </MudNavGroup>
+            <MudNavGroup Title="@L["Sharing"]" Icon="@Icons.Material.Filled.FolderShared" Expanded="false">
+                <MudNavLink Href="/shares" Icon="@Icons.Material.Filled.Share">@L["Shares"]</MudNavLink>
+                <MudNavLink Href="/folders" Icon="@Icons.Material.Filled.Folder">@L["File Manager"]</MudNavLink>
+                <MudNavLink Href="/services" Icon="@Icons.Material.Filled.SettingsEthernet">@L["Services"]</MudNavLink>
+            </MudNavGroup>
+            <MudNavGroup Title="@L["Accounts"]" Icon="@Icons.Material.Filled.ManageAccounts" Expanded="false">
+                <MudNavLink Href="/users" Icon="@Icons.Material.Filled.People">@L["Users"]</MudNavLink>
+                <MudNavLink Href="/groups" Icon="@Icons.Material.Filled.Groups">@L["Groups"]</MudNavLink>
+                <MudNavLink Href="/admins" Icon="@Icons.Material.Filled.AdminPanelSettings">@L["Administrators"]</MudNavLink>
+            </MudNavGroup>
+            <MudNavGroup Title="@L["Monitoring"]" Icon="@Icons.Material.Filled.MonitorHeart" Expanded="false">
+                <MudNavLink Href="/alerts" Icon="@Icons.Material.Filled.NotificationsActive">
+                    @L["Alerts"]
+                    @if (Alerts.Count > 0)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="@(Alerts.CriticalCount > 0 ? Color.Error : Color.Warning)" Class="ml-2">@Alerts.Count</MudChip>
+                    }
+                </MudNavLink>
+                <MudNavLink Href="/journal" Icon="@Icons.Material.Filled.History">@L["Audit log"]</MudNavLink>
+            </MudNavGroup>
         </MudNavMenu>
     </MudDrawer>
     <MudMainContent Class="pt-20 px-4 pb-4">@Body</MudMainContent> @* pt-20 : dégage la barre d'application fixe *@

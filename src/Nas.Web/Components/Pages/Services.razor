@@ -1,0 +1,110 @@
+@page "/services"
+@inherits AutoRefreshBase
+@inject Repo Repo
+@inject AgentClient Agent
+@inject NasOperations Ops
+@inject ISnackbar Snack
+
+<MudText Typo="Typo.h4" Class="mb-4">@L["Services"]</MudText>
+
+<MudAlert Severity="Severity.Info" Class="mb-4">
+    @L["Advanced permissions only apply to SMB. Over NFS and FTP, access is decided by the client list (NFS) or the user list (FTP) of each share, set in the share's options."]
+</MudAlert>
+
+@if (error is not null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">@error</MudAlert>
+}
+
+<MudTable Items="services" Hover="true" Dense="true" Loading="@(!loaded)">
+    <HeaderContent><MudTh>@L["Service"]</MudTh><MudTh>@L["Description"]</MudTh><MudTh>Port</MudTh><MudTh>@L["Status"]</MudTh><MudTh></MudTh></HeaderContent>
+    <RowTemplate>
+        <MudTd><b>@context.Name.ToUpperInvariant()</b></MudTd>
+        <MudTd>@Describe(context.Name)</MudTd>
+        <MudTd>@context.Port</MudTd>
+        <MudTd>
+            @if (!context.Installed) { <MudChip T="string" Size="Size.Small">@L["Not installed"]</MudChip> }
+            else if (context.Active) { <MudChip T="string" Size="Size.Small" Color="Color.Success">@L["Running"]</MudChip> }
+            else { <MudChip T="string" Size="Size.Small" Color="Color.Warning">@L["Stopped"]</MudChip> }
+        </MudTd>
+        <MudTd Style="text-align:right">
+            @if (context.Installed)
+            {
+                @if (context.Active || context.Enabled)
+                {
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" Disabled="busy" OnClick="() => Toggle(context, false)">@L["Disable"]</MudButton>
+                }
+                else
+                {
+                    <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" Disabled="busy" OnClick="() => Toggle(context, true)">@L["Enable"]</MudButton>
+                }
+            }
+        </MudTd>
+    </RowTemplate>
+</MudTable>
+
+<MudText Typo="Typo.h5" Class="mt-8 mb-2">@L["FTP settings"]</MudText>
+<MudPaper Class="pa-4" Style="max-width:640px">
+    <MudSwitch T="bool" @bind-Value="tls" Label="@L["Require TLS (FTPS)"]" Color="Color.Primary" Disabled="busy" />
+    <MudText Typo="Typo.caption" Class="d-block mb-2">@L["Uses a self-signed certificate: FTP clients will ask you to trust it the first time."]</MudText>
+    <MudStack Row="true">
+        <MudNumericField T="int" @bind-Value="pasvMin" Label="@L["First passive port"]" Min="1024" Max="65535" HideSpinButtons="true" Disabled="busy" />
+        <MudNumericField T="int" @bind-Value="pasvMax" Label="@L["Last passive port"]" Min="1024" Max="65535" HideSpinButtons="true" Disabled="busy" />
+    </MudStack>
+    <MudText Typo="Typo.caption" Class="d-block">@L["Open this port range, and port 21, in your firewall."]</MudText>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" Class="mt-4" OnClick="SaveFtp" Disabled="busy">@L["Save"]</MudButton>
+    <MudText Typo="Typo.caption" Class="d-block mt-4">@L["FTP signs users in with their NAS password. A user created before FTP was available must have their password changed once."]</MudText>
+</MudPaper>
+
+@code {
+    IReadOnlyList<ServiceInfo> services = [];
+    bool loaded, busy, formLoaded, tls;
+    int pasvMin = 40000, pasvMax = 40100;
+    string? error;
+
+    protected override async Task LoadAsync()
+    {
+        try
+        {
+            services = await Agent.GetServicesAsync();
+            error = null;
+        }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable."]; }
+        if (!formLoaded) // une seule fois : le rafraîchissement ne doit pas effacer ce qu'on tape
+        {
+            var s = await Repo.GetFtpSettingsAsync();
+            (tls, pasvMin, pasvMax) = (s.Tls, s.PassiveMin, s.PassiveMax);
+            formLoaded = true;
+        }
+        loaded = true;
+    }
+
+    string Describe(string name) => name switch
+    {
+        "smb" => L["Windows, macOS and Linux file sharing (Samba)"],
+        "nfs" => L["Linux and Unix file sharing"],
+        _ => L["File transfer (vsftpd)"],
+    };
+
+    async Task Toggle(ServiceInfo s, bool enable)
+    {
+        await Run(() => Ops.SetServiceAsync(s.Name, enable), enable ? L["{0} enabled.", s.Name.ToUpperInvariant()] : L["{0} disabled.", s.Name.ToUpperInvariant()]);
+    }
+
+    async Task SaveFtp() => await Run(() => Ops.SaveFtpSettingsAsync(new FtpSettings(tls, pasvMin, pasvMax)), L["Settings saved."]);
+
+    async Task Run(Func<Task> action, string success)
+    {
+        busy = true;
+        try
+        {
+            await action();
+            Snack.Add(success, Severity.Success);
+            await LoadAsync();
+        }
+        catch (AgentException e) { Snack.Add(L.Translate(e.Message), Severity.Error); }
+        catch (HttpRequestException) { Snack.Add(L["Agent unreachable."], Severity.Error); }
+        finally { busy = false; }
+    }
+}

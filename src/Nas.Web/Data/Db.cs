@@ -38,6 +38,8 @@ public class Db
         """);
         AddColumn(c, "Shares", "Dataset", "TEXT NULL"); // jeu de données ZFS ; NULL = dossier simple dans /srv/nas
         AddColumn(c, "Shares", "Acl", "INTEGER NOT NULL DEFAULT 0"); // 1 = permissions avancées (ACL NT)
+        AddColumn(c, "Shares", "Nfs", "TEXT NULL"); // JSON de NfsExport ; NULL = pas exporté en NFS
+        AddColumn(c, "Shares", "Ftp", "TEXT NULL"); // JSON de FtpAccess ; NULL = pas accessible en FTP
         c.Execute("CREATE TABLE IF NOT EXISTS FolderAcls(Share TEXT NOT NULL COLLATE NOCASE, Path TEXT NOT NULL, Rules TEXT NOT NULL, PRIMARY KEY(Share, Path)); -- Rules : JSON de AclRule[]");
         AddColumn(c, "FolderAcls", "Inherit", "INTEGER NOT NULL DEFAULT 1"); // 0 = héritage rompu
     }

@@ -49,6 +49,7 @@ public partial class Program
             builder.Services.AddSingleton<IStatsProvider, ProcStatsProvider>();
 
         builder.Services.AddSingleton<UserService>();
+        builder.Services.AddSingleton<ProtocolService>();
         builder.Services.AddSingleton<ShareService>();
         builder.Services.AddSingleton<GroupService>();
         builder.Services.AddSingleton<AclService>();
@@ -70,7 +71,11 @@ public partial class Program
         app.MapDelete("/users/{name}", (string name, UserService u, CancellationToken ct) =>
             Guard(async () => { await u.DeleteAsync(name, ct); return Results.NoContent(); }));
         app.MapPut("/shares", (ApplySharesRequest r, ShareService s, CancellationToken ct) =>
-            Guard(async () => { await s.ApplyAsync(r.Shares, ct); return Results.NoContent(); }));
+            Guard(async () => { await s.ApplyAsync(r.Shares, r.Ftp, ct); return Results.NoContent(); }));
+
+        app.MapGet("/services", (ProtocolService p, CancellationToken ct) => Read(async () => Results.Ok(await p.ListServicesAsync(ct))));
+        app.MapPut("/services/{name}", (string name, SetServiceRequest r, ProtocolService p, CancellationToken ct) =>
+            Guard(async () => { await p.SetServiceAsync(name, r.Enabled, ct); return Results.NoContent(); }));
 
         app.MapGet("/groups", (GroupService g, CancellationToken ct) => Read(async () => Results.Ok(await g.ListAsync(ct))));
         app.MapPost("/groups", (CreateGroupRequest r, GroupService g, CancellationToken ct) =>
@@ -116,6 +121,19 @@ public partial class Program
             Guard(async () => { await z.CreateSnapshotAsync(r, ct); return Results.NoContent(); }));
         app.MapDelete("/zfs/snapshots", (string name, ZfsService z, CancellationToken ct) =>
             Guard(async () => { await z.DestroySnapshotAsync(name, ct); return Results.NoContent(); }));
+
+        // Les montages FTP ne survivent pas à un redémarrage : on remonte ceux qui sont enregistrés.
+        app.Lifetime.ApplicationStarted.Register(() =>
+        {
+            if (OperatingSystem.IsWindows()) return;
+            _ = Task.Run(async () =>
+            {
+                await Gate.WaitAsync();
+                try { await app.Services.GetRequiredService<ProtocolService>().RestoreBindsAsync(); }
+                catch (Exception e) { app.Logger.LogWarning(e, "Restoring the FTP mounts failed."); }
+                finally { Gate.Release(); }
+            });
+        });
 
         // Le socket n'est accessible qu'au propriétaire et au groupe (le groupe est celui de l'unité systemd).
         if (!string.IsNullOrWhiteSpace(socketPath))

@@ -24,8 +24,13 @@ public class AgentClient(HttpClient http)
     public async Task DeleteUserAsync(string name, CancellationToken ct = default) =>
         await EnsureOkAsync(await http.DeleteAsync($"users/{Uri.EscapeDataString(name)}", ct), ct);
 
-    public async Task ApplySharesAsync(IReadOnlyList<ShareDef> shares, CancellationToken ct = default) =>
-        await EnsureOkAsync(await http.PutAsJsonAsync("shares", new ApplySharesRequest(shares), ct), ct);
+    public async Task ApplySharesAsync(IReadOnlyList<ShareDef> shares, FtpSettings? ftp = null, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PutAsJsonAsync("shares", new ApplySharesRequest(shares, ftp), ct), ct);
+
+    public Task<IReadOnlyList<ServiceInfo>> GetServicesAsync(CancellationToken ct = default) => GetListAsync<ServiceInfo>("services", ct);
+
+    public async Task SetServiceAsync(string name, bool enabled, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PutAsJsonAsync($"services/{Uri.EscapeDataString(name)}", new SetServiceRequest(enabled), ct), ct);
 
     // ---- Groupes et permissions avancées
     public Task<IReadOnlyList<NasGroup>> GetGroupsAsync(CancellationToken ct = default) => GetListAsync<NasGroup>("groups", ct);

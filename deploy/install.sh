@@ -7,6 +7,23 @@ getent group ursanas >/dev/null || groupadd --system ursanas
 getent passwd ursanas >/dev/null || \
   useradd --system --gid ursanas --home-dir /var/lib/ursanas --shell /usr/sbin/nologin ursanas
 
+# NFS et FTP : paquets installés une fois, services laissés arrêtés jusqu'à leur activation dans l'interface (page Services).
+for entry in nfs-kernel-server:nfs-server vsftpd:vsftpd openssl:; do
+  pkg="${entry%%:*}"; unit="${entry#*:}"
+  if ! dpkg -s "$pkg" >/dev/null 2>&1; then
+    if DEBIAN_FRONTEND=noninteractive apt-get install -y "$pkg" >/dev/null 2>&1; then
+      [ -z "$unit" ] || systemctl disable --now "$unit" >/dev/null 2>&1 || true
+    else
+      echo "Avertissement : installation de $pkg impossible (réseau ?)" >&2
+    fi
+  fi
+done
+mkdir -p /etc/exports.d
+# FTP s'authentifie avec les comptes du NAS, sans les contrôles de shell de la configuration PAM par défaut de vsftpd.
+printf 'auth    required pam_unix.so
+account required pam_unix.so
+' > /etc/pam.d/ursanas-ftp
+
 mkdir -p /opt/ursanas/agent /opt/ursanas/web
 rm -rf /opt/ursanas/web/*
 

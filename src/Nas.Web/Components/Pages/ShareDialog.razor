@@ -24,6 +24,34 @@
             }
         </MudSelect>
         <MudTextField @bind-Value="comment" Label="@L["Description"]" Disabled="busy" />
+
+        @* NFS et FTP : les permissions avancées ne s'y appliquent pas, la liste ci-dessous décide. *@
+        <MudDivider Class="my-3" />
+        <MudSwitch T="bool" @bind-Value="nfsOn" Label="@L["Share over NFS"]" Color="Color.Primary" Disabled="busy" />
+        @if (nfsOn)
+        {
+            <MudTextField @bind-Value="nfsClients" Label="@L["Allowed NFS clients"]" Lines="2" Disabled="busy"
+                          HelperText="@L["IP addresses, networks (192.168.1.0/24) or host names, separated by spaces or commas."]" />
+            <MudSwitch T="bool" @bind-Value="nfsRo" Label="@L["Read-only"]" Color="Color.Primary" Disabled="busy" />
+        }
+        <MudSwitch T="bool" @bind-Value="ftpOn" Label="@L["Share over FTP"]" Color="Color.Primary" Disabled="busy" />
+        @if (ftpOn)
+        {
+            <MudSelect T="string" Label="@L["Allowed FTP users"]" MultiSelection="true" @bind-SelectedValues="ftpUsers" Disabled="busy"
+                       HelperText="@(Users.Count == 0 ? L["Create a user first."] : null)">
+                @foreach (var u in Users)
+                {
+                    <MudSelectItem T="string" Value="@u">@u</MudSelectItem>
+                }
+            </MudSelect>
+            <MudSwitch T="bool" @bind-Value="ftpRo" Label="@L["Read-only"]" Color="Color.Primary" Disabled="busy" />
+        }
+        @if (nfsOn || ftpOn)
+        {
+            <MudText Typo="Typo.caption" Class="d-block">@L["Advanced permissions do not apply over NFS and FTP: the list above decides who gets in, with access to the whole share."]</MudText>
+        }
+        <MudDivider Class="my-3" />
+
         @if (Existing is null)
         {
             <MudText Typo="Typo.caption" Class="d-block mt-2">@L["Permissions are set right after creation: nobody has access until you add some."]</MudText>
@@ -70,6 +98,9 @@
         ? L["Existing files are not moved: copy them to the new location."]
         : Datasets.Count == 0 ? L["Create a dataset in the “Datasets” page to choose it here."] : null;
     IReadOnlyCollection<string> selected = [];
+    bool nfsOn, nfsRo, ftpOn, ftpRo;
+    string nfsClients = "";
+    IReadOnlyCollection<string> ftpUsers = [];
     string? error;
     bool busy;
 
@@ -82,6 +113,8 @@
         acl = Existing.Acl;
         storage = Existing.Dataset ?? Plain;
         selected = Existing.ValidUsers.ToList();
+        if (Existing.Nfs is { } nfs) (nfsOn, nfsRo, nfsClients) = (true, nfs.ReadOnly, string.Join('\n', nfs.Clients));
+        if (Existing.Ftp is { } ftp) (ftpOn, ftpRo, ftpUsers) = (true, ftp.ReadOnly, ftp.Users.ToList());
     }
 
     async Task Save()
@@ -97,7 +130,9 @@
                 await Ops.CreateDatasetAsync(dataset);
                 created = storage = dataset; // si l'enregistrement du partage échoue, on ne recrée pas le jeu de données
             }
-            await Ops.SaveShareAsync(new ShareDef(name.Trim(), comment.Trim(), readOnly, selected.OrderBy(u => u, StringComparer.Ordinal).ToList(), storage == Plain ? null : storage, acl), isNew: Existing is null);
+            await Ops.SaveShareAsync(new ShareDef(name.Trim(), comment.Trim(), readOnly, selected.OrderBy(u => u, StringComparer.Ordinal).ToList(), storage == Plain ? null : storage, acl,
+                nfsOn ? new NfsExport(nfsClients.Split([' ', ',', ';', '\n', '\r', '\t'], StringSplitOptions.RemoveEmptyEntries).ToList(), nfsRo) : null,
+                ftpOn ? new FtpAccess(ftpUsers.OrderBy(u => u, StringComparer.Ordinal).ToList(), ftpRo) : null), isNew: Existing is null);
             Dialog.Close(DialogResult.Ok(name.Trim()));
             return;
         }

@@ -70,7 +70,7 @@ public class NasOperations(AgentClient agent, Repo repo, IMailSender mail, Admin
         await _gate.WaitAsync();
         try
         {
-            var using_ = (await repo.GetSharesAsync()).Where(s => !s.Acl && s.ValidUsers.Contains(name)).Select(s => s.Name).ToList();
+            var using_ = (await repo.GetSharesAsync()).Where(s => (!s.Acl && s.ValidUsers.Contains(name)) || s.Ftp?.Users.Contains(name) == true).Select(s => s.Name).ToList();
             if (using_.Count > 0)
                 throw new AgentException(Msg.F("“{0}” is used by share {1}: remove it from that share first.", name, string.Join(", ", using_)));
             var ruled = await ShareFoldersUsingAsync(AclSubjectKind.User, name);
@@ -97,7 +97,7 @@ public class NasOperations(AgentClient agent, Repo repo, IMailSender mail, Admin
                 .OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase).ToList();
 
             var before = all.FirstOrDefault(s => s.Name.Equals(share.Name, StringComparison.OrdinalIgnoreCase));
-            await agent.ApplySharesAsync(next);
+            await agent.ApplySharesAsync(next, await repo.GetFtpSettingsAsync());
             await repo.UpsertShareAsync(share);
             await repo.AuditAsync(await ActorAsync(), isNew ? "Share created" : "Share modified", share.Name);
 
@@ -128,7 +128,7 @@ public class NasOperations(AgentClient agent, Repo repo, IMailSender mail, Admin
         {
             var all = await repo.GetSharesAsync();
             var removed = all.FirstOrDefault(s => s.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
-            await agent.ApplySharesAsync(all.Where(s => s != removed).ToList());
+            await agent.ApplySharesAsync(all.Where(s => s != removed).ToList(), await repo.GetFtpSettingsAsync());
             await repo.DeleteShareAsync(name);
             var detail = removed?.Dataset is { } ds
                 ? Msg.F("{0} (files remain in dataset {1})", name, ds)
@@ -408,8 +408,39 @@ public class NasOperations(AgentClient agent, Repo repo, IMailSender mail, Admin
         await _gate.WaitAsync();
         try
         {
-            await agent.ApplySharesAsync(await repo.GetSharesAsync());
+            await agent.ApplySharesAsync(await repo.GetSharesAsync(), await repo.GetFtpSettingsAsync());
             await repo.AuditAsync(await ActorAsync(), "Shares reapplied");
+        }
+        finally { _gate.Release(); }
+    }
+
+    // ---- Services réseau (SMB, NFS, FTP)
+
+    /// <summary>
+    /// Active ou arrête un service. Avant de démarrer NFS ou FTP, leur configuration est écrite : sinon le service démarrerait
+    /// avec celle du paquet (pour vsftpd, une configuration qui n'est pas la nôtre).
+    /// </summary>
+    public async Task SetServiceAsync(string name, bool enabled)
+    {
+        await _gate.WaitAsync();
+        try
+        {
+            if (enabled) await agent.ApplySharesAsync(await repo.GetSharesAsync(), await repo.GetFtpSettingsAsync());
+            await agent.SetServiceAsync(name, enabled);
+            await repo.AuditAsync(await ActorAsync(), enabled ? "Service enabled" : "Service disabled", name.ToUpperInvariant());
+        }
+        finally { _gate.Release(); }
+    }
+
+    public async Task SaveFtpSettingsAsync(FtpSettings settings)
+    {
+        if (Rules.ValidateFtpSettings(settings) is { } e) throw new AgentException(e);
+        await _gate.WaitAsync();
+        try
+        {
+            await agent.ApplySharesAsync(await repo.GetSharesAsync(), settings);
+            await repo.SaveFtpSettingsAsync(settings);
+            await repo.AuditAsync(await ActorAsync(), "FTP settings changed");
         }
         finally { _gate.Release(); }
     }

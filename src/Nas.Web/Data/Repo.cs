@@ -40,8 +40,12 @@ class ShareRow
     public string ValidUsers { get; set; } = "";
     public string? Dataset { get; set; }
     public bool Acl { get; set; }
+    public string? Nfs { get; set; }
+    public string? Ftp { get; set; }
 
-    public ShareDef ToDef() => new(Name, Comment, ReadOnly, ValidUsers.Split(' ', StringSplitOptions.RemoveEmptyEntries), Dataset, Acl);
+    public ShareDef ToDef() => new(Name, Comment, ReadOnly, ValidUsers.Split(' ', StringSplitOptions.RemoveEmptyEntries), Dataset, Acl,
+        Nfs is null ? null : System.Text.Json.JsonSerializer.Deserialize<NfsExport>(Nfs),
+        Ftp is null ? null : System.Text.Json.JsonSerializer.Deserialize<FtpAccess>(Ftp));
 }
 
 public class Repo(Db db)
@@ -66,7 +70,7 @@ public class Repo(Db db)
     public async Task<List<ShareDef>> GetSharesAsync()
     {
         using var c = db.Open();
-        return (await c.QueryAsync<ShareRow>("SELECT Name,Comment,ReadOnly,ValidUsers,Dataset,Acl FROM Shares ORDER BY Name"))
+        return (await c.QueryAsync<ShareRow>("SELECT Name,Comment,ReadOnly,ValidUsers,Dataset,Acl,Nfs,Ftp FROM Shares ORDER BY Name"))
             .Select(r => r.ToDef()).ToList();
     }
 
@@ -74,9 +78,10 @@ public class Repo(Db db)
     {
         using var c = db.Open();
         await c.ExecuteAsync("""
-            INSERT INTO Shares(Name,Comment,ReadOnly,ValidUsers,Dataset,Acl) VALUES(@Name,@Comment,@ReadOnly,@Users,@Dataset,@Acl)
-            ON CONFLICT(Name) DO UPDATE SET Comment=@Comment, ReadOnly=@ReadOnly, ValidUsers=@Users, Dataset=@Dataset, Acl=@Acl
-            """, new { s.Name, s.Comment, s.ReadOnly, Users = string.Join(' ', s.ValidUsers), s.Dataset, s.Acl });
+            INSERT INTO Shares(Name,Comment,ReadOnly,ValidUsers,Dataset,Acl,Nfs,Ftp) VALUES(@Name,@Comment,@ReadOnly,@Users,@Dataset,@Acl,@Nfs,@Ftp)
+            ON CONFLICT(Name) DO UPDATE SET Comment=@Comment, ReadOnly=@ReadOnly, ValidUsers=@Users, Dataset=@Dataset, Acl=@Acl, Nfs=@Nfs, Ftp=@Ftp
+            """, new { s.Name, s.Comment, s.ReadOnly, Users = string.Join(' ', s.ValidUsers), s.Dataset, s.Acl,
+                Nfs = s.Nfs is null ? null : System.Text.Json.JsonSerializer.Serialize(s.Nfs), Ftp = s.Ftp is null ? null : System.Text.Json.JsonSerializer.Serialize(s.Ftp) });
     }
 
     public async Task DeleteShareAsync(string name)
@@ -236,6 +241,27 @@ public class Repo(Db db)
         foreach (var (k, val) in pairs)
             await c.ExecuteAsync("INSERT INTO Settings(Name,Value) VALUES(@n,@v) ON CONFLICT(Name) DO UPDATE SET Value=@v",
                 new { n = "mail." + k, v = val }, tx);
+        tx.Commit();
+    }
+
+    public async Task<FtpSettings> GetFtpSettingsAsync()
+    {
+        using var c = db.Open();
+        var v = (await c.QueryAsync<(string Name, string Value)>("SELECT Name,Value FROM Settings WHERE Name LIKE 'ftp.%'"))
+            .ToDictionary(x => x.Name, x => x.Value);
+        var d = new FtpSettings();
+        return new FtpSettings(v.GetValueOrDefault("ftp.tls") == "1",
+            int.TryParse(v.GetValueOrDefault("ftp.pasvmin"), out var min) ? min : d.PassiveMin,
+            int.TryParse(v.GetValueOrDefault("ftp.pasvmax"), out var max) ? max : d.PassiveMax);
+    }
+
+    public async Task SaveFtpSettingsAsync(FtpSettings s)
+    {
+        using var c = db.Open();
+        using var tx = c.BeginTransaction();
+        var pairs = new Dictionary<string, string> { ["ftp.tls"] = s.Tls ? "1" : "0", ["ftp.pasvmin"] = s.PassiveMin.ToString(), ["ftp.pasvmax"] = s.PassiveMax.ToString() };
+        foreach (var (k, val) in pairs)
+            await c.ExecuteAsync("INSERT INTO Settings(Name,Value) VALUES(@n,@v) ON CONFLICT(Name) DO UPDATE SET Value=@v", new { n = k, v = val }, tx);
         tx.Commit();
     }
 }

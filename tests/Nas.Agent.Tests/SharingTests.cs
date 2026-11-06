@@ -114,7 +114,7 @@ public class UserServiceTests
     {
         var run = new FakeRunner
         {
-            Handler = c => (c.File, c.Args[0]) switch
+            Handler = c => (c.File, c.Args.Length > 0 ? c.Args[0] : "") switch
             {
                 ("getent", "group") => Ok("nasusers:x:990:bob\n"),
                 ("getent", "passwd") => Ok("root:x:0:0::/root:/bin/bash\nalice:x:1001:990::/:/usr/sbin/nologin\n"),
@@ -130,7 +130,7 @@ public class UserServiceTests
     {
         var run = new FakeRunner
         {
-            Handler = c => (c.File, c.Args[0]) switch
+            Handler = c => (c.File, c.Args.Length > 0 ? c.Args[0] : "") switch
             {
                 ("getent", "group") => Ok("nasusers:x:990:\n"),
                 ("id", _) => Fail(),
@@ -152,7 +152,7 @@ public class UserServiceTests
     {
         var run = new FakeRunner
         {
-            Handler = c => (c.File, c.Args[0]) switch
+            Handler = c => (c.File, c.Args.Length > 0 ? c.Args[0] : "") switch
             {
                 ("getent", "group") => Ok("nasusers:x:990:\n"),
                 ("id", _) => Ok("1000"),
@@ -170,7 +170,7 @@ public class UserServiceTests
     {
         var run = new FakeRunner
         {
-            Handler = c => (c.File, c.Args[0]) switch
+            Handler = c => (c.File, c.Args.Length > 0 ? c.Args[0] : "") switch
             {
                 ("getent", "group") => Ok("nasusers:x:990:\n"),
                 ("id", _) => Fail(),
@@ -207,7 +207,7 @@ public class ShareServiceTests : IDisposable
             ["Samba:ConfigDir"] = _dir,
             ["Samba:ShareRoot"] = Path.Combine(_dir, "shares"),
         }).Build();
-        _run.Handler = c => (c.File, c.Args[0]) switch
+        _run.Handler = c => (c.File, c.Args.Length > 0 ? c.Args[0] : "") switch
         {
             ("getent", "group") => new(0, "nasusers:x:990:alice\n", ""),
             _ => new(0, "", ""),

@@ -60,6 +60,15 @@ public sealed class UserService(ICommandRunner run)
             await run.RunAsync("userdel", [req.Name], ct: ct); // ne pas laisser un compte sans mot de passe Samba
             Check(smb, "Creating the Samba account");
         }
+
+        // Le même mot de passe sert au compte système : FTP s'authentifie par PAM, pas par Samba.
+        var unix = await run.RunAsync("chpasswd", [], UnixPasswordInput(req.Name, req.Password), ct);
+        if (unix.ExitCode != 0)
+        {
+            await run.RunAsync("smbpasswd", ["-x", req.Name], ct: ct);
+            await run.RunAsync("userdel", [req.Name], ct: ct);
+            Check(unix, "Setting the account password");
+        }
     }
 
     public async Task SetPasswordAsync(string name, string password, CancellationToken ct = default)
@@ -67,6 +76,7 @@ public sealed class UserService(ICommandRunner run)
         await RequireManagedAsync(name, ct);
         if (Rules.ValidatePassword(password) is { } e) throw new OperationException(e);
         Check(await run.RunAsync("smbpasswd", ["-s", name], PasswordInput(password), ct), "Changing the password");
+        Check(await run.RunAsync("chpasswd", [], UnixPasswordInput(name, password), ct), "Changing the password");
     }
 
     public async Task DeleteAsync(string name, CancellationToken ct = default)
@@ -85,6 +95,9 @@ public sealed class UserService(ICommandRunner run)
 
     // smbpasswd -s lit le mot de passe puis sa confirmation sur l'entrée standard.
     static string PasswordInput(string password) => $"{password}\n{password}\n";
+
+    // chpasswd lit « nom:mot de passe » sur l'entrée standard (le nom ne contient jamais de « : », le mot de passe peut en contenir).
+    static string UnixPasswordInput(string name, string password) => $"{name}:{password}\n";
 
     static void Check(CommandResult r, string what)
     {

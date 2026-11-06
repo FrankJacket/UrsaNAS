@@ -64,19 +64,21 @@ public static class ShareConf
 /// <c>testparm</c> (retour arrière si Samba le refuse) puis recharge Samba. Les dossiers des partages supprimés
 /// ne sont jamais effacés : les données restent sur le disque.
 /// </summary>
-public sealed class ShareService(ICommandRunner run, UserService users, IConfiguration cfg, AclService? acl = null)
+public sealed class ShareService(ICommandRunner run, UserService users, IConfiguration cfg, AclService? acl = null, ProtocolService? protocols = null)
 {
     string ConfigDir => cfg["Samba:ConfigDir"] ?? "/etc/samba";
     string ShareRoot => cfg["Samba:ShareRoot"] ?? "/srv/nas";
     string ConfPath => Path.Combine(ConfigDir, "ursanas.conf");
     string MainConfPath => Path.Combine(ConfigDir, "smb.conf");
 
-    public async Task ApplyAsync(IReadOnlyList<ShareDef> shares, CancellationToken ct = default)
+    public async Task ApplyAsync(IReadOnlyList<ShareDef> shares, FtpSettings? ftp = null, CancellationToken ct = default)
     {
         var known = (await users.ListAsync(ct)).Select(u => u.Name).ToHashSet();
         if (Rules.ValidateShares(shares, known) is { } error) throw new OperationException(error);
 
         var datasetPaths = await ResolveDatasetsAsync(shares, ct); // avant toute écriture : un jeu absent ne laisse aucune trace
+        if (Rules.ValidateFtpSettings(ftp) is { } ftpError) throw new OperationException(ftpError);
+        protocols?.EnsureAvailable(shares); // idem pour NFS/FTP non installés
 
         await EnsureIncludeAsync(ct);
         if (acl is not null && shares.Any(s => s.Acl)) await acl.EnsureServiceAccountAsync(ct); // le compte doit exister avant que Samba lise « admin users »
@@ -110,6 +112,12 @@ public sealed class ShareService(ICommandRunner run, UserService users, IConfigu
         }
 
         Check(await run.RunAsync("smbcontrol", ["all", "reload-config"], ct: ct), "Reloading Samba");
+
+        if (protocols is not null)
+        {
+            var paths = shares.ToDictionary(s => s.Name, s => s.Dataset is not null ? datasetPaths[s.Dataset] : ShareConf.PathFor(ShareRoot, s.Name), StringComparer.OrdinalIgnoreCase);
+            await protocols.ApplyAsync(shares, paths, ftp, ct);
+        }
     }
 
     /// <summary>Trouve le point de montage de chaque jeu de données choisi ; refuse un jeu inconnu ou non monté.</summary>
