@@ -1,0 +1,393 @@
+@page "/folders"
+@page "/permissions"
+@inject Repo Repo
+@inject AgentClient Agent
+@inject NasOperations Ops
+@inject IDialogService Dialogs
+@inject ISnackbar Snack
+
+<MudText Typo="Typo.h4" Class="mb-4">@L["Folders"]</MudText>
+@if (error is not null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">@error</MudAlert>
+}
+@if (loaded && aclShares.Count == 0)
+{
+    <MudAlert Severity="Severity.Info">@L["No share uses advanced permissions yet. Edit a share and turn on “Advanced permissions”."]</MudAlert>
+}
+else if (share is not null)
+{
+    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="mb-3" Wrap="Wrap.Wrap">
+        <MudSelect T="string" Value="share" ValueChanged="SelectShare" Label="@L["Share"]" Dense="true" Style="width:200px">
+            @foreach (var s in aclShares)
+            {
+                <MudSelectItem T="string" Value="@s">@s</MudSelectItem>
+            }
+        </MudSelect>
+        <MudTextField T="string" Value="@CurrentLocation" ReadOnly="true" Label="@L["Location"]" Dense="true" Style="flex:1;min-width:200px" />
+    </MudStack>
+
+    <MudStack Row="true" Spacing="2" Class="mb-3" Wrap="Wrap.Wrap" AlignItems="AlignItems.Center">
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.CreateNewFolder" OnClick="() => NewFolder(selected)" Disabled="@(selected is null)">@L["New folder"]</MudButton>
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.DriveFileRenameOutline" OnClick="() => Rename(selected)" Disabled="@(selected is null || selected.Path.Length == 0)">@L["Rename"]</MudButton>
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.DriveFileMove" OnClick="() => MoveTo(selected, copy: false)" Disabled="@(selected is null || selected.Path.Length == 0)">@L["Move"]</MudButton>
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="() => MoveTo(selected, copy: true)" Disabled="@(selected is null || selected.Path.Length == 0)">@L["Copy"]</MudButton>
+        <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="() => Delete(selected)" Disabled="@(selected is null || selected.Path.Length == 0)">@L["Delete"]</MudButton>
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Lock" OnClick="() => OpenPermissions(selected)" Disabled="@(selected is null)">@L["Permissions"]</MudButton>
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="Refresh">@L["Refresh"]</MudButton>
+        <MudSpacer />
+        <MudToggleGroup T="bool" Value="columns" ValueChanged="SetColumns" Color="Color.Primary" Size="Size.Small">
+            <MudToggleItem Value="false" Text="@L["Tree"]" />
+            <MudToggleItem Value="true" Text="@L["Columns"]" />
+        </MudToggleGroup>
+    </MudStack>
+
+    @if (columns)
+    {
+        <MudPaper Elevation="0" Class="explorer miller">
+            @foreach (var parent in Chain())
+            {
+                @if (parent.Children.Count > 0 || parent == selected)
+                {
+                    <div class="mil-col">
+                        @foreach (var c in parent.Children)
+                        {
+                            var node = c;
+                            <div class="mil-item @(InChain(node) ? "sel" : "")" @onclick="() => PickColumn(node)"
+                                 @oncontextmenu="e => Context(e, node)" @oncontextmenu:preventDefault="true">
+                                <MudIcon Icon="@Icons.Material.Filled.Folder" Color="Color.Info" Class="mr-2" />
+                                <span class="mil-name">@node.Name</span>
+                                @if (states.GetValueOrDefault(node.Path) is { } st && (st.Rules.Count > 0 || !st.Inherit))
+                                {
+                                    <MudIcon Icon="@(st.Inherit ? Icons.Material.Filled.Lock : Icons.Material.Filled.LinkOff)" Size="Size.Small" Class="ml-1" />
+                                }
+                                <MudSpacer />
+                                @if (node.Loading) { <MudProgressCircular Size="Size.Small" Indeterminate="true" /> }
+                                else { <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Size="Size.Small" /> }
+                            </div>
+                        }
+                        @if (parent.Children.Count == 0)
+                        {
+                            <MudText Typo="Typo.caption" Class="pa-3">@L["No subfolders."]</MudText>
+                        }
+                    </div>
+                }
+            }
+        </MudPaper>
+    }
+    else
+    {
+    <MudPaper Elevation="0" Class="explorer">
+        <div class="ex-row ex-head">
+            <div class="ex-name">@L["Name"]</div><div class="ex-mod">@L["Modified"]</div><div class="ex-perm">@L["Permissions"]</div>
+        </div>
+        @foreach (var n in Visible())
+        {
+            var node = n;
+            var st = states.GetValueOrDefault(node.Path);
+            <div class="ex-row @(node == selected ? "sel" : "")" @onclick="() => Select(node)" @ondblclick="() => Toggle(node)"
+                 @oncontextmenu="e => Context(e, node)" @oncontextmenu:preventDefault="true">
+                <div class="ex-name" style="padding-left:@(node.Depth * 24)px">
+                    <span class="ex-chev" @onclick="() => Toggle(node)" @onclick:stopPropagation="true">
+                        <MudIcon Icon="@(node.Expanded ? Icons.Material.Filled.ExpandMore : Icons.Material.Filled.ChevronRight)" Size="Size.Small" />
+                    </span>
+                    <MudIcon Icon="@(node.Path.Length == 0 ? Icons.Material.Filled.FolderShared : Icons.Material.Filled.Folder)" Color="Color.Info" Class="mr-2" />
+                    <span>@node.Name</span>
+                    @if (node.Loading) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="ml-2" /> }
+                </div>
+                <div class="ex-mod">@(node.Modified is { } m ? Fmt.Dt(m) : "")</div>
+                <div class="ex-perm">
+                    @if (st is { Inherit: false }) { <MudChip T="string" Size="Size.Small" Color="Color.Warning" Icon="@Icons.Material.Filled.LinkOff">@L["Inheritance off"]</MudChip> }
+                    @if (st is { Rules.Count: > 0 }) { <MudChip T="string" Size="Size.Small" Icon="@Icons.Material.Filled.Lock">@L["{0} permission(s)", st.Rules.Count]</MudChip> }
+                </div>
+            </div>
+        }
+    </MudPaper>
+    }
+
+    <MudMenu @ref="menu" PositionAtCursor="true">
+        <MudMenuItem Icon="@Icons.Material.Filled.CreateNewFolder" OnClick="() => NewFolder(menuNode)">@L["New folder"]</MudMenuItem>
+        @if (menuNode is { Path.Length: > 0 })
+        {
+            <MudMenuItem Icon="@Icons.Material.Filled.DriveFileRenameOutline" OnClick="() => Rename(menuNode)">@L["Rename"]</MudMenuItem>
+            <MudMenuItem Icon="@Icons.Material.Filled.DriveFileMove" OnClick="() => MoveTo(menuNode, copy: false)">@L["Move"]</MudMenuItem>
+            <MudMenuItem Icon="@Icons.Material.Filled.ContentCopy" OnClick="() => MoveTo(menuNode, copy: true)">@L["Copy"]</MudMenuItem>
+            <MudMenuItem Icon="@Icons.Material.Filled.Delete" IconColor="Color.Error" OnClick="() => Delete(menuNode)">@L["Delete"]</MudMenuItem>
+        }
+        <MudMenuItem Icon="@Icons.Material.Filled.Lock" OnClick="() => OpenPermissions(menuNode)">@L["Permissions"]</MudMenuItem>
+        <MudDivider />
+        <MudMenuItem Icon="@Icons.Material.Filled.Refresh" OnClick="() => Reload(menuNode)">@L["Refresh"]</MudMenuItem>
+    </MudMenu>
+}
+
+<style>
+    .explorer { border: 1px solid var(--mud-palette-lines-default); border-radius: 12px; overflow: auto; max-height: calc(100vh - 280px); }
+    .ex-row { display: grid; grid-template-columns: minmax(220px, 1fr) 170px 280px; align-items: center; padding: 6px 12px; cursor: default; user-select: none;
+              border-bottom: 1px solid var(--mud-palette-lines-default); }
+    .ex-row:not(.ex-head):hover { background: var(--mud-palette-action-default-hover); }
+    .ex-row.sel { background: var(--mud-palette-primary-hover); }
+    .ex-head { font-weight: 500; position: sticky; top: 0; background: var(--mud-palette-surface); opacity: .85; }
+    .ex-name { display: flex; align-items: center; }
+    .ex-chev { display: inline-flex; width: 24px; cursor: pointer; }
+    .ex-perm { display: flex; gap: 6px; flex-wrap: wrap; }
+    .miller { display: flex; flex-direction: row; overflow-x: auto; min-height: 320px; }
+    .mil-col { flex: 0 0 240px; border-right: 1px solid var(--mud-palette-lines-default); overflow-y: auto; max-height: calc(100vh - 280px); }
+    .mil-item { display: flex; align-items: center; padding: 6px 10px; cursor: default; user-select: none; }
+    .mil-item:hover { background: var(--mud-palette-action-default-hover); }
+    .mil-item.sel { background: var(--mud-palette-primary-hover); }
+    .mil-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    @@media (max-width: 800px) { .ex-row { grid-template-columns: 1fr; } .ex-mod, .ex-perm { display: none; } }
+</style>
+
+@code {
+    [SupplyParameterFromQuery] public string? Share { get; set; }
+
+    sealed class Node
+    {
+        public string Path = "", Name = "";
+        public DateTime? Modified;
+        public int Depth;
+        public bool Expanded, Loaded, Loading;
+        public List<Node> Children = new();
+    }
+
+    List<string> aclShares = [];
+    Dictionary<string, FolderState> states = new();
+    Node? root, selected, menuNode;
+    MudMenu? menu;
+    string? share, error;
+    bool loaded;
+
+    string CurrentLocation => share is null ? "" : "/" + share + (selected is { Path.Length: > 0 } ? "/" + selected.Path : "");
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { aclShares = (await Repo.GetSharesAsync()).Where(s => s.Acl).Select(s => s.Name).ToList(); }
+        catch (Exception e) when (e is AgentException or HttpRequestException) { error = L["Agent unreachable."]; }
+        loaded = true;
+        var wanted = Share is not null && aclShares.Contains(Share) ? Share : aclShares.FirstOrDefault();
+        if (wanted is not null) await SelectShare(wanted);
+    }
+
+    async Task SelectShare(string? name)
+    {
+        share = name;
+        if (name is null) return;
+        states = await Repo.GetFolderStatesAsync(name);
+        root = new Node { Name = name, Path = "" };
+        selected = root;
+        await Load(root);
+        root.Expanded = true;
+    }
+
+    Task Refresh() => share is null ? Task.CompletedTask : Show(selected?.Path ?? "");
+
+    /// <summary>Relit l'arborescence puis sélectionne ce chemin (ou le dossier existant le plus proche), en ouvrant ses parents.</summary>
+    async Task Show(string path)
+    {
+        states = await Repo.GetFolderStatesAsync(share!);
+        await Reload(root!);
+        var n = root!;
+        foreach (var seg in path.Split('/', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var child = n.Children.FirstOrDefault(c => c.Name == seg);
+            if (child is null) break;
+            n.Expanded = true;
+            n = child;
+            await Load(n);
+        }
+        selected = n;
+    }
+
+    // ---- Vue en colonnes : une colonne par niveau du dossier sélectionné, comme dans le Finder
+    bool columns;
+
+    async Task SetColumns(bool value)
+    {
+        columns = value;
+        if (value && selected is { Loaded: false } s) await Load(s);
+        else if (!value) foreach (var n in Chain().Where(n => n != selected)) n.Expanded = true;
+    }
+
+    /// <summary>Racine, puis chaque dossier du chemin sélectionné, dont les sous-dossiers forment une colonne.</summary>
+    List<Node> Chain()
+    {
+        var list = new List<Node>();
+        if (root is null) return list;
+        var n = root;
+        list.Add(n);
+        foreach (var seg in (selected?.Path ?? "").Split('/', StringSplitOptions.RemoveEmptyEntries))
+        {
+            n = n.Children.FirstOrDefault(c => c.Name == seg);
+            if (n is null) break;
+            list.Add(n);
+        }
+        return list;
+    }
+
+    bool InChain(Node n) => selected is not null && (n.Path == selected.Path || selected.Path.StartsWith(n.Path + "/", StringComparison.Ordinal));
+
+    async Task PickColumn(Node n)
+    {
+        selected = n;
+        if (!n.Loaded) await Load(n);
+    }
+
+    IEnumerable<Node> Visible()
+    {
+        if (root is null) yield break;
+        var stack = new Stack<Node>();
+        stack.Push(root);
+        while (stack.Count > 0)
+        {
+            var n = stack.Pop();
+            yield return n;
+            if (n.Expanded) foreach (var c in Enumerable.Reverse(n.Children)) stack.Push(c);
+        }
+    }
+
+    /// <summary>Lit les sous-dossiers ; les dossiers déjà ouverts gardent leur état après un rechargement.</summary>
+    async Task Load(Node n)
+    {
+        n.Loading = true;
+        try
+        {
+            var listing = await Agent.GetFoldersAsync(share!, n.Path);
+            var old = n.Children.ToDictionary(c => c.Name);
+            n.Children = listing.Folders.Select(f => old.TryGetValue(f.Name, out var o) ? Touch(o, f)
+                : new Node { Name = f.Name, Path = n.Path.Length == 0 ? f.Name : n.Path + "/" + f.Name, Depth = n.Depth + 1, Modified = f.ModifiedUtc }).ToList();
+            n.Loaded = true;
+            error = null;
+        }
+        catch (AgentException e) { Snack.Add(L.Translate(e.Message), Severity.Error); }
+        catch (HttpRequestException) { Snack.Add(L["Agent unreachable."], Severity.Error); }
+        n.Loading = false;
+    }
+
+    static Node Touch(Node n, FolderEntry f) { n.Modified = f.ModifiedUtc; return n; }
+
+    async Task Reload(Node n)
+    {
+        await Load(n);
+        foreach (var c in n.Children.Where(c => c.Expanded)) await Reload(c);
+    }
+
+    async Task Toggle(Node n)
+    {
+        if (!n.Loaded) await Load(n);
+        n.Expanded = !n.Expanded;
+    }
+
+    void Select(Node n) => selected = n;
+
+    async Task Context(MouseEventArgs e, Node n)
+    {
+        selected = n;
+        menuNode = n;
+        if (menu is not null) await menu.OpenMenuAsync(e);
+    }
+
+    static readonly DialogOptions SmallOptions = new() { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true, BackdropClick = false };
+    static readonly DialogOptions BigOptions = new() { MaxWidth = MaxWidth.Large, FullWidth = true, CloseButton = true, BackdropClick = false };
+
+    async Task NewFolder(Node? n)
+    {
+        if (n is null || share is null) return;
+        var parameters = new DialogParameters<FolderNameDialog> { { x => x.Location, "/" + share + (n.Path.Length > 0 ? "/" + n.Path : "") } };
+        var dialog = await Dialogs.ShowAsync<FolderNameDialog>(L["New folder"], parameters, SmallOptions);
+        if (await dialog.Result is { Canceled: false, Data: string name })
+        {
+            try
+            {
+                await Ops.CreateFolderAsync(share, n.Path, name);
+                Snack.Add(L["Folder created."], Severity.Success);
+                await Load(n);
+                n.Expanded = true;
+            }
+            catch (AgentException e) { Snack.Add(L.Translate(e.Message), Severity.Error); }
+            catch (HttpRequestException) { Snack.Add(L["Agent unreachable."], Severity.Error); }
+        }
+    }
+
+    string Loc(Node n) => "/" + share + (n.Path.Length > 0 ? "/" + n.Path : "");
+
+    static string Join(string parent, string name) => parent.Length == 0 ? name : parent + "/" + name;
+
+    /// <summary>Exécute une opération sur un dossier, puis réaffiche l'arborescence sur <paramref name="showPath"/>.</summary>
+    async Task Run(Func<Task> action, string success, string showPath)
+    {
+        try
+        {
+            await action();
+            Snack.Add(success, Severity.Success);
+            await Show(showPath);
+        }
+        catch (AgentException e) { Snack.Add(L.Translate(e.Message), Severity.Error); }
+        catch (HttpRequestException) { Snack.Add(L["Agent unreachable."], Severity.Error); }
+    }
+
+    async Task Rename(Node? n)
+    {
+        if (n is null || share is null || n.Path.Length == 0) return;
+        var sh = share;
+        var parameters = new DialogParameters<FolderNameDialog>
+        {
+            { x => x.Message, L["Rename {0}", Loc(n)] }, { x => x.Initial, n.Name }, { x => x.ButtonText, "Rename" },
+        };
+        var dialog = await Dialogs.ShowAsync<FolderNameDialog>(L["Rename"], parameters, SmallOptions);
+        if (await dialog.Result is { Canceled: false, Data: string name } && name != n.Name)
+        {
+            var parent = NasOperations.ParentOf(n.Path);
+            await Run(() => Ops.MoveFolderAsync(sh, n.Path, parent, name), L["Folder renamed."], Join(parent, name));
+        }
+    }
+
+    async Task MoveTo(Node? n, bool copy)
+    {
+        if (n is null || share is null || n.Path.Length == 0) return;
+        var sh = share;
+        var parameters = new DialogParameters<FolderPickerDialog>
+        {
+            { x => x.Share, sh }, { x => x.Exclude, n.Path },
+            { x => x.Message, copy ? L["Copy {0} to:", Loc(n)] : L["Move {0} to:", Loc(n)] },
+            { x => x.ButtonText, copy ? "Copy" : "Move" },
+        };
+        var dialog = await Dialogs.ShowAsync<FolderPickerDialog>(copy ? L["Copy"] : L["Move"], parameters, SmallOptions);
+        if (await dialog.Result is not { Canceled: false, Data: string dest }) return;
+        var parent = NasOperations.ParentOf(n.Path);
+        if (dest == parent && !copy) return; // déjà là
+        var name = dest == parent ? L["{0} - copy", n.Name] : n.Name; // copier au même endroit : il faut un autre nom
+        var path = n.Path;
+        await Run(() => copy ? Ops.CopyFolderAsync(sh, path, dest, name) : Ops.MoveFolderAsync(sh, path, dest, name),
+            copy ? L["Folder copied."] : L["Folder moved."], Join(dest, name));
+    }
+
+    async Task Delete(Node? n)
+    {
+        if (n is null || share is null || n.Path.Length == 0) return;
+        var sh = share;
+        var path = n.Path;
+        var parameters = new DialogParameters<ConfirmNameDialog>
+        {
+            { x => x.Expected, n.Name },
+            { x => x.Message, L["Folder {0} and everything it contains will be deleted. This cannot be undone.", Loc(n)] },
+            { x => x.ButtonText, "Delete" },
+            { x => x.Action, () => Ops.DeleteFolderAsync(sh, path) },
+        };
+        var dialog = await Dialogs.ShowAsync<ConfirmNameDialog>(L["Delete {0}", n.Name], parameters, SmallOptions);
+        if (await dialog.Result is { Canceled: false })
+        {
+            Snack.Add(L["Folder deleted."], Severity.Success);
+            await Show(NasOperations.ParentOf(path));
+        }
+    }
+
+    async Task OpenPermissions(Node? n)
+    {
+        if (n is null || share is null) return;
+        var parameters = new DialogParameters<FolderPermissionsDialog> { { x => x.Share, share }, { x => x.Path, n.Path } };
+        var title = L["Permissions of {0}", "/" + share + (n.Path.Length > 0 ? "/" + n.Path : "")];
+        await (await Dialogs.ShowAsync<FolderPermissionsDialog>(title, parameters, BigOptions)).Result;
+        states = await Repo.GetFolderStatesAsync(share);
+    }
+}

@@ -37,6 +37,9 @@ public class Db
         CREATE TABLE IF NOT EXISTS Settings(Name TEXT PRIMARY KEY, Value TEXT NOT NULL);
         """);
         AddColumn(c, "Shares", "Dataset", "TEXT NULL"); // jeu de données ZFS ; NULL = dossier simple dans /srv/nas
+        AddColumn(c, "Shares", "Acl", "INTEGER NOT NULL DEFAULT 0"); // 1 = permissions avancées (ACL NT)
+        c.Execute("CREATE TABLE IF NOT EXISTS FolderAcls(Share TEXT NOT NULL COLLATE NOCASE, Path TEXT NOT NULL, Rules TEXT NOT NULL, PRIMARY KEY(Share, Path)); -- Rules : JSON de AclRule[]");
+        AddColumn(c, "FolderAcls", "Inherit", "INTEGER NOT NULL DEFAULT 1"); // 0 = héritage rompu
     }
 
     static void AddColumn(SqliteConnection c, string table, string column, string ddl)

@@ -39,8 +39,9 @@ class ShareRow
     public bool ReadOnly { get; set; }
     public string ValidUsers { get; set; } = "";
     public string? Dataset { get; set; }
+    public bool Acl { get; set; }
 
-    public ShareDef ToDef() => new(Name, Comment, ReadOnly, ValidUsers.Split(' ', StringSplitOptions.RemoveEmptyEntries), Dataset);
+    public ShareDef ToDef() => new(Name, Comment, ReadOnly, ValidUsers.Split(' ', StringSplitOptions.RemoveEmptyEntries), Dataset, Acl);
 }
 
 public class Repo(Db db)
@@ -65,7 +66,7 @@ public class Repo(Db db)
     public async Task<List<ShareDef>> GetSharesAsync()
     {
         using var c = db.Open();
-        return (await c.QueryAsync<ShareRow>("SELECT Name,Comment,ReadOnly,ValidUsers,Dataset FROM Shares ORDER BY Name"))
+        return (await c.QueryAsync<ShareRow>("SELECT Name,Comment,ReadOnly,ValidUsers,Dataset,Acl FROM Shares ORDER BY Name"))
             .Select(r => r.ToDef()).ToList();
     }
 
@@ -73,15 +74,73 @@ public class Repo(Db db)
     {
         using var c = db.Open();
         await c.ExecuteAsync("""
-            INSERT INTO Shares(Name,Comment,ReadOnly,ValidUsers,Dataset) VALUES(@Name,@Comment,@ReadOnly,@Users,@Dataset)
-            ON CONFLICT(Name) DO UPDATE SET Comment=@Comment, ReadOnly=@ReadOnly, ValidUsers=@Users, Dataset=@Dataset
-            """, new { s.Name, s.Comment, s.ReadOnly, Users = string.Join(' ', s.ValidUsers), s.Dataset });
+            INSERT INTO Shares(Name,Comment,ReadOnly,ValidUsers,Dataset,Acl) VALUES(@Name,@Comment,@ReadOnly,@Users,@Dataset,@Acl)
+            ON CONFLICT(Name) DO UPDATE SET Comment=@Comment, ReadOnly=@ReadOnly, ValidUsers=@Users, Dataset=@Dataset, Acl=@Acl
+            """, new { s.Name, s.Comment, s.ReadOnly, Users = string.Join(' ', s.ValidUsers), s.Dataset, s.Acl });
     }
 
     public async Task DeleteShareAsync(string name)
     {
         using var c = db.Open();
-        await c.ExecuteAsync("DELETE FROM Shares WHERE Name=@name", new { name });
+        await c.ExecuteAsync("DELETE FROM Shares WHERE Name=@name; DELETE FROM FolderAcls WHERE Share=@name", new { name });
+    }
+
+    // ---- Permissions avancées : les règles voulues de chaque dossier (l'agent les écrit dans les ACL de Samba)
+    static readonly System.Text.Json.JsonSerializerOptions Json = new();
+
+    public async Task<Dictionary<string, IReadOnlyList<AclRule>>> GetFolderAclsAsync(string share) =>
+        (await GetFolderStatesAsync(share)).ToDictionary(p => p.Key, p => p.Value.Rules, StringComparer.Ordinal);
+
+    public async Task<Dictionary<string, FolderState>> GetFolderStatesAsync(string share)
+    {
+        using var c = db.Open();
+        var rows = await c.QueryAsync<(string Path, string Rules, int Inherit)>("SELECT Path,Rules,Inherit FROM FolderAcls WHERE Share=@share", new { share });
+        return rows.ToDictionary(r => r.Path,
+            r => new FolderState(System.Text.Json.JsonSerializer.Deserialize<List<AclRule>>(r.Rules, Json) ?? [], r.Inherit != 0), StringComparer.Ordinal);
+    }
+
+    public Task SetFolderAclAsync(string share, string path, IReadOnlyList<AclRule> rules) => SetFolderStateAsync(share, path, new FolderState(rules));
+
+    /// <summary>Un dossier sans règle propre qui hérite n'a rien en base : la ligne est supprimée.</summary>
+    public async Task SetFolderStateAsync(string share, string path, FolderState state)
+    {
+        using var c = db.Open();
+        if (state.Rules.Count == 0 && state.Inherit)
+            await c.ExecuteAsync("DELETE FROM FolderAcls WHERE Share=@share AND Path=@path", new { share, path });
+        else
+            await c.ExecuteAsync("""
+                INSERT INTO FolderAcls(Share,Path,Rules,Inherit) VALUES(@share,@path,@json,@inherit)
+                ON CONFLICT(Share,Path) DO UPDATE SET Rules=@json, Inherit=@inherit
+                """, new { share, path, json = System.Text.Json.JsonSerializer.Serialize(state.Rules, Json), inherit = state.Inherit ? 1 : 0 });
+    }
+
+    // Un dossier et tout ce qu'il contient : le chemin lui-même, ou un chemin qui commence par « chemin/ » (pas de LIKE : _ et % sont des noms valides).
+    const string InTree = "(Path=@path OR substr(Path,1,length(@path)+1)=@path||'/')";
+
+    /// <summary>Un dossier déplacé ou renommé garde ses règles : les lignes du dossier et de ses sous-dossiers changent de chemin.</summary>
+    public async Task RenameFolderStatesAsync(string share, string oldPath, string newPath)
+    {
+        using var c = db.Open();
+        await c.ExecuteAsync($"DELETE FROM FolderAcls WHERE Share=@share AND {InTree}", new { share, path = newPath }); // restes d'un ancien dossier du même nom
+        await c.ExecuteAsync($"UPDATE FolderAcls SET Path=@newPath||substr(Path,length(@path)+1) WHERE Share=@share AND {InTree}",
+            new { share, path = oldPath, newPath });
+    }
+
+    /// <summary>Une copie reçoit les règles (et les ruptures d'héritage) du dossier d'origine et de ses sous-dossiers.</summary>
+    public async Task CopyFolderStatesAsync(string share, string oldPath, string newPath)
+    {
+        using var c = db.Open();
+        await c.ExecuteAsync($"DELETE FROM FolderAcls WHERE Share=@share AND {InTree}", new { share, path = newPath });
+        await c.ExecuteAsync($"""
+            INSERT INTO FolderAcls(Share,Path,Rules,Inherit)
+            SELECT Share,@newPath||substr(Path,length(@path)+1),Rules,Inherit FROM FolderAcls WHERE Share=@share AND {InTree}
+            """, new { share, path = oldPath, newPath });
+    }
+
+    public async Task DeleteFolderStatesAsync(string share, string path)
+    {
+        using var c = db.Open();
+        await c.ExecuteAsync($"DELETE FROM FolderAcls WHERE Share=@share AND {InTree}", new { share, path });
     }
 
     // ---- Comptes qui peuvent se connecter à l'interface

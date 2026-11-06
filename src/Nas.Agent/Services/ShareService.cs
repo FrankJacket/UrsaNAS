@@ -16,10 +16,17 @@ public static class ShareConf
             sb.Append('\n').Append('[').Append(s.Name).Append("]\n");
             if (!string.IsNullOrWhiteSpace(s.Comment)) sb.Append("   comment = ").Append(s.Comment.Trim().Replace("%", "%%")).Append('\n');
             sb.Append("   path = ").Append(s.Dataset is not null && datasetPaths is not null && datasetPaths.TryGetValue(s.Dataset, out var p) ? p : PathFor(shareRoot, s.Name)).Append('\n');
-            sb.Append("   read only = ").Append(s.ReadOnly ? "yes" : "no").Append('\n');
+            sb.Append("   read only = ").Append(s.ReadOnly && !s.Acl ? "yes" : "no").Append('\n'); // en mode permissions, les règles décident
             sb.Append("   guest ok = no\n");
             sb.Append("   browseable = yes\n");
-            sb.Append("   valid users = ").Append(string.Join(' ', s.ValidUsers)).Append('\n');
+            if (s.Acl)
+            {
+                // Les permissions fines vivent dans les ACL NT : pas de liste d'utilisateurs, le noyau garde sa base 2770 root:nasusers.
+                sb.Append("   vfs objects = acl_xattr\n   acl_xattr:ignore system acls = yes\n   map acl inherit = yes\n");
+                sb.Append("   admin users = ").Append(AclService.ServiceUser).Append('\n');
+                sb.Append("   force group = ").Append(UserService.Group).Append("\n   force create mode = 0660\n   force directory mode = 2770\n");
+            }
+            else sb.Append("   valid users = ").Append(string.Join(' ', s.ValidUsers)).Append('\n');
             sb.Append("   create mask = 0660\n");
             sb.Append("   directory mask = 2770\n");
         }
@@ -57,7 +64,7 @@ public static class ShareConf
 /// <c>testparm</c> (retour arrière si Samba le refuse) puis recharge Samba. Les dossiers des partages supprimés
 /// ne sont jamais effacés : les données restent sur le disque.
 /// </summary>
-public sealed class ShareService(ICommandRunner run, UserService users, IConfiguration cfg)
+public sealed class ShareService(ICommandRunner run, UserService users, IConfiguration cfg, AclService? acl = null)
 {
     string ConfigDir => cfg["Samba:ConfigDir"] ?? "/etc/samba";
     string ShareRoot => cfg["Samba:ShareRoot"] ?? "/srv/nas";
@@ -72,6 +79,7 @@ public sealed class ShareService(ICommandRunner run, UserService users, IConfigu
         var datasetPaths = await ResolveDatasetsAsync(shares, ct); // avant toute écriture : un jeu absent ne laisse aucune trace
 
         await EnsureIncludeAsync(ct);
+        if (acl is not null && shares.Any(s => s.Acl)) await acl.EnsureServiceAccountAsync(ct); // le compte doit exister avant que Samba lise « admin users »
 
         // Le dossier racine doit être traversable par tous les utilisateurs : l'unité systemd de l'agent a un UMask 0007,
         // sans cette étape il serait en 0770 et personne d'autre que root ne pourrait atteindre un partage.

@@ -1,0 +1,115 @@
+@* Ajout ou modification d'une permission : même organisation que le dialogue « Ajouter une permission » d'un NAS du commerce. *@
+<MudDialog>
+    <DialogContent>
+        @if (error is not null)
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-3">@error</MudAlert>
+        }
+        <MudText Typo="Typo.subtitle2">@L["Object"]</MudText>
+        <MudStack Row="true" AlignItems="AlignItems.Center">
+            <MudRadioGroup T="AclSubjectKind" @bind-Value="kind">
+                <MudRadio T="AclSubjectKind" Value="AclSubjectKind.User">@L["User"]</MudRadio>
+                <MudRadio T="AclSubjectKind" Value="AclSubjectKind.Group">@L["Group"]</MudRadio>
+            </MudRadioGroup>
+            <MudSelect T="string" @bind-Value="name" Label="@(kind == AclSubjectKind.User ? L["User"] : L["Group"])" Dense="true" Style="min-width:200px">
+                @foreach (var n in kind == AclSubjectKind.User ? Users : Groups)
+                {
+                    <MudSelectItem T="string" Value="@n">@n</MudSelectItem>
+                }
+            </MudSelect>
+        </MudStack>
+
+        <MudText Typo="Typo.subtitle2" Class="mt-3">@L["Type"]</MudText>
+        <MudRadioGroup T="bool" @bind-Value="allow">
+            <MudRadio T="bool" Value="true" Color="Color.Success">@L["Allow"]</MudRadio>
+            <MudRadio T="bool" Value="false" Color="Color.Error">@L["Deny"]</MudRadio>
+        </MudRadioGroup>
+
+        <MudStack Row="true" Spacing="1" Class="mt-2">
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="() => rights = AclRights.Read">@L["Read"]</MudButton>
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="() => rights = AclRights.Read | AclRights.Write">@L["Modify"]</MudButton>
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="() => rights = AclRights.All">@L["Full control"]</MudButton>
+        </MudStack>
+
+        <div class="acl-grid mt-2">
+            <div>
+                <MudText Typo="Typo.subtitle2">@L["Read"]</MudText>
+                @Box(AclRights.Traverse, L["Traverse folder / execute file"])
+                @Box(AclRights.ListData, L["List folder / read data"])
+                @Box(AclRights.ReadAttr, L["Read attributes"])
+                @Box(AclRights.ReadExtAttr, L["Read extended attributes"])
+                @Box(AclRights.ReadPerm, L["Read permissions"])
+            </div>
+            <div>
+                <MudText Typo="Typo.subtitle2">@L["Write"]</MudText>
+                @Box(AclRights.CreateFiles, L["Create files / write data"])
+                @Box(AclRights.CreateFolders, L["Create folders / append data"])
+                @Box(AclRights.WriteAttr, L["Write attributes"])
+                @Box(AclRights.WriteExtAttr, L["Write extended attributes"])
+                @Box(AclRights.DeleteSelf, L["Delete"])
+                @Box(AclRights.DeleteChildren, L["Delete sub-folders and files"])
+            </div>
+            <div>
+                <MudText Typo="Typo.subtitle2">@L["Administration"]</MudText>
+                @Box(AclRights.Admin, L["Change permissions / take ownership"])
+            </div>
+        </div>
+
+        <MudText Typo="Typo.subtitle2" Class="mt-3">@L["Apply to"]</MudText>
+        <MudStack Row="true">
+            @ApplyBox(AclApply.ThisFolder, L["This folder"])
+            @ApplyBox(AclApply.SubFolders, L["Sub-folders"])
+            @ApplyBox(AclApply.Files, L["Files"])
+        </MudStack>
+        <MudRadioGroup T="bool" @bind-Value="firstLevel">
+            <MudRadio T="bool" Value="false" Disabled="@NoInheritance">@L["All sub-levels"]</MudRadio>
+            <MudRadio T="bool" Value="true" Disabled="@NoInheritance">@L["First level only"]</MudRadio>
+        </MudRadioGroup>
+        <MudText Typo="Typo.caption" Class="d-block">@L["To let someone write files inside sub-folders, tick both Sub-folders and Files."]</MudText>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => Dialog.Cancel()">@L["Cancel"]</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save">@L["OK"]</MudButton>
+    </DialogActions>
+</MudDialog>
+
+<style>
+    .acl-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+    .acl-grid .mud-input-control { margin: 0; }
+</style>
+
+@code {
+    [CascadingParameter] IMudDialogInstance Dialog { get; set; } = default!;
+    [Parameter] public AclRule? Existing { get; set; }
+    [Parameter, EditorRequired] public IReadOnlyList<string> Users { get; set; } = [];
+    [Parameter, EditorRequired] public IReadOnlyList<string> Groups { get; set; } = [];
+
+    AclSubjectKind kind = AclSubjectKind.User;
+    string? name;
+    bool allow = true, firstLevel;
+    AclRights rights = AclRights.Read;
+    AclApply apply = AclApply.Everything;
+    string? error;
+
+    bool NoInheritance => !apply.HasFlag(AclApply.SubFolders) && !apply.HasFlag(AclApply.Files);
+
+    protected override void OnInitialized()
+    {
+        if (Existing is null) return;
+        (kind, name, allow, rights, apply, firstLevel) = (Existing.Kind, Existing.Name, Existing.Allow, Existing.Rights, Existing.Apply, Existing.FirstLevelOnly);
+    }
+
+    RenderFragment Box(AclRights flag, string label) => @<MudCheckBox T="bool" Value="@rights.HasFlag(flag)" Dense="true" Label="@label"
+        ValueChanged="@((bool on) => rights = on ? rights | flag : rights & ~flag)" />;
+
+    RenderFragment ApplyBox(AclApply flag, string label) => @<MudCheckBox T="bool" Value="@apply.HasFlag(flag)" Dense="true" Label="@label"
+        ValueChanged="@((bool on) => apply = on ? apply | flag : apply & ~flag)" />;
+
+    void Save()
+    {
+        var rule = new AclRule(kind, name ?? "", allow, rights, apply, firstLevel && !NoInheritance);
+        if (string.IsNullOrEmpty(name)) { error = L["Choose a user or a group."]; return; }
+        if (AclRules.ValidateRule(rule) is { } e) { error = L.Translate(e); return; }
+        Dialog.Close(DialogResult.Ok(rule));
+    }
+}

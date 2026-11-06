@@ -34,7 +34,10 @@ public partial class Program
             builder.WebHost.ConfigureKestrel(k => k.ListenUnixSocket(socketPath));
         }
 
-        builder.Services.AddSingleton<ICommandRunner, ProcessCommandRunner>();
+        if (builder.Configuration["URSANAS_FAKE"] == "1")
+            builder.Services.AddSingleton<ICommandRunner, FakeCommandRunner>();
+        else
+            builder.Services.AddSingleton<ICommandRunner, ProcessCommandRunner>();
         if (builder.Configuration["URSANAS_FAKE"] == "1")
             builder.Services.AddSingleton<IDiskProvider, FakeDiskProvider>();
         else
@@ -47,6 +50,8 @@ public partial class Program
 
         builder.Services.AddSingleton<UserService>();
         builder.Services.AddSingleton<ShareService>();
+        builder.Services.AddSingleton<GroupService>();
+        builder.Services.AddSingleton<AclService>();
         builder.Services.AddSingleton<ZfsService>();
         builder.Services.AddSingleton<SmartService>();
 
@@ -66,6 +71,29 @@ public partial class Program
             Guard(async () => { await u.DeleteAsync(name, ct); return Results.NoContent(); }));
         app.MapPut("/shares", (ApplySharesRequest r, ShareService s, CancellationToken ct) =>
             Guard(async () => { await s.ApplyAsync(r.Shares, ct); return Results.NoContent(); }));
+
+        app.MapGet("/groups", (GroupService g, CancellationToken ct) => Read(async () => Results.Ok(await g.ListAsync(ct))));
+        app.MapPost("/groups", (CreateGroupRequest r, GroupService g, CancellationToken ct) =>
+            Guard(async () => { await g.CreateAsync(r, ct); return Results.NoContent(); }));
+        app.MapPut("/groups/{name}/members", (string name, SetGroupMembersRequest r, GroupService g, CancellationToken ct) =>
+            Guard(async () => { await g.SetMembersAsync(name, r.Members, ct); return Results.NoContent(); }));
+        app.MapDelete("/groups/{name}", (string name, GroupService g, CancellationToken ct) =>
+            Guard(async () => { await g.DeleteAsync(name, ct); return Results.NoContent(); }));
+
+        app.MapGet("/acl/folders", (string share, string? path, AclService a, CancellationToken ct) =>
+            Read(async () => Results.Ok(await a.ListFoldersAsync(share, path ?? "", ct))));
+        app.MapPut("/acl/folder", (SetFolderAclRequest r, AclService a, CancellationToken ct) =>
+            Guard(async () => { await a.SetFolderAsync(r, ct); return Results.NoContent(); }));
+        app.MapPost("/acl/folder", (CreateFolderRequest r, AclService a, CancellationToken ct) =>
+            Guard(async () => { await a.CreateFolderAsync(r, ct); return Results.NoContent(); }));
+        app.MapPost("/acl/folder/move", (MoveFolderRequest r, AclService a, CancellationToken ct) =>
+            Guard(async () => { await a.MoveFolderAsync(r, ct); return Results.NoContent(); }));
+        app.MapPost("/acl/folder/copy", (CopyFolderRequest r, AclService a, CancellationToken ct) =>
+            Guard(async () => { await a.CopyFolderAsync(r, ct); return Results.NoContent(); }));
+        app.MapDelete("/acl/folder", (string share, string path, AclService a, CancellationToken ct) =>
+            Guard(async () => { await a.DeleteFolderAsync(share, path, ct); return Results.NoContent(); }));
+        app.MapPost("/acl/reset", (ResetAclRequest r, AclService a, CancellationToken ct) =>
+            Guard(async () => { await a.ResetTreeAsync(r.Share, r.Path, ct); return Results.NoContent(); }));
 
         app.MapGet("/smart", (SmartService s, CancellationToken ct) => Read(async () => Results.Ok(await s.ListAsync(ct))));
 

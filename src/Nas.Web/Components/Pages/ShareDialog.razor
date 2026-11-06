@@ -24,6 +24,8 @@
                 <MudSelectItem T="string" Value="@u">@u</MudSelectItem>
             }
         </MudSelect>
+        <MudSwitch T="bool" @bind-Value="acl" Label="@L["Advanced permissions"]" Color="Color.Primary" Disabled="@(busy || Existing?.Acl == true)" />
+        <MudText Typo="Typo.caption" Class="d-block">@(acl ? L["Who can do what is set per folder in the Permissions page. The users above only get their current access to start with."] : L["Per-folder permissions, groups, deny rules. Can be turned on later."])</MudText>
         <MudSwitch T="bool" @bind-Value="readOnly" Label="@L["Read-only"]" Color="Color.Primary" Disabled="busy" />
     </DialogContent>
     <DialogActions>
@@ -42,7 +44,7 @@
 
     const string Plain = "__plain";
     string name = "", comment = "", storage = Plain;
-    bool readOnly;
+    bool readOnly, acl;
 
     string? StorageHelp => Existing is not null && (Existing.Dataset ?? Plain) != storage
         ? L["Existing files are not moved: copy them to the new location."]
@@ -57,6 +59,7 @@
         name = Existing.Name;
         comment = Existing.Comment;
         readOnly = Existing.ReadOnly;
+        acl = Existing.Acl;
         storage = Existing.Dataset ?? Plain;
         selected = Existing.ValidUsers.ToList();
     }
@@ -67,7 +70,7 @@
         busy = true;
         try
         {
-            await Ops.SaveShareAsync(new ShareDef(name.Trim(), comment.Trim(), readOnly, selected.OrderBy(u => u, StringComparer.Ordinal).ToList(), storage == Plain ? null : storage), isNew: Existing is null);
+            await Ops.SaveShareAsync(new ShareDef(name.Trim(), comment.Trim(), readOnly, selected.OrderBy(u => u, StringComparer.Ordinal).ToList(), storage == Plain ? null : storage, acl), isNew: Existing is null);
             Dialog.Close(DialogResult.Ok(true));
             return;
         }

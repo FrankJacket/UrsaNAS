@@ -13,7 +13,7 @@ public sealed record SetPasswordRequest(string Password);
 /// Un partage SMB. Le chemin n'est jamais fourni par l'appelant : sans <c>Dataset</c>, le dossier est
 /// <c>/srv/nas/&lt;Name&gt;</c> ; avec <c>Dataset</c> (ex. <c>tank/photos</c>), c'est le point de montage de ce jeu de données ZFS.
 /// </summary>
-public sealed record ShareDef(string Name, string Comment, bool ReadOnly, IReadOnlyList<string> ValidUsers, string? Dataset = null);
+public sealed record ShareDef(string Name, string Comment, bool ReadOnly, IReadOnlyList<string> ValidUsers, string? Dataset = null, bool Acl = false);
 
 /// <summary>L'ensemble complet des partages à appliquer (remplace l'existant).</summary>
 public sealed record ApplySharesRequest(IReadOnlyList<ShareDef> Shares);
@@ -85,6 +85,7 @@ public static partial class Rules
                 if (ValidateDatasetName(s.Dataset) is { } e3) return e3;
                 if (!datasets.Add(s.Dataset)) return Msg.F("The dataset “{0}” is already used by another share.", s.Dataset);
             }
+            if (s.Acl) continue; // en mode permissions, ce sont les règles du dossier qui décident, pas la liste d'utilisateurs
             if (s.ValidUsers is null || s.ValidUsers.Count == 0) return Msg.F("Share “{0}” must have at least one user.", s.Name);
             foreach (var u in s.ValidUsers)
                 if (!knownUsers.Contains(u)) return Msg.F("Share “{0}” references the unknown user “{1}”.", s.Name, u);

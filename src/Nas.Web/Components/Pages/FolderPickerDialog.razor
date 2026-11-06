@@ -1,0 +1,107 @@
+@inject AgentClient Agent
+
+@* Choix d'un dossier de destination dans un partage (arborescence ouverte au fur et à mesure) ; se ferme avec le chemin choisi. *@
+<MudDialog>
+    <DialogContent>
+        @if (error is not null)
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-3">@error</MudAlert>
+        }
+        <MudText Typo="Typo.body2" Class="mb-2">@Message</MudText>
+        <MudPaper Elevation="0" Class="pick">
+            @if (root is not null)
+            {
+                @foreach (var n in Visible())
+                {
+                    var node = n;
+                    var blocked = IsBlocked(node);
+                    <div class="pick-row @(node == selected ? "sel" : "") @(blocked ? "off" : "")" style="padding-left:@(node.Depth * 22 + 6)px"
+                         @onclick="() => { if (!blocked) selected = node; }" @ondblclick="() => Toggle(node)">
+                        <span class="ex-chev" @onclick="() => Toggle(node)" @onclick:stopPropagation="true">
+                            <MudIcon Icon="@(node.Expanded ? Icons.Material.Filled.ExpandMore : Icons.Material.Filled.ChevronRight)" Size="Size.Small" />
+                        </span>
+                        <MudIcon Icon="@(node.Path.Length == 0 ? Icons.Material.Filled.FolderShared : Icons.Material.Filled.Folder)" Color="Color.Info" Class="mr-2" />
+                        <span>@node.Name</span>
+                        @if (node.Loading) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="ml-2" /> }
+                    </div>
+                }
+            }
+        </MudPaper>
+        <MudText Typo="Typo.caption" Class="mt-2">@L["Destination"] : <code>/@Share@(selected is { Path.Length: > 0 } ? "/" + selected.Path : "")</code></MudText>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => Dialog.Cancel()">@L["Cancel"]</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="() => Dialog.Close(DialogResult.Ok(selected!.Path))" Disabled="@(selected is null)">@L[ButtonText]</MudButton>
+    </DialogActions>
+</MudDialog>
+
+<style>
+    .pick { border: 1px solid var(--mud-palette-lines-default); border-radius: 8px; max-height: 340px; overflow: auto; }
+    .pick-row { display: flex; align-items: center; padding: 4px 6px; cursor: default; user-select: none; }
+    .pick-row:hover { background: var(--mud-palette-action-default-hover); }
+    .pick-row.sel { background: var(--mud-palette-primary-hover); }
+    .pick-row.off { opacity: .45; }
+    .ex-chev { display: inline-flex; width: 24px; cursor: pointer; }
+</style>
+
+@code {
+    [CascadingParameter] IMudDialogInstance Dialog { get; set; } = default!;
+    [Parameter, EditorRequired] public string Share { get; set; } = "";
+    [Parameter] public string Message { get; set; } = "";
+    [Parameter] public string ButtonText { get; set; } = "Move";
+    /// <summary>Dossier déplacé ou copié : ni lui ni ce qu'il contient ne peuvent servir de destination.</summary>
+    [Parameter] public string Exclude { get; set; } = "";
+
+    sealed class Node
+    {
+        public string Path = "", Name = "";
+        public int Depth;
+        public bool Expanded, Loaded, Loading;
+        public List<Node> Children = new();
+    }
+
+    Node? root, selected;
+    string? error;
+
+    bool IsBlocked(Node n) => Exclude.Length > 0 && (n.Path == Exclude || n.Path.StartsWith(Exclude + "/", StringComparison.Ordinal));
+
+    protected override async Task OnInitializedAsync()
+    {
+        root = new Node { Name = Share, Path = "" };
+        selected = root;
+        await Load(root);
+        root.Expanded = true;
+    }
+
+    IEnumerable<Node> Visible()
+    {
+        var stack = new Stack<Node>();
+        stack.Push(root!);
+        while (stack.Count > 0)
+        {
+            var n = stack.Pop();
+            yield return n;
+            if (n.Expanded) foreach (var c in Enumerable.Reverse(n.Children)) stack.Push(c);
+        }
+    }
+
+    async Task Load(Node n)
+    {
+        n.Loading = true;
+        try
+        {
+            var listing = await Agent.GetFoldersAsync(Share, n.Path);
+            n.Children = listing.Folders.Select(f => new Node { Name = f.Name, Path = n.Path.Length == 0 ? f.Name : n.Path + "/" + f.Name, Depth = n.Depth + 1 }).ToList();
+            n.Loaded = true;
+        }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable."]; }
+        n.Loading = false;
+    }
+
+    async Task Toggle(Node n)
+    {
+        if (!n.Loaded) await Load(n);
+        n.Expanded = !n.Expanded;
+    }
+}

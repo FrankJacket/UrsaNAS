@@ -70,9 +70,12 @@ public class NasOperations(AgentClient agent, Repo repo, IMailSender mail, Admin
         await _gate.WaitAsync();
         try
         {
-            var using_ = (await repo.GetSharesAsync()).Where(s => s.ValidUsers.Contains(name)).Select(s => s.Name).ToList();
+            var using_ = (await repo.GetSharesAsync()).Where(s => !s.Acl && s.ValidUsers.Contains(name)).Select(s => s.Name).ToList();
             if (using_.Count > 0)
                 throw new AgentException(Msg.F("“{0}” is used by share {1}: remove it from that share first.", name, string.Join(", ", using_)));
+            var ruled = await ShareFoldersUsingAsync(AclSubjectKind.User, name);
+            if (ruled.Count > 0)
+                throw new AgentException(Msg.F("“{0}” is used by permissions on {1}: remove those permissions first.", name, string.Join(", ", ruled)));
             await agent.DeleteUserAsync(name);
             await repo.AuditAsync(await ActorAsync(), "User deleted", name);
         }
@@ -93,11 +96,29 @@ public class NasOperations(AgentClient agent, Repo repo, IMailSender mail, Admin
             var next = all.Where(s => !s.Name.Equals(share.Name, StringComparison.OrdinalIgnoreCase)).Append(share)
                 .OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase).ToList();
 
+            var before = all.FirstOrDefault(s => s.Name.Equals(share.Name, StringComparison.OrdinalIgnoreCase));
             await agent.ApplySharesAsync(next);
             await repo.UpsertShareAsync(share);
             await repo.AuditAsync(await ActorAsync(), isNew ? "Share created" : "Share modified", share.Name);
+
+            if (share.Acl && before?.Acl != true) await EnableAclAsync(share, existingData: before is not null);
         }
         finally { _gate.Release(); }
+    }
+
+    /// <summary>
+    /// Passage au mode permissions : ce qui existe déjà reçoit une ACL neutre, puis les utilisateurs autorisés jusque-là
+    /// reçoivent les droits qu'ils avaient (modification, ou lecture seule) sur tout le partage, pour ne rien casser.
+    /// </summary>
+    async Task EnableAclAsync(ShareDef share, bool existingData)
+    {
+        if (existingData) await agent.ResetAclAsync(share.Name);
+        if ((await repo.GetFolderAclsAsync(share.Name)).ContainsKey("")) return;
+        var rights = share.ReadOnly ? AclRights.Read : AclRights.Read | AclRights.Write;
+        var seed = share.ValidUsers.Select(u => new AclRule(AclSubjectKind.User, u, true, rights, AclApply.Everything)).ToList();
+        await agent.SetFolderAclAsync(new SetFolderAclRequest(share.Name, "", seed, []));
+        await repo.SetFolderAclAsync(share.Name, "", seed);
+        await repo.AuditAsync(await ActorAsync(), "Advanced permissions enabled", share.Name);
     }
 
     public async Task DeleteShareAsync(string name)
@@ -115,6 +136,177 @@ public class NasOperations(AgentClient agent, Repo repo, IMailSender mail, Admin
             await repo.AuditAsync(await ActorAsync(), "Share deleted", detail);
         }
         finally { _gate.Release(); }
+    }
+
+    // ---- Groupes (groupes Linux préfixés nasg-) et permissions avancées
+    public async Task CreateGroupAsync(string name, IReadOnlyList<string> members)
+    {
+        if (AclRules.ValidateGroupName(name) is { } e) throw new AgentException(e);
+        await Audited(() => agent.CreateGroupAsync(new CreateGroupRequest(name, members)), "Group created", name);
+    }
+
+    public Task SetGroupMembersAsync(string name, IReadOnlyList<string> members) =>
+        Audited(() => agent.SetGroupMembersAsync(name, members), "Group members changed", $"{name}: {string.Join(", ", members)}");
+
+    public async Task DeleteGroupAsync(string name)
+    {
+        await _gate.WaitAsync();
+        try
+        {
+            var where = await ShareFoldersUsingAsync(AclSubjectKind.Group, name);
+            if (where.Count > 0)
+                throw new AgentException(Msg.F("“{0}” is used by permissions on {1}: remove those permissions first.", name, string.Join(", ", where)));
+            await agent.DeleteGroupAsync(name);
+            await repo.AuditAsync(await ActorAsync(), "Group deleted", name);
+        }
+        finally { _gate.Release(); }
+    }
+
+    /// <summary>Dossiers (« partage/chemin ») dont les règles nomment cet utilisateur ou ce groupe.</summary>
+    async Task<List<string>> ShareFoldersUsingAsync(AclSubjectKind kind, string name)
+    {
+        var found = new List<string>();
+        foreach (var s in (await repo.GetSharesAsync()).Where(s => s.Acl))
+            foreach (var (path, rules) in await repo.GetFolderAclsAsync(s.Name))
+                if (rules.Any(r => r.Kind == kind && r.Name == name)) found.Add(path.Length == 0 ? s.Name : $"{s.Name}/{path}");
+        return found;
+    }
+
+    /// <summary>
+    /// Remplace les règles d'un dossier : l'agent écrit l'ACL (héritage compris, sauf rupture) et la propage à ce qui existe déjà.
+    /// <paramref name="inherit"/> faux = ce dossier ne reçoit plus les permissions de son parent.
+    /// </summary>
+    public async Task SaveFolderAclAsync(string share, string path, IReadOnlyList<AclRule> rules, bool? inherit = null)
+    {
+        if (Rules.ValidateShareName(share) is { } e1) throw new AgentException(e1);
+        if (AclRules.ValidateFolderPath(path) is { } e2) throw new AgentException(e2);
+        if (AclRules.ValidateRules(rules) is { } e3) throw new AgentException(e3);
+        await _gate.WaitAsync();
+        try
+        {
+            await RequireAclShareAsync(share);
+            var states = await repo.GetFolderStatesAsync(share);
+            var keep = inherit ?? states.GetValueOrDefault(path)?.Inherit ?? true;
+            states[path] = new FolderState(rules, keep);
+            await agent.SetFolderAclAsync(new SetFolderAclRequest(share, path, rules, AclInheritance.Ancestors(path, states), keep));
+            await repo.SetFolderStateAsync(share, path, new FolderState(rules, keep));
+            await repo.AuditAsync(await ActorAsync(), inherit switch { false => "Permission inheritance broken", true => "Permission inheritance restored", _ => "Permissions changed" },
+                path.Length == 0 ? share : $"{share}/{path}");
+        }
+        finally { _gate.Release(); }
+    }
+
+    /// <summary>Rompt l'héritage d'un dossier ; <paramref name="copy"/> garde les droits actuels en les recopiant comme règles propres.</summary>
+    public async Task BreakInheritanceAsync(string share, string path, bool copy)
+    {
+        if (path.Length == 0) throw new AgentException(Msg.F("The share root has no parent folder."));
+        var states = await repo.GetFolderStatesAsync(share);
+        var own = states.GetValueOrDefault(path)?.Rules ?? [];
+        var rules = copy ? own.Concat(AclInheritance.CopyInherited(path, states)).ToList() : own.ToList();
+        await SaveFolderAclAsync(share, path, rules, inherit: false);
+    }
+
+    public async Task RestoreInheritanceAsync(string share, string path)
+    {
+        var states = await repo.GetFolderStatesAsync(share);
+        await SaveFolderAclAsync(share, path, states.GetValueOrDefault(path)?.Rules ?? [], inherit: true);
+    }
+
+    /// <summary>Crée un sous-dossier par Samba : il reçoit tout seul les permissions héritées de son parent.</summary>
+    public async Task CreateFolderAsync(string share, string path, string name)
+    {
+        if (Rules.ValidateShareName(share) is { } e1) throw new AgentException(e1);
+        if (AclRules.ValidateFolderPath(path) is { } e2) throw new AgentException(e2);
+        if (AclRules.ValidateNewFolderName(name) is { } e3) throw new AgentException(e3);
+        await _gate.WaitAsync();
+        try
+        {
+            await RequireAclShareAsync(share);
+            await agent.CreateFolderAsync(new CreateFolderRequest(share, path, name));
+            await repo.AuditAsync(await ActorAsync(), "Folder created", path.Length == 0 ? $"{share}/{name}" : $"{share}/{path}/{name}");
+        }
+        finally { _gate.Release(); }
+    }
+
+    static string JoinPath(string parent, string name) => parent.Length == 0 ? name : parent + "/" + name;
+    public static string ParentOf(string path) => path.LastIndexOf('/') is var i and >= 0 ? path[..i] : "";
+
+    static void CheckFolderArgs(string share, string path, string destParent, string newName)
+    {
+        if (Rules.ValidateShareName(share) is { } e1) throw new AgentException(e1);
+        if (path.Length == 0) throw new AgentException(Msg.F("The share root has no parent folder."));
+        if (AclRules.ValidateFolderPath(path) is { } e2) throw new AgentException(e2);
+        if (AclRules.ValidateFolderPath(destParent) is { } e3) throw new AgentException(e3);
+        if (AclRules.ValidateNewFolderName(newName) is { } e4) throw new AgentException(e4);
+    }
+
+    /// <summary>Réécrit l'ACL d'un dossier avec ce que la base sait de lui et de ses parents (propagée à ce qu'il contient).</summary>
+    async Task ReapplyFolderAsync(string share, string path, Dictionary<string, FolderState> states)
+    {
+        var st = states.GetValueOrDefault(path) ?? new FolderState([]);
+        await agent.SetFolderAclAsync(new SetFolderAclRequest(share, path, st.Rules, AclInheritance.Ancestors(path, states), st.Inherit));
+    }
+
+    /// <summary>
+    /// Déplace ou renomme (même parent, autre nom). Les droits propres suivent le dossier ; ceux qu'il héritait
+    /// de l'ancien parent laissent la place à ceux du nouveau.
+    /// </summary>
+    public async Task MoveFolderAsync(string share, string path, string destParent, string newName)
+    {
+        CheckFolderArgs(share, path, destParent, newName);
+        await _gate.WaitAsync();
+        try
+        {
+            await RequireAclShareAsync(share);
+            var newPath = JoinPath(destParent, newName);
+            await agent.MoveFolderAsync(new MoveFolderRequest(share, path, destParent, newName));
+            await repo.RenameFolderStatesAsync(share, path, newPath);
+            if (destParent != ParentOf(path)) await ReapplyFolderAsync(share, newPath, await repo.GetFolderStatesAsync(share));
+            await repo.AuditAsync(await ActorAsync(), destParent == ParentOf(path) ? "Folder renamed" : "Folder moved", $"{share}/{path} → {share}/{newPath}");
+        }
+        finally { _gate.Release(); }
+    }
+
+    /// <summary>Copie un dossier : la copie garde les règles propres de l'original et reçoit l'héritage de sa destination.</summary>
+    public async Task CopyFolderAsync(string share, string path, string destParent, string newName)
+    {
+        CheckFolderArgs(share, path, destParent, newName);
+        await _gate.WaitAsync();
+        try
+        {
+            await RequireAclShareAsync(share);
+            var newPath = JoinPath(destParent, newName);
+            await agent.CopyFolderAsync(new CopyFolderRequest(share, path, destParent, newName));
+            await repo.CopyFolderStatesAsync(share, path, newPath);
+            var states = await repo.GetFolderStatesAsync(share);
+            // De haut en bas : chaque dossier à règles propres est réécrit après son parent.
+            foreach (var p in new[] { newPath }.Concat(states.Keys.Where(k => k.StartsWith(newPath + "/", StringComparison.Ordinal)).OrderBy(k => k.Count(c => c == '/'))))
+                await ReapplyFolderAsync(share, p, states);
+            await repo.AuditAsync(await ActorAsync(), "Folder copied", $"{share}/{path} → {share}/{newPath}");
+        }
+        finally { _gate.Release(); }
+    }
+
+    public async Task DeleteFolderAsync(string share, string path)
+    {
+        if (Rules.ValidateShareName(share) is { } e1) throw new AgentException(e1);
+        if (path.Length == 0) throw new AgentException(Msg.F("The share root cannot be deleted."));
+        if (AclRules.ValidateFolderPath(path) is { } e2) throw new AgentException(e2);
+        await _gate.WaitAsync();
+        try
+        {
+            await RequireAclShareAsync(share);
+            await agent.DeleteFolderAsync(share, path);
+            await repo.DeleteFolderStatesAsync(share, path);
+            await repo.AuditAsync(await ActorAsync(), "Folder deleted", $"{share}/{path}");
+        }
+        finally { _gate.Release(); }
+    }
+
+    async Task RequireAclShareAsync(string share)
+    {
+        if (!(await repo.GetSharesAsync()).Any(s => s.Acl && s.Name.Equals(share, StringComparison.OrdinalIgnoreCase)))
+            throw new AgentException(Msg.F("Share “{0}” does not use advanced permissions.", share));
     }
 
     // ---- ZFS : l'état vit dans ZFS lui-même, la base ne garde que le journal.

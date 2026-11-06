@@ -1,0 +1,37 @@
+@* Nom d'un dossier (création, renommage ou nom d'une copie) ; se ferme avec le nom saisi. *@
+<MudDialog>
+    <DialogContent>
+        @if (error is not null)
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-3">@error</MudAlert>
+        }
+        <MudText Typo="Typo.body2" Class="mb-2">@(Message ?? L["Create in {0}", Location])</MudText>
+        <MudTextField @bind-Value="name" Label="@L["Folder name"]" Immediate="true" AutoFocus="true" OnKeyDown="OnKey" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => Dialog.Cancel()">@L["Cancel"]</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save">@L[ButtonText]</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance Dialog { get; set; } = default!;
+    [Parameter] public string Location { get; set; } = "";
+    [Parameter] public string? Message { get; set; }
+    [Parameter] public string Initial { get; set; } = "";
+    [Parameter] public string ButtonText { get; set; } = "Create";
+
+    string name = "";
+    string? error;
+
+    protected override void OnInitialized() => name = Initial;
+
+    void OnKey(KeyboardEventArgs e) { if (e.Key == "Enter") Save(); }
+
+    void Save()
+    {
+        var trimmed = name.Trim();
+        if (AclRules.ValidateNewFolderName(trimmed) is { } e) { error = L.Translate(e); return; }
+        Dialog.Close(DialogResult.Ok(trimmed));
+    }
+}

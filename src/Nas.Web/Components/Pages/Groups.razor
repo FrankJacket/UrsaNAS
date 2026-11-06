@@ -1,0 +1,73 @@
+@page "/groups"
+@inherits AutoRefreshBase
+@inject AgentClient Agent
+@inject NasOperations Ops
+@inject IDialogService Dialogs
+@inject ISnackbar Snack
+
+<MudText Typo="Typo.h4" Class="mb-4">@L["Groups"]</MudText>
+@if (error is not null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">@error</MudAlert>
+}
+<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.GroupAdd" OnClick="Add" Class="mb-4">@L["Add a group"]</MudButton>
+<MudTable Items="groups" Hover="true" Dense="true" Loading="@(!loaded)">
+    <HeaderContent><MudTh>@L["Name"]</MudTh><MudTh>@L["Members"]</MudTh><MudTh></MudTh></HeaderContent>
+    <RowTemplate>
+        <MudTd>@context.Name</MudTd>
+        <MudTd>@(context.Members.Count == 0 ? "—" : string.Join(", ", context.Members))</MudTd>
+        <MudTd Style="text-align:right">
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Edit" OnClick="() => Edit(context)">@L["Edit"]</MudButton>
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="() => Delete(context)">@L["Delete"]</MudButton>
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent><MudText Class="pa-4">@L["No groups."]</MudText></NoRecordsContent>
+</MudTable>
+
+@code {
+    IReadOnlyList<NasGroup> groups = [];
+    string? error;
+    bool loaded;
+
+    protected override async Task LoadAsync()
+    {
+        try { groups = await Agent.GetGroupsAsync(); error = null; }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable: is the ursanas-agent service running?"]; }
+        loaded = true;
+    }
+
+    static readonly DialogOptions Options = new() { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true, BackdropClick = false };
+
+    async Task Add() => await ShowDialog(null, L["New group"]);
+    async Task Edit(NasGroup g) => await ShowDialog(g, L["Edit {0}", g.Name]);
+
+    async Task ShowDialog(NasGroup? existing, string title)
+    {
+        IReadOnlyList<string> users;
+        try { users = (await Agent.GetUsersAsync()).Select(u => u.Name).ToList(); }
+        catch (HttpRequestException) { Snack.Add(L["Agent unreachable."], Severity.Error); return; }
+        var parameters = new DialogParameters<GroupDialog> { { x => x.Existing, existing }, { x => x.Users, users } };
+        var dialog = await Dialogs.ShowAsync<GroupDialog>(title, parameters, Options);
+        if (await dialog.Result is { Canceled: false })
+        {
+            Snack.Add(L["Group saved."], Severity.Success);
+            await LoadAsync();
+        }
+    }
+
+    async Task Delete(NasGroup g)
+    {
+        var ok = await Dialogs.ShowMessageBoxAsync(L["Delete group {0}?", g.Name],
+            L["Its members stay, but lose the access this group gave them."], yesText: L["Delete"], cancelText: L["Cancel"]);
+        if (ok != true) return;
+        try
+        {
+            await Ops.DeleteGroupAsync(g.Name);
+            Snack.Add(L["{0} deleted.", g.Name], Severity.Success);
+            await LoadAsync();
+        }
+        catch (AgentException e) { Snack.Add(L.Translate(e.Message), Severity.Error); }
+        catch (HttpRequestException) { Snack.Add(L["Agent unreachable."], Severity.Error); }
+    }
+}

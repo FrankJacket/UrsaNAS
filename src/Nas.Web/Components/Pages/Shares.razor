@@ -22,8 +22,11 @@
                 <MudChip T="string" Size="Size.Small" Color="Color.Info" Class="ml-2">ZFS</MudChip>
             }
         </MudTd>
-        <MudTd><MudChip T="string" Size="Size.Small" Color="@(context.ReadOnly ? Color.Default : Color.Success)">@(context.ReadOnly ? L["Read-only"] : L["Read/write"])</MudChip></MudTd>
-        <MudTd>@string.Join(", ", context.ValidUsers)</MudTd>
+        <MudTd>
+            @if (context.Acl) { <MudChip T="string" Size="Size.Small" Color="Color.Primary" Href="@($"/permissions?share={context.Name}")">@L["Advanced permissions"]</MudChip> }
+            else { <MudChip T="string" Size="Size.Small" Color="@(context.ReadOnly ? Color.Default : Color.Success)">@(context.ReadOnly ? L["Read-only"] : L["Read/write"])</MudChip> }
+        </MudTd>
+        <MudTd>@(context.Acl ? "—" : string.Join(", ", context.ValidUsers))</MudTd>
         <MudTd>@context.Comment</MudTd>
         <MudTd Style="text-align:right">
             <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Edit" OnClick="() => Edit(context)">@L["Edit"]</MudButton>

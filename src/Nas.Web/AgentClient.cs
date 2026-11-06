@@ -27,6 +27,43 @@ public class AgentClient(HttpClient http)
     public async Task ApplySharesAsync(IReadOnlyList<ShareDef> shares, CancellationToken ct = default) =>
         await EnsureOkAsync(await http.PutAsJsonAsync("shares", new ApplySharesRequest(shares), ct), ct);
 
+    // ---- Groupes et permissions avancées
+    public Task<IReadOnlyList<NasGroup>> GetGroupsAsync(CancellationToken ct = default) => GetListAsync<NasGroup>("groups", ct);
+
+    public async Task CreateGroupAsync(CreateGroupRequest req, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PostAsJsonAsync("groups", req, ct), ct);
+
+    public async Task SetGroupMembersAsync(string name, IReadOnlyList<string> members, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PutAsJsonAsync($"groups/{Uri.EscapeDataString(name)}/members", new SetGroupMembersRequest(members), ct), ct);
+
+    public async Task DeleteGroupAsync(string name, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.DeleteAsync($"groups/{Uri.EscapeDataString(name)}", ct), ct);
+
+    public async Task<FolderListing> GetFoldersAsync(string share, string path, CancellationToken ct = default)
+    {
+        using var r = await http.GetAsync($"acl/folders?share={Uri.EscapeDataString(share)}&path={Uri.EscapeDataString(path)}", ct);
+        await EnsureOkAsync(r, ct);
+        return await r.Content.ReadFromJsonAsync<FolderListing>(ct) ?? new FolderListing(path, []);
+    }
+
+    public async Task SetFolderAclAsync(SetFolderAclRequest req, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PutAsJsonAsync("acl/folder", req, ct), ct);
+
+    public async Task CreateFolderAsync(CreateFolderRequest req, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PostAsJsonAsync("acl/folder", req, ct), ct);
+
+    public async Task ResetAclAsync(string share, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PostAsJsonAsync("acl/reset", new ResetAclRequest(share), ct), ct);
+
+    public async Task MoveFolderAsync(MoveFolderRequest req, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PostAsJsonAsync("acl/folder/move", req, ct), ct);
+
+    public async Task CopyFolderAsync(CopyFolderRequest req, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PostAsJsonAsync("acl/folder/copy", req, ct), ct);
+
+    public async Task DeleteFolderAsync(string share, string path, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.DeleteAsync($"acl/folder?share={Uri.EscapeDataString(share)}&path={Uri.EscapeDataString(path)}", ct), ct);
+
     public async Task<SystemStats> GetStatsAsync(CancellationToken ct = default)
     {
         using var r = await http.GetAsync("stats", ct);
