@@ -1,0 +1,64 @@
+@page "/docker"
+@inherits AutoRefreshBase
+@inject AgentClient Agent
+
+<MudText Typo="Typo.h4" Class="mb-4">Docker</MudText>
+
+@if (!loaded)
+{
+    <MudProgressCircular Indeterminate="true" />
+}
+else if (error is not null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">@error</MudAlert>
+}
+else if (status is { State: DockerState.Ready })
+{
+    <MudAlert Severity="Severity.Success" Class="mb-4">
+        @L["Docker is running."] @L["Engine {0}", status.Version ?? "?"]@(status.ComposeVersion is null ? "" : " · Compose " + status.ComposeVersion)
+    </MudAlert>
+    @if (status.ComposeVersion is null)
+    {
+        <MudAlert Severity="Severity.Warning" Class="mb-4">
+            @L["Docker Compose is not installed, so stacks are unavailable. Install it with:"] <code>sudo apt install docker-compose</code>
+        </MudAlert>
+    }
+    <MudStack Row="true" Wrap="Wrap.Wrap" Class="mb-6">
+        <MudButton Href="/docker/containers" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Inventory2">@L["Containers"]</MudButton>
+        <MudButton Href="/docker/images" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Album">@L["Images"]</MudButton>
+        <MudButton Href="/docker/stacks" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Layers">@L["Stacks"]</MudButton>
+        <MudButton Href="/docker/volumes" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Lan">@L["Volumes and networks"]</MudButton>
+    </MudStack>
+    <MudAlert Severity="Severity.Info">
+        @L["A container that mounts a folder of the NAS reads and writes it with full rights: the permissions (ACLs) of the shares do not apply to Docker."]
+    </MudAlert>
+}
+else if (status is { State: DockerState.Stopped })
+{
+    <MudAlert Severity="Severity.Warning" Class="mb-4">@L["Docker is installed but its service is not running. Start it on the NAS with:"]</MudAlert>
+    <MudPaper Class="pa-4 mb-4"><code>sudo systemctl enable --now docker</code></MudPaper>
+    <MudText>@L["This page checks again every few seconds: the Docker menu appears as soon as the service answers."]</MudText>
+}
+else
+{
+    <MudAlert Severity="Severity.Info" Class="mb-4">@L["Docker is not installed on this NAS, so the Docker menu is hidden."]</MudAlert>
+    <MudText Class="mb-2">@L["To install it, run on the NAS:"]</MudText>
+    <MudPaper Class="pa-4 mb-4"><code>sudo apt install docker.io docker-compose</code></MudPaper>
+    <MudText>@L["This page checks again every few seconds: the Docker menu appears as soon as Docker is ready."]</MudText>
+}
+
+@code {
+    DockerStatus? status;
+    string? error;
+    bool loaded;
+
+    protected override TimeSpan Interval => TimeSpan.FromSeconds(5);
+
+    protected override async Task LoadAsync()
+    {
+        try { status = await Agent.GetDockerStatusAsync(); error = null; }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable: is the ursanas-agent service running?"]; }
+        loaded = true;
+    }
+}

@@ -2,6 +2,7 @@
 @implements IDisposable
 @inject ThemeState Theme
 @inject Nas.Web.Alerting.AlertState Alerts
+@inject DockerAvailability Docker
 @inject IJSRuntime JS
 @inject NavigationManager Nav
 
@@ -45,6 +46,16 @@
                 <MudNavLink Href="/folders" Icon="@Icons.Material.Filled.Folder">@L["File Manager"]</MudNavLink>
                 <MudNavLink Href="/services" Icon="@Icons.Material.Filled.SettingsEthernet">@L["Services"]</MudNavLink>
             </MudNavGroup>
+            @if (Docker.Ready)
+            {
+                @* Le groupe n'existe que si Docker est installé et que son service répond ; sinon la page /docker explique quoi faire. *@
+                <MudNavGroup Title="Docker" Icon="@Icons.Material.Filled.ViewInAr" Expanded="false">
+                    <MudNavLink Href="/docker/containers" Icon="@Icons.Material.Filled.Inventory2">@L["Containers"]</MudNavLink>
+                    <MudNavLink Href="/docker/images" Icon="@Icons.Material.Filled.Album">@L["Images"]</MudNavLink>
+                    <MudNavLink Href="/docker/stacks" Icon="@Icons.Material.Filled.Layers">@L["Stacks"]</MudNavLink>
+                    <MudNavLink Href="/docker/volumes" Icon="@Icons.Material.Filled.Lan">@L["Volumes and networks"]</MudNavLink>
+                </MudNavGroup>
+            }
             <MudNavGroup Title="@L["Accounts"]" Icon="@Icons.Material.Filled.ManageAccounts" Expanded="false">
                 <MudNavLink Href="/users" Icon="@Icons.Material.Filled.People">@L["Users"]</MudNavLink>
                 <MudNavLink Href="/groups" Icon="@Icons.Material.Filled.Groups">@L["Groups"]</MudNavLink>
@@ -70,6 +81,7 @@
     {
         Theme.Changed += OnThemeChanged;
         Alerts.Changed += OnThemeChanged; // même rafraîchissement : la pastille d'alertes suit le contrôle périodique
+        Docker.Changed += OnThemeChanged; // le groupe Docker apparaît ou disparaît avec l'état du service
     }
     void OnThemeChanged() => InvokeAsync(StateHasChanged);
 
@@ -90,5 +102,6 @@
     {
         Theme.Changed -= OnThemeChanged;
         Alerts.Changed -= OnThemeChanged;
+        Docker.Changed -= OnThemeChanged;
     }
 }

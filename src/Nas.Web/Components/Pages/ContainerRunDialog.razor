@@ -1,0 +1,236 @@
+@inject DockerOperations Ops
+@inject NasFolderPicker Picker
+@inject AgentClient Agent
+
+@* Lance un conteneur simple (« docker run -d »). Pour plusieurs conteneurs liés, une stack Compose est plus adaptée. *@
+<MudDialog>
+    <DialogContent>
+        @if (error is not null)
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-3">@error</MudAlert>
+        }
+        @if (Editing)
+        {
+            @if (stack is not null)
+            {
+                <MudAlert Severity="Severity.Warning" Class="mb-3">@L["This container belongs to the stack “{0}”: edit the stack instead.", stack]</MudAlert>
+            }
+            else if (unsupported.Count > 0)
+            {
+                <MudAlert Severity="Severity.Warning" Class="mb-3">
+                    @L["This container uses settings that cannot be kept when it is recreated: only its restart policy can be changed here."]
+                    (@string.Join(", ", unsupported.Select(u => L.Translate(u))))
+                </MudAlert>
+            }
+            else
+            {
+                <MudAlert Severity="Severity.Info" Class="mb-3">
+                    @L["Changing the image, ports, folders, variables or network recreates the container: it is stopped and replaced. Data in volumes and NAS folders is kept; files written inside the container itself are lost. If the new container cannot start, the previous one is restored."]
+                </MudAlert>
+            }
+        }
+        <MudAutocomplete T="string" @bind-Value="image" SearchFunc="SearchImages" Label="@L["Image"]" Placeholder="nginx:latest"
+                         MinCharacters="0" MaxItems="50" CoerceText="false" CoerceValue="true" Disabled="busy" AutoFocus="true"
+                         HelperText="@L["Pick an image already on the NAS, or type a name to download (the first start can take a while)."]" />
+        <MudTextField @bind-Value="name" Label="@L["Name (optional)"]" Immediate="true" Disabled="busy" Class="mt-2" />
+        <MudAutocomplete T="string" @bind-Value="network" SearchFunc="SearchNetworks" Label="@L["Network"]" Placeholder="@L["Default network (bridge)"]"
+                         MinCharacters="0" MaxItems="50" CoerceText="false" CoerceValue="true" Disabled="busy" Class="mt-2"
+                         HelperText="@(NewNetwork ? L["This network does not exist yet: it will be created."] : L["Pick an existing network, or type a new name to create one. Empty: default network."])" />
+        <MudSelect T="string" @bind-Value="restart" Label="@L["Restart policy"]" Disabled="busy" Class="mt-2">
+            <MudSelectItem T="string" Value='"no"'>@L["Never"]</MudSelectItem>
+            <MudSelectItem T="string" Value='"unless-stopped"'>@L["Unless stopped by hand"]</MudSelectItem>
+            <MudSelectItem T="string" Value='"always"'>@L["Always"]</MudSelectItem>
+            <MudSelectItem T="string" Value='"on-failure"'>@L["On failure"]</MudSelectItem>
+        </MudSelect>
+
+        <MudText Typo="Typo.subtitle2" Class="mt-5">@L["Port settings"]</MudText>
+        <MudText Typo="Typo.caption" Class="d-block mb-2">@L["Map a port of the NAS (host port) to a port of the container."]</MudText>
+        @foreach (var p in ports)
+        {
+            var row = p;
+            <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
+                <MudNumericField T="int?" @bind-Value="row.Host" Label="@L["Host port"]" Min="1" Max="65535" HideSpinButtons="true" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="busy" />
+                <MudNumericField T="int?" @bind-Value="row.Container" Label="@L["Container port"]" Min="1" Max="65535" HideSpinButtons="true" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="busy" />
+                <MudSelect T="string" @bind-Value="row.Protocol" Variant="Variant.Outlined" Margin="Margin.Dense" Style="max-width:110px" Disabled="busy">
+                    <MudSelectItem T="string" Value='"tcp"'>TCP</MudSelectItem>
+                    <MudSelectItem T="string" Value='"udp"'>UDP</MudSelectItem>
+                </MudSelect>
+                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="() => ports.Remove(row)" Disabled="busy" aria-label="@L["Remove"]" />
+            </MudStack>
+        }
+        <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="() => ports.Add(new())" Disabled="busy">@L["Add port"]</MudButton>
+
+        <MudText Typo="Typo.subtitle2" Class="mt-5">@L["Storage location"]</MudText>
+        <MudText Typo="Typo.caption" Class="d-block mb-2">@L["Map a folder of the NAS (or the name of a Docker volume) to a path inside the container."]</MudText>
+        @foreach (var v in volumes)
+        {
+            var row = v;
+            <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
+                <MudTextField @bind-Value="row.Host" Label="@L["Folder of the NAS"]" Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true" Disabled="busy"
+                              Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Folder" OnAdornmentClick="() => PickFolder(row)" />
+                <MudTextField @bind-Value="row.Container" Label="@L["Path in the container"]" Placeholder="/data" Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true" Disabled="busy" />
+                <MudSelect T="string" @bind-Value="row.Mode" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:190px; max-width:190px" Disabled="busy">
+                    <MudSelectItem T="string" Value='"rw"'>@L["Read and write"]</MudSelectItem>
+                    <MudSelectItem T="string" Value='"ro"'>@L["Read only"]</MudSelectItem>
+                </MudSelect>
+                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="() => volumes.Remove(row)" Disabled="busy" aria-label="@L["Remove"]" />
+            </MudStack>
+        }
+        <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="() => volumes.Add(new())" Disabled="busy">@L["Add path"]</MudButton>
+
+        <MudText Typo="Typo.subtitle2" Class="mt-5">@L["Environment variables"]</MudText>
+        @foreach (var e in env)
+        {
+            var row = e;
+            <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
+                <MudTextField @bind-Value="row.Name" Label="@L["Variable name"]" Placeholder="TZ" Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true" Disabled="busy" />
+                <MudTextField @bind-Value="row.Value" Label="@L["Value"]" Placeholder="America/Toronto" Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true" Disabled="busy" />
+                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="() => env.Remove(row)" Disabled="busy" aria-label="@L["Remove"]" />
+            </MudStack>
+        }
+        <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="() => env.Add(new())" Disabled="busy">@L["Add variable"]</MudButton>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => Dialog.Cancel()" Disabled="busy">@L["Cancel"]</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save" Disabled="@(busy || stack is not null || loadFailed)">@(busy ? L["In progress…"] : Editing ? L["Save"] : L["Start"])</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance Dialog { get; set; } = default!;
+
+    /// <summary>Conteneur à modifier ; null pour en lancer un nouveau.</summary>
+    [Parameter] public string? ContainerId { get; set; }
+    [Parameter] public string? ContainerName { get; set; }
+    bool Editing => ContainerId is not null;
+
+    // Ip : adresse précise d'un lien existant, conservée telle quelle (le formulaire ne la montre pas).
+    sealed class PortRow { public int? Host { get; set; } public int? Container { get; set; } public string Protocol { get; set; } = "tcp"; public string Ip { get; set; } = ""; }
+    sealed class VolumeRow { public string Host { get; set; } = ""; public string Container { get; set; } = ""; public string Mode { get; set; } = "rw"; }
+    sealed class EnvRow { public string Name { get; set; } = ""; public string Value { get; set; } = ""; }
+
+    string? image = "", name = "", restart = "unless-stopped";
+    readonly List<PortRow> ports = [];
+    readonly List<VolumeRow> volumes = [];
+    readonly List<EnvRow> env = [];
+    IReadOnlyList<string> known = [];
+    IReadOnlyList<string> networks = [];
+    string? network = "";
+    string? stack;
+    bool loadFailed;
+    IReadOnlyList<string> unsupported = [];
+    string? error;
+    bool busy;
+
+    // Les images déjà sur le NAS servent de suggestions ; un autre nom (à télécharger) reste permis.
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            known = (await Agent.GetImagesAsync())
+                .Where(i => i.Repository != "<none>")
+                .Select(i => i.Tag is "" or "<none>" ? i.Repository : $"{i.Repository}:{i.Tag}")
+                .Distinct().Order(StringComparer.OrdinalIgnoreCase).ToList();
+        }
+        catch (Exception e) when (e is AgentException or HttpRequestException) { } // pas de suggestions, la saisie libre suffit
+        try { networks = (await Agent.GetDockerNetworksAsync()).Select(n => n.Name).Order(StringComparer.OrdinalIgnoreCase).ToList(); }
+        catch (Exception e) when (e is AgentException or HttpRequestException) { }
+
+        if (Editing) await LoadCurrentAsync();
+    }
+
+    // Préremplit le formulaire avec les réglages actuels du conteneur (relus par docker inspect).
+    async Task LoadCurrentAsync()
+    {
+        try
+        {
+            var s = await Agent.GetContainerSettingsAsync(ContainerId!);
+            var r = s.Settings;
+            image = r.Image;
+            name = r.Name;
+            network = r.Network;
+            restart = r.Restart;
+            stack = s.Stack;
+            unsupported = s.Unsupported;
+            ports.Clear();
+            foreach (var p in r.Ports)
+            {
+                // [ip:]hôte:conteneur[/udp]
+                var proto = p.EndsWith("/udp", StringComparison.Ordinal) ? "udp" : "tcp";
+                var parts = p.Split('/')[0].Split(':');
+                if (parts.Length < 2 || !int.TryParse(parts[^1], out var container) || !int.TryParse(parts[^2], out var host)) continue;
+                ports.Add(new PortRow { Host = host, Container = container, Protocol = proto, Ip = parts.Length == 3 ? parts[0] : "" });
+            }
+            volumes.Clear();
+            foreach (var v in r.Volumes)
+            {
+                var parts = v.Split(':');
+                if (parts.Length < 2) continue;
+                volumes.Add(new VolumeRow { Host = parts[0], Container = parts[1], Mode = parts.Length > 2 && parts[2] == "ro" ? "ro" : "rw" });
+            }
+            env.Clear();
+            foreach (var x in r.Env)
+            {
+                var eq = x.IndexOf('=');
+                if (eq > 0) env.Add(new EnvRow { Name = x[..eq], Value = x[(eq + 1)..] });
+            }
+        }
+        catch (AgentException e) { error = L.Translate(e.Message); loadFailed = true; } // illisible : on ne laisse pas enregistrer un formulaire vide
+        catch (HttpRequestException) { error = L["Agent unreachable."]; loadFailed = true; }
+    }
+
+    bool NewNetwork => !string.IsNullOrWhiteSpace(network) && !networks.Contains(network.Trim());
+
+    Task<IEnumerable<string>> SearchNetworks(string? text, CancellationToken ct) =>
+        Task.FromResult<IEnumerable<string>>(string.IsNullOrWhiteSpace(text)
+            ? networks
+            : networks.Where(n => n.Contains(text, StringComparison.OrdinalIgnoreCase)));
+
+    Task<IEnumerable<string>> SearchImages(string? text, CancellationToken ct) =>
+        Task.FromResult<IEnumerable<string>>(string.IsNullOrWhiteSpace(text)
+            ? known
+            : known.Where(i => i.Contains(text, StringComparison.OrdinalIgnoreCase)));
+
+    async Task PickFolder(VolumeRow row)
+    {
+        try { if (await Picker.PickAsync() is { } path) row.Host = path; }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable."]; }
+    }
+
+    async Task Save()
+    {
+        error = null;
+        var portList = new List<string>();
+        foreach (var p in ports.Where(p => p.Host is not null || p.Container is not null))
+        {
+            if (p.Host is null || p.Container is null) { error = L["Fill in both ports of each row, or remove the row."]; return; }
+            portList.Add($"{(p.Ip.Length > 0 ? p.Ip + ":" : "")}{p.Host}:{p.Container}" + (p.Protocol == "udp" ? "/udp" : ""));
+        }
+        var volumeList = new List<string>();
+        foreach (var v in volumes.Where(v => v.Host.Trim().Length > 0 || v.Container.Trim().Length > 0))
+        {
+            if (v.Host.Trim().Length == 0 || v.Container.Trim().Length == 0) { error = L["Fill in both paths of each row, or remove the row."]; return; }
+            volumeList.Add($"{v.Host.Trim()}:{v.Container.Trim()}" + (v.Mode == "ro" ? ":ro" : ""));
+        }
+        var envList = new List<string>();
+        foreach (var e in env.Where(e => e.Name.Trim().Length > 0 || e.Value.Length > 0))
+        {
+            if (e.Name.Trim().Length == 0) { error = L["Give a name to each variable, or remove the row."]; return; }
+            envList.Add($"{e.Name.Trim()}={e.Value}");
+        }
+
+        busy = true;
+        try
+        {
+            var request = new RunContainerRequest((image ?? "").Trim(), (name ?? "").Trim(), restart ?? "no", portList, envList, volumeList, (network ?? "").Trim());
+            if (Editing) await Ops.UpdateContainerAsync(ContainerId!, ContainerName ?? ContainerId!, request);
+            else await Ops.RunContainerAsync(request);
+            Dialog.Close(DialogResult.Ok(true));
+            return;
+        }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable."]; }
+        busy = false;
+    }
+}

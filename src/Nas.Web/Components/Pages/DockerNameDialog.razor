@@ -1,0 +1,42 @@
+@* Saisie d'un seul texte (nom d'image, de volume, de réseau). L'action s'exécute ici : l'erreur reste affichée dans la fenêtre. *@
+<MudDialog>
+    <DialogContent>
+        @if (error is not null)
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-3">@error</MudAlert>
+        }
+        <MudTextField @bind-Value="value" Label="@Label" Placeholder="@Placeholder" HelperText="@Helper" Immediate="true" Disabled="busy" AutoFocus="true" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => Dialog.Cancel()" Disabled="busy">@L["Cancel"]</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save" Disabled="@(busy || value.Trim().Length == 0)">@(busy ? L["In progress…"] : ButtonText)</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance Dialog { get; set; } = default!;
+    [Parameter, EditorRequired] public string Label { get; set; } = "";
+    [Parameter, EditorRequired] public string ButtonText { get; set; } = "";
+    [Parameter, EditorRequired] public Func<string, Task> Action { get; set; } = default!;
+    [Parameter] public string? Placeholder { get; set; }
+    [Parameter] public string? Helper { get; set; }
+
+    string value = "";
+    string? error;
+    bool busy;
+
+    async Task Save()
+    {
+        error = null;
+        busy = true;
+        try
+        {
+            await Action(value.Trim());
+            Dialog.Close(DialogResult.Ok(true));
+            return;
+        }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable."]; }
+        busy = false;
+    }
+}

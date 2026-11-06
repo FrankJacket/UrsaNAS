@@ -1,0 +1,104 @@
+@page "/docker/volumes"
+@inherits AutoRefreshBase
+@inject AgentClient Agent
+@inject DockerOperations Ops
+@inject IDialogService Dialogs
+@inject ISnackbar Snack
+
+<MudText Typo="Typo.h4" Class="mb-4">@L["Volumes and networks"]</MudText>
+
+@if (error is not null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">@error <MudLink Href="/docker">@L["Docker status"]</MudLink></MudAlert>
+}
+
+<MudText Typo="Typo.h5" Class="mb-2">@L["Volumes"]</MudText>
+<MudAlert Severity="Severity.Info" Class="mb-4">
+    @L["A Docker volume is stored in Docker's own folder. To use a folder of the NAS instead, give its path when you start the container or in your stack."]
+</MudAlert>
+<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="CreateVolume" Class="mb-4" Disabled="busy">@L["Create a volume"]</MudButton>
+<MudTable Items="volumes" Hover="true" Dense="true" Loading="@(!loaded)" Class="mb-8">
+    <HeaderContent><MudTh>@L["Name"]</MudTh><MudTh>@L["Driver"]</MudTh><MudTh>@L["Mounted on"]</MudTh><MudTh></MudTh></HeaderContent>
+    <RowTemplate>
+        <MudTd><b>@context.Name</b></MudTd>
+        <MudTd>@context.Driver</MudTd>
+        <MudTd><code>@context.Mountpoint</code></MudTd>
+        <MudTd Style="text-align:right">
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" Disabled="busy" OnClick="() => DeleteVolume(context)">@L["Delete"]</MudButton>
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent><MudText Class="pa-4">@L["No volumes."]</MudText></NoRecordsContent>
+</MudTable>
+
+<MudText Typo="Typo.h5" Class="mb-2">@L["Networks"]</MudText>
+<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="CreateNetwork" Class="mb-4" Disabled="busy">@L["Create a network"]</MudButton>
+<MudTable Items="networks" Hover="true" Dense="true" Loading="@(!loaded)">
+    <HeaderContent><MudTh>@L["Name"]</MudTh><MudTh>@L["Driver"]</MudTh><MudTh>@L["Scope"]</MudTh><MudTh></MudTh></HeaderContent>
+    <RowTemplate>
+        <MudTd><b>@context.Name</b></MudTd>
+        <MudTd>@context.Driver</MudTd>
+        <MudTd>@context.Scope</MudTd>
+        <MudTd Style="text-align:right">
+            @if (!Builtin.Contains(context.Name))
+            {
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" Disabled="busy" OnClick="() => DeleteNetwork(context)">@L["Delete"]</MudButton>
+            }
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent><MudText Class="pa-4">@L["No networks."]</MudText></NoRecordsContent>
+</MudTable>
+
+@code {
+    static readonly HashSet<string> Builtin = ["bridge", "host", "none"];
+    static readonly DialogOptions Small = new() { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true, BackdropClick = false };
+
+    IReadOnlyList<DockerVolume> volumes = [];
+    IReadOnlyList<DockerNetwork> networks = [];
+    string? error;
+    bool loaded, busy;
+
+    protected override async Task LoadAsync()
+    {
+        try
+        {
+            volumes = (await Agent.GetDockerVolumesAsync()).OrderBy(v => v.Name, StringComparer.OrdinalIgnoreCase).ToList();
+            networks = (await Agent.GetDockerNetworksAsync()).OrderBy(n => n.Name, StringComparer.OrdinalIgnoreCase).ToList();
+            error = null;
+        }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable: is the ursanas-agent service running?"]; }
+        loaded = true;
+    }
+
+    async Task Prompt(string title, string label, string button, Func<string, Task> action, string success)
+    {
+        var parameters = new DialogParameters<DockerNameDialog> { { x => x.Label, label }, { x => x.ButtonText, button }, { x => x.Action, action } };
+        var dialog = await Dialogs.ShowAsync<DockerNameDialog>(title, parameters, Small);
+        if (await dialog.Result is { Canceled: false })
+        {
+            Snack.Add(success, Severity.Success);
+            await LoadAsync();
+        }
+    }
+
+    Task CreateVolume() => Prompt(L["Create a volume"], L["Name"], L["Create"], Ops.CreateVolumeAsync, L["Volume created."]);
+    Task CreateNetwork() => Prompt(L["Create a network"], L["Name"], L["Create"], Ops.CreateNetworkAsync, L["Network created."]);
+
+    async Task Confirm(string title, string message, Func<Task> action, string success)
+    {
+        var ok = await Dialogs.ShowMessageBoxAsync(title, message, yesText: L["Delete"], cancelText: L["Cancel"]);
+        if (ok != true) return;
+        busy = true;
+        try { await action(); Snack.Add(success, Severity.Success); }
+        catch (AgentException e) { Snack.Add(L.Translate(e.Message), Severity.Error); }
+        catch (HttpRequestException) { Snack.Add(L["Agent unreachable."], Severity.Error); }
+        busy = false;
+        await LoadAsync();
+    }
+
+    Task DeleteVolume(DockerVolume v) => Confirm(L["Delete {0}?", v.Name],
+        L["The volume and the data it holds are deleted. Docker refuses if a container still uses it."], () => Ops.RemoveVolumeAsync(v.Name), L["{0} deleted.", v.Name]);
+
+    Task DeleteNetwork(DockerNetwork n) => Confirm(L["Delete {0}?", n.Name],
+        L["The network is deleted. Docker refuses if a container is still connected to it."], () => Ops.RemoveNetworkAsync(n.Name), L["{0} deleted.", n.Name]);
+}

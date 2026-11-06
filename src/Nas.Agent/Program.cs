@@ -51,6 +51,7 @@ public partial class Program
         builder.Services.AddSingleton<UserService>();
         builder.Services.AddSingleton<ProtocolService>();
         builder.Services.AddSingleton<BackupService>();
+        builder.Services.AddSingleton<DockerService>();
         builder.Services.AddSingleton<ShareService>();
         builder.Services.AddSingleton<GroupService>();
         builder.Services.AddSingleton<AclService>();
@@ -112,7 +113,47 @@ public partial class Program
         app.MapPost("/backup/runs/{id:int}/cancel", (int id, BackupService b) => { b.Cancel(id); return Results.NoContent(); });
         app.MapDelete("/backup/runs/{id:int}", (int id, BackupService b) => { b.Acknowledge(id); return Results.NoContent(); });
 
-        app.MapGet("/smart", (SmartService s, CancellationToken ct) => Read(async () => Results.Ok(await s.ListAsync(ct))));
+        // Docker : chaque opération qui modifie quelque chose passe par le verrou propre à DockerService (un téléchargement peut être long).
+        app.MapGet("/docker/status", async (DockerService d, CancellationToken ct) => Results.Ok(await d.StatusAsync(ct)));
+        app.MapGet("/docker/containers", (DockerService d, CancellationToken ct) => Read(async () => Results.Ok(await d.ContainersAsync(ct))));
+        app.MapGet("/docker/stats", (DockerService d, CancellationToken ct) => Read(async () => Results.Ok(await d.StatsAsync(ct))));
+        app.MapGet("/docker/containers/{id}/logs", (string id, int? tail, DockerService d, CancellationToken ct) =>
+            Read(async () => Results.Text(await d.LogsAsync(id, tail ?? 200, ct))));
+        app.MapPost("/docker/containers/{id}/{action}", (string id, string action, DockerService d, CancellationToken ct) =>
+            Read(async () => { await d.ContainerActionAsync(id, action, ct); return Results.NoContent(); }));
+        app.MapGet("/docker/containers/{id}/settings", (string id, DockerService d, CancellationToken ct) =>
+            Read(async () => Results.Ok(await d.SettingsAsync(id, ct))));
+        app.MapPut("/docker/containers/{id}", (string id, RunContainerRequest r, DockerService d, CancellationToken ct) =>
+            Read(async () => { await d.UpdateContainerAsync(id, r, ct); return Results.NoContent(); }));
+        app.MapPost("/docker/containers", (RunContainerRequest r, DockerService d, CancellationToken ct) =>
+            Read(async () => { await d.RunContainerAsync(r, ct); return Results.NoContent(); }));
+        app.MapGet("/docker/images", (DockerService d, CancellationToken ct) => Read(async () => Results.Ok(await d.ImagesAsync(ct))));
+        app.MapPost("/docker/images/pull", (PullImageRequest r, DockerService d, CancellationToken ct) =>
+            Read(async () => { await d.PullImageAsync(r.Image, ct); return Results.NoContent(); }));
+        app.MapPost("/docker/images/prune", (DockerService d, CancellationToken ct) => Read(async () => Results.Text(await d.PruneImagesAsync(ct))));
+        app.MapDelete("/docker/images", (string id, DockerService d, CancellationToken ct) =>
+            Read(async () => { await d.RemoveImageAsync(id, ct); return Results.NoContent(); }));
+        app.MapGet("/docker/volumes", (DockerService d, CancellationToken ct) => Read(async () => Results.Ok(await d.VolumesAsync(ct))));
+        app.MapPost("/docker/volumes", (DockerNameRequest r, DockerService d, CancellationToken ct) =>
+            Read(async () => { await d.CreateVolumeAsync(r.Name, ct); return Results.NoContent(); }));
+        app.MapDelete("/docker/volumes", (string name, DockerService d, CancellationToken ct) =>
+            Read(async () => { await d.RemoveVolumeAsync(name, ct); return Results.NoContent(); }));
+        app.MapGet("/docker/networks", (DockerService d, CancellationToken ct) => Read(async () => Results.Ok(await d.NetworksAsync(ct))));
+        app.MapPost("/docker/networks", (DockerNameRequest r, DockerService d, CancellationToken ct) =>
+            Read(async () => { await d.CreateNetworkAsync(r.Name, ct); return Results.NoContent(); }));
+        app.MapDelete("/docker/networks", (string name, DockerService d, CancellationToken ct) =>
+            Read(async () => { await d.RemoveNetworkAsync(name, ct); return Results.NoContent(); }));
+        app.MapGet("/docker/stacks", (DockerService d, CancellationToken ct) => Read(async () => Results.Ok(await d.StacksAsync(ct))));
+        app.MapGet("/docker/stacks/{name}", (string name, DockerService d) => Read(() => Task.FromResult(Results.Ok(d.ReadStack(name)))));
+        app.MapPut("/docker/stacks/{name}", (string name, SaveStackRequest r, DockerService d, CancellationToken ct) =>
+            Read(async () => { await d.SaveStackAsync(name, r.Content, ct); return Results.NoContent(); }));
+        app.MapPost("/docker/stacks/{name}/{action}", (string name, string action, DockerService d, CancellationToken ct) =>
+            Read(async () => { await d.StackActionAsync(name, action, ct); return Results.NoContent(); }));
+        // Chemin réel d'un partage, pour proposer un dossier du NAS comme volume.
+        app.MapGet("/shares/{name}/path", (string name, AclService a, CancellationToken ct) =>
+            Read(async () => Results.Ok(new ShareRoot(name, await a.SharePathAsync(name, ct)))));
+
+        app.MapGet("/smart",(SmartService s, CancellationToken ct) => Read(async () => Results.Ok(await s.ListAsync(ct))));
 
         app.MapGet("/zfs/pools",(ZfsService z, CancellationToken ct) => Read(async () => Results.Ok(await z.ListPoolsAsync(ct))));
         app.MapPost("/zfs/pools", (CreatePoolRequest r, ZfsService z, CancellationToken ct) =>

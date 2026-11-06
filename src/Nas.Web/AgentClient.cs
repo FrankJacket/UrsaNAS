@@ -132,6 +132,89 @@ public class AgentClient(HttpClient http)
     public async Task DestroySnapshotAsync(string fullName, CancellationToken ct = default) =>
         await EnsureOkAsync(await http.DeleteAsync($"zfs/snapshots?name={Uri.EscapeDataString(fullName)}", ct), ct);
 
+    // ---- Docker
+    public async Task<DockerStatus> GetDockerStatusAsync(CancellationToken ct = default)
+    {
+        using var r = await http.GetAsync("docker/status", ct);
+        await EnsureOkAsync(r, ct);
+        return await r.Content.ReadFromJsonAsync<DockerStatus>(ct) ?? new(DockerState.NotInstalled, null, null);
+    }
+
+    public Task<IReadOnlyList<ContainerInfo>> GetContainersAsync(CancellationToken ct = default) => GetListAsync<ContainerInfo>("docker/containers", ct);
+    public Task<IReadOnlyList<ContainerStats>> GetContainerStatsAsync(CancellationToken ct = default) => GetListAsync<ContainerStats>("docker/stats", ct);
+    public Task<IReadOnlyList<ImageInfo>> GetImagesAsync(CancellationToken ct = default) => GetListAsync<ImageInfo>("docker/images", ct);
+    public Task<IReadOnlyList<DockerVolume>> GetDockerVolumesAsync(CancellationToken ct = default) => GetListAsync<DockerVolume>("docker/volumes", ct);
+    public Task<IReadOnlyList<DockerNetwork>> GetDockerNetworksAsync(CancellationToken ct = default) => GetListAsync<DockerNetwork>("docker/networks", ct);
+    public Task<IReadOnlyList<StackInfo>> GetStacksAsync(CancellationToken ct = default) => GetListAsync<StackInfo>("docker/stacks", ct);
+
+    public async Task<string> GetContainerLogsAsync(string id, int tail, CancellationToken ct = default)
+    {
+        using var r = await http.GetAsync($"docker/containers/{Uri.EscapeDataString(id)}/logs?tail={tail}", ct);
+        await EnsureOkAsync(r, ct);
+        return await r.Content.ReadAsStringAsync(ct);
+    }
+
+    public async Task ContainerActionAsync(string id, string action, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PostAsync($"docker/containers/{Uri.EscapeDataString(id)}/{action}", null, ct), ct);
+
+    public async Task RunContainerAsync(RunContainerRequest req, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PostAsJsonAsync("docker/containers", req, ct), ct);
+
+    public async Task<ContainerSettings> GetContainerSettingsAsync(string id, CancellationToken ct = default)
+    {
+        using var r = await http.GetAsync($"docker/containers/{Uri.EscapeDataString(id)}/settings", ct);
+        await EnsureOkAsync(r, ct);
+        return await r.Content.ReadFromJsonAsync<ContainerSettings>(ct) ?? throw new AgentException(Msg.F("The agent answered {0}.", 204));
+    }
+
+    public async Task UpdateContainerAsync(string id, RunContainerRequest req, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PutAsJsonAsync($"docker/containers/{Uri.EscapeDataString(id)}", req, ct), ct);
+
+    public async Task PullImageAsync(string image, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PostAsJsonAsync("docker/images/pull", new PullImageRequest(image), ct), ct);
+
+    public async Task<string> PruneImagesAsync(CancellationToken ct = default)
+    {
+        using var r = await http.PostAsync("docker/images/prune", null, ct);
+        await EnsureOkAsync(r, ct);
+        return await r.Content.ReadAsStringAsync(ct);
+    }
+
+    public async Task RemoveImageAsync(string id, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.DeleteAsync($"docker/images?id={Uri.EscapeDataString(id)}", ct), ct);
+
+    public async Task CreateDockerVolumeAsync(string name, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PostAsJsonAsync("docker/volumes", new DockerNameRequest(name), ct), ct);
+
+    public async Task RemoveDockerVolumeAsync(string name, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.DeleteAsync($"docker/volumes?name={Uri.EscapeDataString(name)}", ct), ct);
+
+    public async Task CreateDockerNetworkAsync(string name, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PostAsJsonAsync("docker/networks", new DockerNameRequest(name), ct), ct);
+
+    public async Task RemoveDockerNetworkAsync(string name, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.DeleteAsync($"docker/networks?name={Uri.EscapeDataString(name)}", ct), ct);
+
+    public async Task<StackContent> GetStackAsync(string name, CancellationToken ct = default)
+    {
+        using var r = await http.GetAsync($"docker/stacks/{Uri.EscapeDataString(name)}", ct);
+        await EnsureOkAsync(r, ct);
+        return await r.Content.ReadFromJsonAsync<StackContent>(ct) ?? throw new AgentException(Msg.F("The agent answered {0}.", 204));
+    }
+
+    public async Task SaveStackAsync(string name, string content, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PutAsJsonAsync($"docker/stacks/{Uri.EscapeDataString(name)}", new SaveStackRequest(content), ct), ct);
+
+    public async Task StackActionAsync(string name, string action, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PostAsync($"docker/stacks/{Uri.EscapeDataString(name)}/{action}", null, ct), ct);
+
+    public async Task<string> GetShareRootAsync(string share, CancellationToken ct = default)
+    {
+        using var r = await http.GetAsync($"shares/{Uri.EscapeDataString(share)}/path", ct);
+        await EnsureOkAsync(r, ct);
+        return (await r.Content.ReadFromJsonAsync<ShareRoot>(ct))?.Path ?? throw new AgentException(Msg.F("The agent answered {0}.", 204));
+    }
+
     /// <summary>GET d'une liste ; une erreur de l'agent (ZFS absent, commande en échec) devient une AgentException lisible.</summary>
     async Task<IReadOnlyList<T>> GetListAsync<T>(string url, CancellationToken ct)
     {

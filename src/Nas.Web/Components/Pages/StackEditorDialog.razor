@@ -1,0 +1,76 @@
+@inject AgentClient Agent
+@inject DockerOperations Ops
+@inject NasFolderPicker Picker
+@inject IJSRuntime JS
+
+@* Création ou modification d'une stack Compose. Le fichier est validé par « docker compose config » avant d'être enregistré. *@
+<MudDialog>
+    <DialogContent>
+        @if (error is not null)
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-3" Style="white-space:pre-wrap">@error</MudAlert>
+        }
+        <MudTextField @bind-Value="name" Label="@L["Stack name"]" Immediate="true" Disabled="@(busy || Existing is not null)"
+                      HelperText="@L["Lowercase letters, digits, _ and -."]" AutoFocus="@(Existing is null)" />
+        <MudTextField @bind-Value="content" Label="compose.yml" Lines="18" Immediate="true" Disabled="busy" Class="mt-3 compose-text"
+                      UserAttributes='@(new Dictionary<string, object> { ["id"] = "stack-text", ["spellcheck"] = "false" })' />
+        <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.CreateNewFolder" OnClick="InsertFolder" Disabled="busy" Class="mt-2">@L["Insert a NAS folder path"]</MudButton>
+        <MudText Typo="Typo.caption" Class="d-block mt-1">@L["The path is inserted where the cursor is. Docker gives containers full access to it, whatever the share permissions."]</MudText>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => Dialog.Cancel()" Disabled="busy">@L["Cancel"]</MudButton>
+        <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="() => Save(false)" Disabled="busy">@L["Save"]</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="() => Save(true)" Disabled="busy">@(busy ? L["In progress…"] : L["Save and start"])</MudButton>
+    </DialogActions>
+</MudDialog>
+
+<style>
+    .compose-text textarea { font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+</style>
+
+@code {
+    [CascadingParameter] IMudDialogInstance Dialog { get; set; } = default!;
+    [Parameter] public string? Existing { get; set; }
+
+    const string Template = "services:\n  app:\n    image: nginx:latest\n    ports:\n      - \"8080:80\"\n    restart: unless-stopped\n";
+
+    string name = "", content = Template;
+    string? error;
+    bool busy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Existing is null) return;
+        name = Existing;
+        try { content = (await Agent.GetStackAsync(Existing)).Content; }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable."]; }
+    }
+
+    async Task InsertFolder()
+    {
+        try
+        {
+            if (await Picker.PickAsync() is { } path)
+                content = await JS.InvokeAsync<string?>("ursanasInsertAtCursor", "stack-text", path) ?? content + path;
+        }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable."]; }
+    }
+
+    async Task Save(bool start)
+    {
+        error = null;
+        busy = true;
+        try
+        {
+            await Ops.SaveStackAsync(name.Trim(), content);
+            if (start) await Ops.StackAsync(name.Trim(), "up");
+            Dialog.Close(DialogResult.Ok(start));
+            return;
+        }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable."]; }
+        busy = false;
+    }
+}

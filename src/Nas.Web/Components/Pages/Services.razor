@@ -56,6 +56,8 @@
     <MudText Typo="Typo.caption" Class="d-block mt-4">@L["FTP signs users in with their NAS password. A user created before FTP was available must have their password changed once."]</MudText>
 </MudPaper>
 
+<MudText Typo="Typo.caption" Class="d-block mt-6">@L["Looking for Docker?"] <MudLink Href="/docker">@L["Docker status and installation"]</MudLink></MudText>
+
 @code {
     IReadOnlyList<ServiceInfo> services = [];
     bool loaded, busy, formLoaded, tls;

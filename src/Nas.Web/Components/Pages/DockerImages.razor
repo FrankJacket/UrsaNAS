@@ -1,0 +1,89 @@
+@page "/docker/images"
+@inherits AutoRefreshBase
+@inject AgentClient Agent
+@inject DockerOperations Ops
+@inject IDialogService Dialogs
+@inject ISnackbar Snack
+
+<MudText Typo="Typo.h4" Class="mb-4">@L["Images"]</MudText>
+
+@if (error is not null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">@error <MudLink Href="/docker">@L["Docker status"]</MudLink></MudAlert>
+}
+
+<MudStack Row="true" Class="mb-4">
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.CloudDownload" OnClick="Pull" Disabled="busy">@L["Download an image"]</MudButton>
+    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.CleaningServices" OnClick="Prune" Disabled="busy">@L["Clean unused images"]</MudButton>
+</MudStack>
+
+<MudTable Items="images" Hover="true" Dense="true" Loading="@(!loaded)">
+    <HeaderContent><MudTh>@L["Image"]</MudTh><MudTh>@L["Identifier"]</MudTh><MudTh>@L["Size"]</MudTh><MudTh>@L["Created"]</MudTh><MudTh></MudTh></HeaderContent>
+    <RowTemplate>
+        <MudTd><b>@Label(context)</b></MudTd>
+        <MudTd><code>@context.Id</code></MudTd>
+        <MudTd>@Fmt.Size(context.SizeBytes, L.Lang)</MudTd>
+        <MudTd>@context.Created</MudTd>
+        <MudTd Style="text-align:right">
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" Disabled="busy" OnClick="() => Delete(context)">@L["Delete"]</MudButton>
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent><MudText Class="pa-4">@L["No images."]</MudText></NoRecordsContent>
+</MudTable>
+
+@code {
+    IReadOnlyList<ImageInfo> images = [];
+    string? error;
+    bool loaded, busy;
+
+    protected override async Task LoadAsync()
+    {
+        try { images = (await Agent.GetImagesAsync()).OrderBy(i => i.Repository, StringComparer.OrdinalIgnoreCase).ToList(); error = null; }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable: is the ursanas-agent service running?"]; }
+        loaded = true;
+    }
+
+    static string Label(ImageInfo i) => i.Repository == "<none>" ? "<none>" : i.Tag is "" or "<none>" ? i.Repository : $"{i.Repository}:{i.Tag}";
+
+    async Task Pull()
+    {
+        var parameters = new DialogParameters<DockerNameDialog>
+        {
+            { x => x.Label, L["Image"] }, { x => x.ButtonText, L["Download"] }, { x => x.Placeholder, "nginx:latest" },
+            { x => x.Helper, L["The download can take a few minutes."] }, { x => x.Action, Ops.PullImageAsync },
+        };
+        var dialog = await Dialogs.ShowAsync<DockerNameDialog>(L["Download an image"], parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true, BackdropClick = false });
+        if (await dialog.Result is { Canceled: false })
+        {
+            Snack.Add(L["Image downloaded."], Severity.Success);
+            await LoadAsync();
+        }
+    }
+
+    async Task Delete(ImageInfo i)
+    {
+        var ok = await Dialogs.ShowMessageBoxAsync(L["Delete {0}?", Label(i)],
+            L["The image is removed from the NAS. Docker refuses if a container still uses it."], yesText: L["Delete"], cancelText: L["Cancel"]);
+        if (ok == true) await Run(() => Ops.RemoveImageAsync(i.Id, Label(i)), L["{0} deleted.", Label(i)]);
+    }
+
+    async Task Prune()
+    {
+        var ok = await Dialogs.ShowMessageBoxAsync(L["Clean unused images?"],
+            L["Images without a name (left over after updates) are deleted. Images used by a container, or that have a name, are kept."],
+            yesText: L["Clean"], cancelText: L["Cancel"]);
+        if (ok == true) await Run(async () => await Ops.PruneImagesAsync(), L["Unused images cleaned."]);
+    }
+
+    async Task Run(Func<Task> action, string success)
+    {
+        busy = true;
+        try { await action(); Snack.Add(success, Severity.Success); }
+        catch (AgentException e) { Snack.Add(L.Translate(e.Message), Severity.Error); }
+        catch (HttpRequestException) { Snack.Add(L["Agent unreachable."], Severity.Error); }
+        busy = false;
+        await LoadAsync();
+    }
+}

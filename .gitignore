@@ -3,3 +3,8 @@ obj/
 artifacts/
 .vs/
 *.user
+
+# Local SQLite databases created by running the web app from its project folder
+src/Nas.Web/Data/*.db
+src/Nas.Web/Data/*.db-shm
+src/Nas.Web/Data/*.db-wal

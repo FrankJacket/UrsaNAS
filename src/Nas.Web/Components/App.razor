@@ -18,6 +18,15 @@
         function ursanasSetTheme(value) {
             document.cookie = 'ursanas-theme=' + value + '; path=/; max-age=31536000; SameSite=Lax';
         }
+        // Insère du texte à la position du curseur d'une zone de texte et renvoie son nouveau contenu.
+        function ursanasInsertAtCursor(id, text) {
+            const t = document.getElementById(id);
+            if (!t) return null;
+            const s = t.selectionStart ?? t.value.length;
+            t.setRangeText(text, s, t.selectionEnd ?? s, 'end');
+            t.dispatchEvent(new Event('input', { bubbles: true }));
+            return t.value;
+        }
     </script>
 </body>
 </html>

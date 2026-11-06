@@ -6,12 +6,13 @@ It is written in C# (.NET 10) with MudBlazor, SQLite and Dapper.
 
 ## What you can do with it
 
-The menu is organised in four groups.
+The menu is organised in groups. The Docker group only appears when Docker is installed and running.
 
 | Group | Pages | Purpose |
 |---|---|---|
 | **Storage** | Disks, Pools, Datasets, Backups | Inspect disks, create ZFS pools and datasets, take snapshots, back up to a USB disk |
 | **Sharing** | Shares, Folders, Services | Share folders over SMB, NFS and FTP, set per-folder permissions (ACLs), start or stop services |
+| **Docker** | Containers, Images, Stacks, Volumes and networks | Run and monitor containers, manage images, Compose stacks, volumes and networks |
 | **Accounts** | Users, Groups, Admins | NAS accounts, groups, web interface administrators |
 | **Monitoring** | Dashboard, Alerts, Audit log | Health overview, alerts (with email), log of actions |
 
@@ -43,6 +44,22 @@ The **Backups** page copies a share (or some of its folders) to a **USB disk plu
 4. Click **Run now**.
 
 Safety: the agent only accepts a mount point under `/mnt`, `/media` or `/run/media` as a target. The web interface never sends a source path: the agent resolves the share folder itself.
+
+### Docker
+
+UrsaNAS does not install Docker. It checks every few seconds whether Docker is installed and its service answers, and shows the **Docker** menu group only when it does. Until then, the `/docker` page (linked from *Services*) explains how to install or start it:
+
+```bash
+sudo apt install docker.io docker-compose
+```
+
+- **Containers**: list with state, ports, CPU and memory; start, stop, restart, delete; logs; run a simple container (image, ports, environment variables, volumes, network, restart policy) and edit it later in the same dialog. A restart-policy change is applied in place; any other change recreates the container, and the previous one is restored if the new one cannot start. Containers managed by a Compose stack are edited through their stack.
+- **Images**: list, download (pull), delete, clean unused images.
+- **Stacks**: Docker Compose files kept on the NAS (`/var/lib/ursanas/stacks/<name>/compose.yml`). Edit them in the browser, then start, stop, update (pull + up) or delete the stack. A file is checked with `docker compose config` before it is saved, so an invalid file never replaces a working one.
+- **Volumes and networks**: list, create, delete.
+- **NAS folders as volumes**: a button inserts the real path of a share folder (picked in the file tree) into the container dialog or the compose file.
+
+Docker bypasses the share permissions (ACLs): a container that mounts a NAS folder reads and writes it with full rights. The interface says so where it matters. Names, images, ports, variables and volumes are validated before they reach the `docker` command, which is always run without a shell and never receives a value that could be read as an option.
 
 ## Architecture
 
@@ -126,3 +143,6 @@ Texts are written in English in the code, for example `L["Save"]`. Each text nee
 | `Backup:RequireMountPoint` | `true` | `false` accepts a plain folder (development only) |
 | `Backups:IntervalSeconds` | `20` | How often the backup scheduler runs |
 | `DataDir` | `/var/lib/ursanas-web` | Folder holding the interface's SQLite database |
+| `Docker:StacksDir` | `/var/lib/ursanas/stacks` | Where Compose stacks are stored (agent) |
+| `Docker:IntervalSeconds` | `10` | How often the web interface checks whether Docker is available |
+| `Docker:Binary` | `docker` | Docker command to run (`docker-missing` simulates a machine without Docker in fake mode) |

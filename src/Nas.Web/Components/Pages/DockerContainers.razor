@@ -1,0 +1,130 @@
+@page "/docker/containers"
+@inherits AutoRefreshBase
+@inject AgentClient Agent
+@inject DockerOperations Ops
+@inject IDialogService Dialogs
+@inject ISnackbar Snack
+
+<MudText Typo="Typo.h4" Class="mb-4">@L["Containers"]</MudText>
+
+@if (error is not null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">@error <MudLink Href="/docker">@L["Docker status"]</MudLink></MudAlert>
+}
+
+<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="RunNew" Class="mb-4">@L["Run a container"]</MudButton>
+
+<MudTable Items="containers" Hover="true" Dense="true" Loading="@(!loaded)">
+    <HeaderContent>
+        <MudTh>@L["Name"]</MudTh><MudTh>@L["Image"]</MudTh><MudTh>@L["Status"]</MudTh><MudTh>@L["Ports"]</MudTh><MudTh>CPU</MudTh><MudTh>@L["Memory"]</MudTh><MudTh></MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        @{ var st = stats.GetValueOrDefault(context.Id); }
+        <MudTd>
+            <b>@context.Name</b>
+            @if (context.Project is not null) { <MudChip T="string" Size="Size.Small" Class="ml-2">@context.Project</MudChip> }
+        </MudTd>
+        <MudTd>@context.Image</MudTd>
+        <MudTd>
+            <MudChip T="string" Size="Size.Small" Color="@StateColor(context.State)">@context.State</MudChip>
+            <MudText Typo="Typo.caption" Class="d-block">@context.Status</MudText>
+        </MudTd>
+        <MudTd><code>@context.Ports</code></MudTd>
+        <MudTd>@(st is null ? "" : $"{st.CpuPercent:0.0} %")</MudTd>
+        <MudTd>@(st is null ? "" : Fmt.Size(st.MemUsedBytes, L.Lang))</MudTd>
+        <MudTd Style="text-align:right; white-space:nowrap">
+            @if (context.State == "running")
+            {
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="busy" OnClick='() => Act(context, "stop", L["Container stopped."])'>@L["Stop"]</MudButton>
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="busy" OnClick='() => Act(context, "restart", L["Container restarted."])'>@L["Restart"]</MudButton>
+            }
+            else
+            {
+                <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" Disabled="busy" OnClick='() => Act(context, "start", L["Container started."])'>@L["Start"]</MudButton>
+            }
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Edit" Disabled="busy" OnClick="() => Edit(context)">@L["Edit"]</MudButton>
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Article" OnClick="() => Logs(context)">@L["Logs"]</MudButton>
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" Disabled="busy" OnClick="() => Delete(context)">@L["Delete"]</MudButton>
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent><MudText Class="pa-4">@L["No containers."]</MudText></NoRecordsContent>
+</MudTable>
+
+@code {
+    IReadOnlyList<ContainerInfo> containers = [];
+    Dictionary<string, ContainerStats> stats = new();
+    string? error;
+    bool loaded, busy;
+
+    protected override async Task LoadAsync()
+    {
+        try
+        {
+            containers = (await Agent.GetContainersAsync()).OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase).ToList();
+            error = null;
+            try
+            {
+                // Les statistiques sont indexées par identifiant abrégé (12 caractères) : on les rattache aux conteneurs par préfixe.
+                var s = await Agent.GetContainerStatsAsync();
+                stats = containers.Select(c => (c, s: s.FirstOrDefault(x => c.Id.StartsWith(x.Id, StringComparison.Ordinal) || x.Id.StartsWith(c.Id, StringComparison.Ordinal))))
+                    .Where(p => p.s is not null).ToDictionary(p => p.c.Id, p => p.s!);
+            }
+            catch (Exception e) when (e is AgentException or HttpRequestException) { stats = new(); } // les statistiques sont facultatives
+        }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable: is the ursanas-agent service running?"]; }
+        loaded = true;
+    }
+
+    static Color StateColor(string s) => s switch { "running" => Color.Success, "exited" or "created" => Color.Default, _ => Color.Warning };
+
+    async Task Run(Func<Task> action, string success)
+    {
+        busy = true;
+        try { await action(); Snack.Add(success, Severity.Success); }
+        catch (AgentException e) { Snack.Add(L.Translate(e.Message), Severity.Error); }
+        catch (HttpRequestException) { Snack.Add(L["Agent unreachable."], Severity.Error); }
+        busy = false;
+        await LoadAsync();
+    }
+
+    Task Act(ContainerInfo c, string action, string success) => Run(() => Ops.ContainerAsync(c.Id, c.Name, action), success);
+
+    async Task Delete(ContainerInfo c)
+    {
+        var ok = await Dialogs.ShowMessageBoxAsync(L["Delete {0}?", c.Name],
+            L["The container is removed. Its volumes and the files it wrote in mounted folders are kept. A running container must be stopped first."],
+            yesText: L["Delete"], cancelText: L["Cancel"]);
+        if (ok == true) await Act(c, "remove", L["{0} deleted.", c.Name]);
+    }
+
+    async Task Logs(ContainerInfo c)
+    {
+        var parameters = new DialogParameters<ContainerLogsDialog> { { x => x.Id, c.Id }, { x => x.Name, c.Name } };
+        await Dialogs.ShowAsync<ContainerLogsDialog>(L["Logs of {0}", c.Name], parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true, CloseButton = true });
+    }
+
+    async Task Edit(ContainerInfo c)
+    {
+        var parameters = new DialogParameters<ContainerRunDialog> { { x => x.ContainerId, c.Id }, { x => x.ContainerName, c.Name } };
+        var dialog = await Dialogs.ShowAsync<ContainerRunDialog>(L["Edit {0}", c.Name], parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseButton = true, BackdropClick = false });
+        if (await dialog.Result is { Canceled: false })
+        {
+            Snack.Add(L["Container updated."], Severity.Success);
+            await LoadAsync();
+        }
+    }
+
+    async Task RunNew()
+    {
+        var dialog = await Dialogs.ShowAsync<ContainerRunDialog>(L["Run a container"], new DialogParameters(),
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseButton = true, BackdropClick = false });
+        if (await dialog.Result is { Canceled: false })
+        {
+            Snack.Add(L["Container started."], Severity.Success);
+            await LoadAsync();
+        }
+    }
+}

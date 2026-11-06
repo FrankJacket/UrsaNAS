@@ -1,0 +1,57 @@
+@inject AgentClient Agent
+
+@* Dernières lignes des journaux d'un conteneur, avec rafraîchissement à la demande. *@
+<MudDialog>
+    <DialogContent>
+        @if (error is not null)
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-3">@error</MudAlert>
+        }
+        <MudStack Row="true" Class="mb-2" AlignItems="AlignItems.Center">
+            <MudSelect T="int" Value="tail" ValueChanged="SetTail" Label="@L["Lines"]" Dense="true" Style="max-width:140px">
+                <MudSelectItem T="int" Value="100">100</MudSelectItem>
+                <MudSelectItem T="int" Value="500">500</MudSelectItem>
+                <MudSelectItem T="int" Value="2000">2000</MudSelectItem>
+            </MudSelect>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="Reload" Disabled="busy">@L["Refresh"]</MudButton>
+        </MudStack>
+        <pre class="logs">@(text.Length == 0 && !busy ? L["No log output."] : text)</pre>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => Dialog.Close()">@L["Close"]</MudButton>
+    </DialogActions>
+</MudDialog>
+
+<style>
+    .logs { margin: 0; max-height: 60vh; overflow: auto; white-space: pre-wrap; word-break: break-all; font-size: 12px;
+            background: var(--mud-palette-background-gray); padding: 8px; border-radius: 6px; }
+</style>
+
+@code {
+    [CascadingParameter] IMudDialogInstance Dialog { get; set; } = default!;
+    [Parameter, EditorRequired] public string Id { get; set; } = "";
+    [Parameter] public string Name { get; set; } = "";
+
+    string text = "";
+    string? error;
+    int tail = 200;
+    bool busy;
+
+    protected override async Task OnInitializedAsync() => await Reload();
+
+    async Task SetTail(int value)
+    {
+        tail = value;
+        await Reload();
+    }
+
+    async Task Reload()
+    {
+        busy = true;
+        error = null;
+        try { text = await Agent.GetContainerLogsAsync(Id, tail); }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable."]; }
+        busy = false;
+    }
+}

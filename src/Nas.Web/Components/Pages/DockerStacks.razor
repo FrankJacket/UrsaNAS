@@ -1,0 +1,85 @@
+@page "/docker/stacks"
+@inherits AutoRefreshBase
+@inject AgentClient Agent
+@inject DockerOperations Ops
+@inject IDialogService Dialogs
+@inject ISnackbar Snack
+
+<MudText Typo="Typo.h4" Class="mb-4">@L["Stacks"]</MudText>
+
+<MudAlert Severity="Severity.Info" Class="mb-4">
+    @L["A stack is a Docker Compose file: several containers that work together. The files are kept on the NAS and can be edited here."]
+</MudAlert>
+
+@if (error is not null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">@error <MudLink Href="/docker">@L["Docker status"]</MudLink></MudAlert>
+}
+
+<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="() => Edit(null)" Class="mb-4" Disabled="busy">@L["New stack"]</MudButton>
+
+<MudTable Items="stacks" Hover="true" Dense="true" Loading="@(!loaded)">
+    <HeaderContent><MudTh>@L["Stack"]</MudTh><MudTh>@L["Status"]</MudTh><MudTh></MudTh></HeaderContent>
+    <RowTemplate>
+        <MudTd><b>@context.Name</b></MudTd>
+        <MudTd>
+            @if (context.Total == 0) { <MudChip T="string" Size="Size.Small">@L["Not started"]</MudChip> }
+            else if (context.Running == context.Total) { <MudChip T="string" Size="Size.Small" Color="Color.Success">@L["{0} of {1} running", context.Running, context.Total]</MudChip> }
+            else { <MudChip T="string" Size="Size.Small" Color="Color.Warning">@L["{0} of {1} running", context.Running, context.Total]</MudChip> }
+        </MudTd>
+        <MudTd Style="text-align:right; white-space:nowrap">
+            <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" Disabled="busy" OnClick='() => Act(context, "up", L["Stack started."])'>@L["Start"]</MudButton>
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="@(busy || context.Total == 0)" OnClick='() => Act(context, "down", L["Stack stopped."])'>@L["Stop"]</MudButton>
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="busy" OnClick='() => Act(context, "update", L["Stack updated."])'>@L["Update"]</MudButton>
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Edit" Disabled="busy" OnClick="() => Edit(context.Name)">@L["Edit"]</MudButton>
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" Disabled="busy" OnClick="() => Delete(context)">@L["Delete"]</MudButton>
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent><MudText Class="pa-4">@L["No stacks yet."]</MudText></NoRecordsContent>
+</MudTable>
+
+@code {
+    IReadOnlyList<StackInfo> stacks = [];
+    string? error;
+    bool loaded, busy;
+
+    protected override async Task LoadAsync()
+    {
+        try { stacks = await Agent.GetStacksAsync(); error = null; }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable: is the ursanas-agent service running?"]; }
+        loaded = true;
+    }
+
+    async Task Run(Func<Task> action, string success)
+    {
+        busy = true;
+        try { await action(); Snack.Add(success, Severity.Success); }
+        catch (AgentException e) { Snack.Add(L.Translate(e.Message), Severity.Error); }
+        catch (HttpRequestException) { Snack.Add(L["Agent unreachable."], Severity.Error); }
+        busy = false;
+        await LoadAsync();
+    }
+
+    Task Act(StackInfo s, string action, string success) => Run(() => Ops.StackAsync(s.Name, action), success);
+
+    async Task Edit(string? name)
+    {
+        var parameters = new DialogParameters<StackEditorDialog> { { x => x.Existing, name } };
+        var dialog = await Dialogs.ShowAsync<StackEditorDialog>(name is null ? L["New stack"] : L["Edit {0}", name], parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true, CloseButton = true, BackdropClick = false });
+        if (await dialog.Result is { Canceled: false, Data: bool started })
+        {
+            Snack.Add(started ? L["Stack saved and started."] : L["Stack saved."], Severity.Success);
+            await LoadAsync();
+        }
+    }
+
+    async Task Delete(StackInfo s)
+    {
+        var ok = await Dialogs.ShowMessageBoxAsync(L["Delete {0}?", s.Name],
+            L["The stack is stopped and its compose file is deleted. Named volumes and folders of the NAS keep their data."],
+            yesText: L["Delete"], cancelText: L["Cancel"]);
+        if (ok == true) await Act(s, "remove", L["{0} deleted.", s.Name]);
+    }
+}

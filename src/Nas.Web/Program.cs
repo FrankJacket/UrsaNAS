@@ -56,6 +56,11 @@ b.Services.AddSingleton<AlertService>();
 b.Services.AddSingleton<AlertMonitor>();
 b.Services.AddHostedService(sp => sp.GetRequiredService<AlertMonitor>());
 
+b.Services.AddSingleton<DockerAvailability>();
+b.Services.AddHostedService<DockerMonitor>();
+b.Services.AddScoped<DockerOperations>();
+b.Services.AddScoped<NasFolderPicker>();
+
 b.Services.AddSingleton<BackupRepo>();
 b.Services.AddScoped<BackupCoordinator>();
 b.Services.AddScoped<BackupOperations>();
@@ -64,7 +69,11 @@ b.Services.AddHostedService<BackupMonitor>();
 // L'interface ne touche jamais au système : elle parle à l'agent par socket Unix (ou par URL en développement).
 var socketPath = b.Configuration["Agent:SocketPath"];
 var agentUrl = b.Configuration["Agent:Url"];
-b.Services.AddHttpClient<AgentClient>(c => c.BaseAddress = new Uri(agentUrl ?? "http://agent/"))
+b.Services.AddHttpClient<AgentClient>(c =>
+    {
+        c.BaseAddress = new Uri(agentUrl ?? "http://agent/");
+        c.Timeout = TimeSpan.FromMinutes(15); // télécharger une image Docker ou monter une stack peut prendre plusieurs minutes
+    })
     .ConfigurePrimaryHttpMessageHandler(() =>
     {
         var handler = new SocketsHttpHandler();
