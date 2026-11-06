@@ -162,7 +162,7 @@ public class ZfsServiceTests
     {
         var ex = await Assert.ThrowsAsync<OperationException>(() =>
             _svc.CreatePoolAsync(new CreatePoolRequest("tank", "mirror", ["/dev/sda", "/dev/sdb"])));
-        Assert.Contains("système", ex.Message);
+        Assert.Contains("system", ex.Message);
         Assert.DoesNotContain(_run.Calls, c => c.Args.Length > 0 && c.Args[0] == "create");
     }
 
@@ -180,7 +180,7 @@ public class ZfsServiceTests
     {
         _run.Handler = c => c.Args[0] == "list" ? new(0, "tank\t1\t0\t1\tONLINE\n", "") : new(0, "", "");
         var ex = await Assert.ThrowsAsync<OperationException>(() => _svc.CreatePoolAsync(new("tank", "mirror", ["/dev/sdb", "/dev/sdc"])));
-        Assert.Contains("existe déjà", ex.Message);
+        Assert.Contains("already exists", ex.Message);
     }
 
     [Fact]

@@ -70,13 +70,13 @@ public class AdminAccountsTests : IDisposable
         var bobSession = AdminAccounts.PrincipalFor((await _accounts.ValidateAsync("bob", "mot-de-passe-de-bob"))!);
 
         var self = await Assert.ThrowsAsync<AgentException>(() => _accounts.DeleteAsync("alice", actor: "Alice"));
-        Assert.Contains("propre compte", self.Message);
+        Assert.Contains("own account", self.Message);
 
         await _accounts.DeleteAsync("bob", actor: "alice");
         Assert.False(await _accounts.IsStillValidAsync(bobSession));
 
         var last = await Assert.ThrowsAsync<AgentException>(() => _accounts.DeleteAsync("alice", actor: "bob"));
-        Assert.Contains("dernier", last.Message);
+        Assert.Contains("last administrator", last.Message);
         Assert.Equal(1, await _accounts.CountAsync());
     }
 

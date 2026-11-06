@@ -160,7 +160,7 @@ public class Repo(Db db)
         string S(string k, string d) => v.GetValueOrDefault("mail." + k, d);
         var d = MailSettings.Default;
         return new MailSettings(S("enabled", "0") == "1", S("host", d.Host), int.TryParse(S("port", ""), out var p) ? p : d.Port,
-            S("security", d.Security), S("user", ""), S("password", ""), S("from", ""), S("to", ""));
+            S("security", d.Security), S("user", ""), S("password", ""), S("from", ""), S("to", ""), Localization.Translator.Normalize(S("language", "en")));
     }
 
     /// <summary>Un mot de passe vide conserve celui qui est déjà enregistré.</summary>
@@ -171,7 +171,7 @@ public class Repo(Db db)
         var pairs = new Dictionary<string, string>
         {
             ["enabled"] = s.Enabled ? "1" : "0", ["host"] = s.Host, ["port"] = s.Port.ToString(), ["security"] = s.Security,
-            ["user"] = s.User, ["from"] = s.From, ["to"] = s.To,
+            ["user"] = s.User, ["from"] = s.From, ["to"] = s.To, ["language"] = Localization.Translator.Normalize(s.Language),
         };
         if (s.Password.Length > 0) pairs["password"] = s.Password;
         foreach (var (k, val) in pairs)

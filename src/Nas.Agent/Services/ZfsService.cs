@@ -77,7 +77,7 @@ public sealed class ZfsService(ICommandRunner run, IDiskProvider disks, IConfigu
 
     public async Task<IReadOnlyList<PoolInfo>> ListPoolsAsync(CancellationToken ct = default)
     {
-        var list = Check(await run.RunAsync("zpool", ZfsParser.PoolListArgs, ct: ct), "Liste des pools");
+        var list = Check(await run.RunAsync("zpool", ZfsParser.PoolListArgs, ct: ct), "Listing pools");
         var result = new List<PoolInfo>();
         foreach (var p in ZfsParser.ParsePoolList(list))
         {
@@ -93,21 +93,21 @@ public sealed class ZfsService(ICommandRunner run, IDiskProvider disks, IConfigu
         if (Rules.ValidatePoolName(r.Name) is { } e1) throw new OperationException(e1);
         var paths = r.Disks ?? [];
         if (Rules.ValidatePoolLayout(r.Layout, paths.Count) is { } e2) throw new OperationException(e2);
-        if (paths.Distinct().Count() != paths.Count) throw new OperationException("Un disque est sélectionné deux fois.");
+        if (paths.Distinct().Count() != paths.Count) throw new OperationException(Msg.F("A disk is selected twice."));
 
         // Seuls les disques que l'agent connaît et qui ne sont montés nulle part (système compris) sont acceptés.
         var known = (await disks.ListAsync(ct)).ToDictionary(d => d.Path);
         foreach (var p in paths)
         {
             if (!known.TryGetValue(p, out var d)) throw new OperationException($"Disque inconnu : {p}.");
-            if (d.MountPoints.Count > 0) throw new OperationException($"{p} est utilisé par le système ({string.Join(", ", d.MountPoints)}).");
+            if (d.MountPoints.Count > 0) throw new OperationException(Msg.F("{0} is in use by the system ({1}).", p, string.Join(", ", d.MountPoints)));
         }
 
-        var existing = ZfsParser.ParsePoolList(Check(await run.RunAsync("zpool", ZfsParser.PoolListArgs, ct: ct), "Liste des pools"));
-        if (existing.Any(x => x.Name.Equals(r.Name, StringComparison.OrdinalIgnoreCase))) throw new OperationException($"Le pool « {r.Name} » existe déjà.");
+        var existing = ZfsParser.ParsePoolList(Check(await run.RunAsync("zpool", ZfsParser.PoolListArgs, ct: ct), "Listing pools"));
+        if (existing.Any(x => x.Name.Equals(r.Name, StringComparison.OrdinalIgnoreCase))) throw new OperationException(Msg.F("Pool “{0}” already exists.", r.Name));
 
         // L'UMask 0007 de l'unité systemd rendrait le dossier racine inaccessible aux utilisateurs du NAS : on le remet en 0755.
-        Check(await run.RunAsync("mkdir", ["-p", MountRoot], ct: ct), "Création du dossier des pools");
+        Check(await run.RunAsync("mkdir", ["-p", MountRoot], ct: ct), "Creating the pools folder");
         Check(await run.RunAsync("chmod", ["0755", MountRoot], ct: ct), "chmod");
 
         List<string> args =
@@ -118,61 +118,61 @@ public sealed class ZfsService(ICommandRunner run, IDiskProvider disks, IConfigu
             r.Name, r.Layout,
         ];
         args.AddRange(paths);
-        Check(await run.RunAsync("zpool", args, ct: ct), "Création du pool");
+        Check(await run.RunAsync("zpool", args, ct: ct), "Creating the pool");
     }
 
     public async Task DestroyPoolAsync(string name, CancellationToken ct = default)
     {
         if (Rules.ValidatePoolName(name) is { } e) throw new OperationException(e);
-        var pools = ZfsParser.ParsePoolList(Check(await run.RunAsync("zpool", ZfsParser.PoolListArgs, ct: ct), "Liste des pools"));
-        if (!pools.Any(p => p.Name == name)) throw new OperationException($"Le pool « {name} » n'existe pas.");
-        Check(await run.RunAsync("zpool", ["destroy", name], ct: ct), "Destruction du pool");
+        var pools = ZfsParser.ParsePoolList(Check(await run.RunAsync("zpool", ZfsParser.PoolListArgs, ct: ct), "Listing pools"));
+        if (!pools.Any(p => p.Name == name)) throw new OperationException(Msg.F("Pool “{0}” does not exist.", name));
+        Check(await run.RunAsync("zpool", ["destroy", name], ct: ct), "Destroying the pool");
     }
 
     public async Task ScrubAsync(string name, CancellationToken ct = default)
     {
         if (Rules.ValidatePoolName(name) is { } e) throw new OperationException(e);
-        Check(await run.RunAsync("zpool", ["scrub", name], ct: ct), "Vérification du pool");
+        Check(await run.RunAsync("zpool", ["scrub", name], ct: ct), "Scrubbing the pool");
     }
 
     public async Task<IReadOnlyList<DatasetInfo>> ListDatasetsAsync(CancellationToken ct = default) =>
-        ZfsParser.ParseDatasets(Check(await run.RunAsync("zfs", ZfsParser.DatasetListArgs, ct: ct), "Liste des jeux de données"));
+        ZfsParser.ParseDatasets(Check(await run.RunAsync("zfs", ZfsParser.DatasetListArgs, ct: ct), "Listing datasets"));
 
     public async Task CreateDatasetAsync(string name, CancellationToken ct = default)
     {
         if (Rules.ValidateDatasetName(name) is { } e) throw new OperationException(e);
-        Check(await run.RunAsync("zfs", ["create", name], ct: ct), "Création du jeu de données");
+        Check(await run.RunAsync("zfs", ["create", name], ct: ct), "Creating the dataset");
     }
 
     public async Task DestroyDatasetAsync(string name, CancellationToken ct = default)
     {
         if (Rules.ValidateDatasetName(name) is { } e) throw new OperationException(e);
-        Check(await run.RunAsync("zfs", ["destroy", name], ct: ct), "Suppression du jeu de données");
+        Check(await run.RunAsync("zfs", ["destroy", name], ct: ct), "Deleting the dataset");
     }
 
     public async Task<IReadOnlyList<SnapshotInfo>> ListSnapshotsAsync(CancellationToken ct = default) =>
-        ZfsParser.ParseSnapshots(Check(await run.RunAsync("zfs", ZfsParser.SnapshotListArgs, ct: ct), "Liste des instantanés"));
+        ZfsParser.ParseSnapshots(Check(await run.RunAsync("zfs", ZfsParser.SnapshotListArgs, ct: ct), "Listing snapshots"));
 
     public async Task CreateSnapshotAsync(CreateSnapshotRequest r, CancellationToken ct = default)
     {
         if (Rules.ValidateDatasetName(r.Dataset) is { } e1) throw new OperationException(e1);
         if (Rules.ValidateSnapshotName(r.Name) is { } e2) throw new OperationException(e2);
-        Check(await run.RunAsync("zfs", ["snapshot", $"{r.Dataset}@{r.Name}"], ct: ct), "Création de l'instantané");
+        Check(await run.RunAsync("zfs", ["snapshot", $"{r.Dataset}@{r.Name}"], ct: ct), "Creating the snapshot");
     }
 
     public async Task DestroySnapshotAsync(string fullName, CancellationToken ct = default)
     {
         var at = fullName?.IndexOf('@') ?? -1;
-        if (at < 0) throw new OperationException("Nom d'instantané invalide (jeu@nom attendu).");
+        if (at < 0) throw new OperationException(Msg.F("Invalid snapshot name (dataset@name expected)."));
         if (Rules.ValidateDatasetName(fullName![..at]) is { } e1) throw new OperationException(e1);
         if (Rules.ValidateSnapshotName(fullName[(at + 1)..]) is { } e2) throw new OperationException(e2);
-        Check(await run.RunAsync("zfs", ["destroy", fullName], ct: ct), "Suppression de l'instantané");
+        Check(await run.RunAsync("zfs", ["destroy", fullName], ct: ct), "Deleting the snapshot");
     }
 
     static string Check(CommandResult r, string what)
     {
         if (r.ExitCode == 0) return r.StdOut;
         var msg = (string.IsNullOrWhiteSpace(r.StdErr) ? r.StdOut : r.StdErr).Trim();
-        throw new OperationException($"{what} a échoué : {msg}");
+        throw new OperationException(Msg.F("{0} failed: {1}", what, msg));
     }
 }

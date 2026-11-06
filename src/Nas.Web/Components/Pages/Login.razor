@@ -6,20 +6,20 @@
 @inject Repo Repo
 @inject NavigationManager Nav
 
-<PageTitle>Connexion — UrsaNAS</PageTitle>
+<PageTitle>@L["Sign in"] — UrsaNAS</PageTitle>
 <h1>UrsaNAS</h1>
-<p class="hint">Connecte-toi pour gérer le NAS.</p>
+<p class="hint">@L["Sign in to manage the NAS."]</p>
 
 <EditForm Model="form" FormName="login" OnValidSubmit="Submit" method="post">
-    <label for="name">Identifiant</label>
+    <label for="name">@L["Username"]</label>
     <InputText id="name" @bind-Value="form.Name" autocomplete="username" autofocus />
-    <label for="password">Mot de passe</label>
+    <label for="password">@L["Password"]</label>
     <InputText id="password" type="password" @bind-Value="form.Password" autocomplete="current-password" />
     @if (error is not null)
     {
         <div class="error">@error</div>
     }
-    <button type="submit">Se connecter</button>
+    <button type="submit">@L["Sign in"]</button>
 </EditForm>
 
 @code {
@@ -46,7 +46,7 @@
         var ip = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "?";
         if (Throttle.IsLocked(form.Name, ip))
         {
-            error = "Trop d'essais échoués. Réessaie dans quelques minutes.";
+            error = L["Too many failed attempts. Try again in a few minutes."];
             return;
         }
 
@@ -54,14 +54,14 @@
         if (admin is null)
         {
             Throttle.Fail(form.Name, ip);
-            await Repo.AuditAsync("inconnu", "Connexion refusée", $"{Trunc(form.Name)} depuis {ip}");
-            error = "Identifiant ou mot de passe incorrect.";
+            await Repo.AuditAsync("unknown", "Sign-in refused", Msg.F("{0} from {1}", Trunc(form.Name), ip));
+            error = L["Incorrect username or password."];
             return;
         }
 
         Throttle.Success(form.Name);
         await HttpContext.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, AdminAccounts.PrincipalFor(admin));
-        await Repo.AuditAsync(admin.Name, "Connexion", ip);
+        await Repo.AuditAsync(admin.Name, "Sign-in", ip);
         Nav.NavigateTo(LocalUrl.Safe(ReturnUrl), forceLoad: true);
     }
 

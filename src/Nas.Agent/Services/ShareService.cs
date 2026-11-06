@@ -98,10 +98,10 @@ public sealed class ShareService(ICommandRunner run, UserService users, IConfigu
         if (test.ExitCode != 0)
         {
             if (previous is null) File.Delete(ConfPath); else await File.WriteAllTextAsync(ConfPath, previous, ct);
-            throw new OperationException("Samba refuse la configuration : " + (string.IsNullOrWhiteSpace(test.StdErr) ? test.StdOut : test.StdErr).Trim());
+            throw new OperationException(Msg.F("Samba rejects the configuration: {0}", (string.IsNullOrWhiteSpace(test.StdErr) ? test.StdOut : test.StdErr).Trim()));
         }
 
-        Check(await run.RunAsync("smbcontrol", ["all", "reload-config"], ct: ct), "Rechargement de Samba");
+        Check(await run.RunAsync("smbcontrol", ["all", "reload-config"], ct: ct), "Reloading Samba");
     }
 
     /// <summary>Trouve le point de montage de chaque jeu de données choisi ; refuse un jeu inconnu ou non monté.</summary>
@@ -111,13 +111,13 @@ public sealed class ShareService(ICommandRunner run, UserService users, IConfigu
         if (!shares.Any(s => s.Dataset is not null)) return result;
 
         var list = await run.RunAsync("zfs", ZfsParser.DatasetListArgs, ct: ct);
-        Check(list, "Liste des jeux de données");
+        Check(list, "Listing datasets");
         var known = ZfsParser.ParseDatasets(list.StdOut).ToDictionary(d => d.Name, d => d.Mountpoint);
         foreach (var s in shares.Where(s => s.Dataset is not null))
         {
-            if (!known.TryGetValue(s.Dataset!, out var mp)) throw new OperationException($"Le jeu de données « {s.Dataset} » n'existe pas.");
-            if (!Path.IsPathRooted(mp)) throw new OperationException($"Le jeu de données « {s.Dataset} » n'a pas de point de montage.");
-            if (!Directory.Exists(mp)) throw new OperationException($"Le jeu de données « {s.Dataset} » n'est pas monté ({mp}).");
+            if (!known.TryGetValue(s.Dataset!, out var mp)) throw new OperationException(Msg.F("Dataset “{0}” does not exist.", s.Dataset));
+            if (!Path.IsPathRooted(mp)) throw new OperationException(Msg.F("Dataset “{0}” has no mount point.", s.Dataset));
+            if (!Directory.Exists(mp)) throw new OperationException(Msg.F("Dataset “{0}” is not mounted ({1}).", s.Dataset, mp));
             result[s.Dataset!] = mp;
         }
         return result;
@@ -138,6 +138,6 @@ public sealed class ShareService(ICommandRunner run, UserService users, IConfigu
     static void Check(CommandResult r, string what)
     {
         if (r.ExitCode == 0) return;
-        throw new OperationException($"{what} a échoué ({r.ExitCode}) : {r.StdErr.Trim()}");
+        throw new OperationException(Msg.F("{0} failed ({1}): {2}", what, r.ExitCode, r.StdErr.Trim()));
     }
 }

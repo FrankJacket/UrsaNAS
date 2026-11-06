@@ -39,25 +39,25 @@ public static partial class Rules
     public static string? ValidateShareName(string? name)
     {
         if (string.IsNullOrEmpty(name) || !ShareNameRegex().IsMatch(name))
-            return "Nom de partage invalide : 1 à 32 caractères (lettres, chiffres, _ et -), sans espace.";
-        if (ReservedShares.Contains(name)) return $"« {name} » est un nom réservé.";
+            return Msg.F("Invalid share name: 1 to 32 characters (letters, digits, _ and -), no spaces.");
+        if (ReservedShares.Contains(name)) return Msg.F("“{0}” is a reserved name.", name);
         return null;
     }
 
     public static string? ValidateUserName(string? name)
     {
         if (string.IsNullOrEmpty(name) || !UserNameRegex().IsMatch(name))
-            return "Nom d'utilisateur invalide : 1 à 32 caractères en minuscules (lettres, chiffres, _ et -), sans espace.";
-        if (ReservedUsers.Contains(name)) return $"« {name} » est un nom réservé.";
+            return Msg.F("Invalid user name: 1 to 32 lowercase characters (letters, digits, _ and -), no spaces.");
+        if (ReservedUsers.Contains(name)) return Msg.F("“{0}” is a reserved name.", name);
         return null;
     }
 
     public static string? ValidatePassword(string? password)
     {
         if (password is null || password.Length < MinPasswordLength)
-            return $"Le mot de passe doit contenir au moins {MinPasswordLength} caractères.";
-        if (password.Length > MaxPasswordLength) return $"Le mot de passe est limité à {MaxPasswordLength} caractères.";
-        if (password.Any(char.IsControl)) return "Le mot de passe ne peut pas contenir de caractère de contrôle.";
+            return Msg.F("The password must be at least {0} characters long.", MinPasswordLength);
+        if (password.Length > MaxPasswordLength) return Msg.F("The password is limited to {0} characters.", MaxPasswordLength);
+        if (password.Any(char.IsControl)) return Msg.F("The password cannot contain control characters.");
         return null;
     }
 
@@ -65,8 +65,8 @@ public static partial class Rules
     public static string? ValidateComment(string? comment)
     {
         if (comment is null) return null;
-        if (comment.Length > 200) return "Le commentaire est limité à 200 caractères.";
-        if (comment.Any(char.IsControl)) return "Le commentaire ne peut pas contenir de caractère de contrôle.";
+        if (comment.Length > 200) return Msg.F("The comment is limited to 200 characters.");
+        if (comment.Any(char.IsControl)) return Msg.F("The comment cannot contain control characters.");
         return null;
     }
 
@@ -79,15 +79,15 @@ public static partial class Rules
         {
             if (ValidateShareName(s.Name) is { } e1) return e1;
             if (ValidateComment(s.Comment) is { } e2) return e2;
-            if (!seen.Add(s.Name)) return $"Le partage « {s.Name} » est en double.";
+            if (!seen.Add(s.Name)) return Msg.F("Share “{0}” is duplicated.", s.Name);
             if (s.Dataset is not null)
             {
                 if (ValidateDatasetName(s.Dataset) is { } e3) return e3;
-                if (!datasets.Add(s.Dataset)) return $"Le jeu de données « {s.Dataset} » est déjà utilisé par un autre partage.";
+                if (!datasets.Add(s.Dataset)) return Msg.F("The dataset “{0}” is already used by another share.", s.Dataset);
             }
-            if (s.ValidUsers is null || s.ValidUsers.Count == 0) return $"Le partage « {s.Name} » doit avoir au moins un utilisateur.";
+            if (s.ValidUsers is null || s.ValidUsers.Count == 0) return Msg.F("Share “{0}” must have at least one user.", s.Name);
             foreach (var u in s.ValidUsers)
-                if (!knownUsers.Contains(u)) return $"Le partage « {s.Name} » référence l'utilisateur inconnu « {u} ».";
+                if (!knownUsers.Contains(u)) return Msg.F("Share “{0}” references the unknown user “{1}”.", s.Name, u);
         }
         return null;
     }

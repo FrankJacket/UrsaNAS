@@ -54,10 +54,10 @@ public class RulesTests
         var known = new HashSet<string> { "alice" };
         var a = new ShareDef("docs", "", false, ["alice"]);
         Assert.Null(Rules.ValidateShares([a], known));
-        Assert.Contains("double", Rules.ValidateShares([a, a with { Name = "DOCS" }], known));
-        Assert.Contains("inconnu", Rules.ValidateShares([a with { ValidUsers = ["bob"] }], known));
-        Assert.Contains("au moins un", Rules.ValidateShares([a with { ValidUsers = [] }], known));
-        Assert.Contains("contrôle", Rules.ValidateShares([a with { Comment = "x\ny" }], known));
+        Assert.Contains("duplicated", Rules.ValidateShares([a, a with { Name = "DOCS" }], known));
+        Assert.Contains("unknown", Rules.ValidateShares([a with { ValidUsers = ["bob"] }], known));
+        Assert.Contains("at least one", Rules.ValidateShares([a with { ValidUsers = [] }], known));
+        Assert.Contains("control characters", Rules.ValidateShares([a with { Comment = "x\ny" }], known));
     }
 }
 
@@ -161,7 +161,7 @@ public class UserServiceTests
         };
         var ex = await Assert.ThrowsAsync<OperationException>(() =>
             new UserService(run).CreateAsync(new CreateUserRequest("daemon2", "12345678")));
-        Assert.Contains("compte système", ex.Message);
+        Assert.Contains("system account", ex.Message);
         Assert.DoesNotContain(run.Calls, c => c.File is "useradd" or "smbpasswd");
     }
 

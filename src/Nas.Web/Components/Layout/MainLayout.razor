@@ -17,32 +17,36 @@
         <MudSpacer />
         <AuthorizeView>
             <MudText Typo="Typo.body2" Class="mr-2">@context.User.Identity?.Name</MudText>
-            <MudTooltip Text="Se déconnecter">
+            <MudTooltip Text="@L["Sign out"]">
                 <MudIconButton Icon="@Icons.Material.Filled.Logout" Color="Color.Inherit" OnClick="Logout" />
             </MudTooltip>
         </AuthorizeView>
+        <MudMenu Icon="@Icons.Material.Filled.Translate" Color="Color.Inherit" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
+            <MudMenuItem OnClick='() => SetLanguage("en")'>English @(L.Lang == "en" ? "✓" : "")</MudMenuItem>
+            <MudMenuItem OnClick='() => SetLanguage("fr")'>Français @(L.Lang == "fr" ? "✓" : "")</MudMenuItem>
+        </MudMenu>
         <MudMenu Icon="@(Theme.IsDark ? Icons.Material.Filled.DarkMode : Icons.Material.Filled.LightMode)" Color="Color.Inherit"
                  AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
-            <MudMenuItem Icon="@Icons.Material.Filled.LightMode" OnClick="() => SetTheme(false)">Thème clair @(Theme.IsDark ? "" : "✓")</MudMenuItem>
-            <MudMenuItem Icon="@Icons.Material.Filled.DarkMode" OnClick="() => SetTheme(true)">Thème sombre @(Theme.IsDark ? "✓" : "")</MudMenuItem>
+            <MudMenuItem Icon="@Icons.Material.Filled.LightMode" OnClick="() => SetTheme(false)">@L["Light theme"] @(Theme.IsDark ? "" : "✓")</MudMenuItem>
+            <MudMenuItem Icon="@Icons.Material.Filled.DarkMode" OnClick="() => SetTheme(true)">@L["Dark theme"] @(Theme.IsDark ? "✓" : "")</MudMenuItem>
         </MudMenu>
     </MudAppBar>
     <MudDrawer Open="true" Elevation="0" Variant="DrawerVariant.Persistent">
         <MudNavMenu>
-            <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Dns">Disques</MudNavLink>
-            <MudNavLink Href="/pools" Icon="@Icons.Material.Filled.Layers">Pools ZFS</MudNavLink>
-            <MudNavLink Href="/datasets" Icon="@Icons.Material.Filled.FolderCopy">Jeux de données</MudNavLink>
-            <MudNavLink Href="/users" Icon="@Icons.Material.Filled.People">Utilisateurs</MudNavLink>
-            <MudNavLink Href="/shares" Icon="@Icons.Material.Filled.FolderShared">Partages</MudNavLink>
+            <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Dns">@L["Disks"]</MudNavLink>
+            <MudNavLink Href="/pools" Icon="@Icons.Material.Filled.Layers">@L["ZFS pools"]</MudNavLink>
+            <MudNavLink Href="/datasets" Icon="@Icons.Material.Filled.FolderCopy">@L["Datasets"]</MudNavLink>
+            <MudNavLink Href="/users" Icon="@Icons.Material.Filled.People">@L["Users"]</MudNavLink>
+            <MudNavLink Href="/shares" Icon="@Icons.Material.Filled.FolderShared">@L["Shares"]</MudNavLink>
             <MudNavLink Href="/alerts" Icon="@Icons.Material.Filled.NotificationsActive">
-                Alertes
+                @L["Alerts"]
                 @if (Alerts.Count > 0)
                 {
                     <MudChip T="string" Size="Size.Small" Color="@(Alerts.CriticalCount > 0 ? Color.Error : Color.Warning)" Class="ml-2">@Alerts.Count</MudChip>
                 }
             </MudNavLink>
-            <MudNavLink Href="/admins" Icon="@Icons.Material.Filled.AdminPanelSettings">Administrateurs</MudNavLink>
-            <MudNavLink Href="/journal" Icon="@Icons.Material.Filled.History">Journal</MudNavLink>
+            <MudNavLink Href="/admins" Icon="@Icons.Material.Filled.AdminPanelSettings">@L["Administrators"]</MudNavLink>
+            <MudNavLink Href="/journal" Icon="@Icons.Material.Filled.History">@L["Journal"]</MudNavLink>
         </MudNavMenu>
     </MudDrawer>
     <MudMainContent Class="pt-20 px-4 pb-4">@Body</MudMainContent> @* pt-20 : dégage la barre d'application fixe *@
@@ -58,6 +62,10 @@
 
     // Rechargement complet : /logout est une vraie réponse HTTP qui supprime le cookie, pas une page du routeur.
     void Logout() => Nav.NavigateTo("/logout", forceLoad: true);
+
+    // /lang pose le cookie de langue puis revient ici : rechargement complet pour que le circuit reparte dans la nouvelle langue.
+    void SetLanguage(string code) =>
+        Nav.NavigateTo($"/lang/{code}?returnUrl={Uri.EscapeDataString("/" + Nav.ToBaseRelativePath(Nav.Uri))}", forceLoad: true);
 
     async Task SetTheme(bool dark)
     {

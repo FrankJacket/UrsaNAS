@@ -3,6 +3,7 @@ using Nas.Contracts;
 using Nas.Web.Alerting;
 using Nas.Web.Auth;
 using Nas.Web.Data;
+using Nas.Web.Localization;
 
 namespace Nas.Web;
 
@@ -16,26 +17,26 @@ public class NasOperations(AgentClient agent, Repo repo, IMailSender mail, Admin
     static readonly SemaphoreSlim _gate = new(1, 1);
 
     /// <summary>L'administrateur connecté, tel qu'il apparaît dans le journal.</summary>
-    async Task<string> ActorAsync() => (await auth.GetAuthenticationStateAsync()).User.Identity?.Name ?? "inconnu";
+    async Task<string> ActorAsync() => (await auth.GetAuthenticationStateAsync()).User.Identity?.Name ?? "unknown";
 
     // ---- Administrateurs de l'interface
     public async Task CreateAdminAsync(string name, string password)
     {
         await admins.CreateAsync(name, password);
-        await repo.AuditAsync(await ActorAsync(), "Administrateur créé", name);
+        await repo.AuditAsync(await ActorAsync(), "Administrator created", name);
     }
 
     public async Task SetAdminPasswordAsync(string name, string password)
     {
         await admins.SetPasswordAsync(name, password);
-        await repo.AuditAsync(await ActorAsync(), "Mot de passe d'administrateur changé", name); // jamais le mot de passe lui-même
+        await repo.AuditAsync(await ActorAsync(), "Administrator password changed", name); // jamais le mot de passe lui-même
     }
 
     public async Task DeleteAdminAsync(string name)
     {
         var actor = await ActorAsync();
         await admins.DeleteAsync(name, actor);
-        await repo.AuditAsync(actor, "Administrateur supprimé", name);
+        await repo.AuditAsync(actor, "Administrator deleted", name);
     }
 
     // ---- Utilisateurs
@@ -47,7 +48,7 @@ public class NasOperations(AgentClient agent, Repo repo, IMailSender mail, Admin
         try
         {
             await agent.CreateUserAsync(new CreateUserRequest(name, password));
-            await repo.AuditAsync(await ActorAsync(), "Utilisateur créé", name);
+            await repo.AuditAsync(await ActorAsync(), "User created", name);
         }
         finally { _gate.Release(); }
     }
@@ -59,7 +60,7 @@ public class NasOperations(AgentClient agent, Repo repo, IMailSender mail, Admin
         try
         {
             await agent.SetPasswordAsync(name, password);
-            await repo.AuditAsync(await ActorAsync(), "Mot de passe changé", name); // jamais le mot de passe lui-même
+            await repo.AuditAsync(await ActorAsync(), "Password changed", name); // jamais le mot de passe lui-même
         }
         finally { _gate.Release(); }
     }
@@ -71,9 +72,9 @@ public class NasOperations(AgentClient agent, Repo repo, IMailSender mail, Admin
         {
             var using_ = (await repo.GetSharesAsync()).Where(s => s.ValidUsers.Contains(name)).Select(s => s.Name).ToList();
             if (using_.Count > 0)
-                throw new AgentException($"« {name} » est utilisé par le partage {string.Join(", ", using_)} : retire-le d'abord de ce partage.");
+                throw new AgentException(Msg.F("“{0}” is used by share {1}: remove it from that share first.", name, string.Join(", ", using_)));
             await agent.DeleteUserAsync(name);
-            await repo.AuditAsync(await ActorAsync(), "Utilisateur supprimé", name);
+            await repo.AuditAsync(await ActorAsync(), "User deleted", name);
         }
         finally { _gate.Release(); }
     }
@@ -88,13 +89,13 @@ public class NasOperations(AgentClient agent, Repo repo, IMailSender mail, Admin
         {
             var all = await repo.GetSharesAsync();
             var exists = all.Any(s => s.Name.Equals(share.Name, StringComparison.OrdinalIgnoreCase));
-            if (isNew && exists) throw new AgentException($"Le partage « {share.Name} » existe déjà.");
+            if (isNew && exists) throw new AgentException(Msg.F("Share “{0}” already exists.", share.Name));
             var next = all.Where(s => !s.Name.Equals(share.Name, StringComparison.OrdinalIgnoreCase)).Append(share)
                 .OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase).ToList();
 
             await agent.ApplySharesAsync(next);
             await repo.UpsertShareAsync(share);
-            await repo.AuditAsync(await ActorAsync(), isNew ? "Partage créé" : "Partage modifié", share.Name);
+            await repo.AuditAsync(await ActorAsync(), isNew ? "Share created" : "Share modified", share.Name);
         }
         finally { _gate.Release(); }
     }
@@ -108,8 +109,10 @@ public class NasOperations(AgentClient agent, Repo repo, IMailSender mail, Admin
             var removed = all.FirstOrDefault(s => s.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
             await agent.ApplySharesAsync(all.Where(s => s != removed).ToList());
             await repo.DeleteShareAsync(name);
-            var where = removed?.Dataset is { } ds ? $"les fichiers restent dans le jeu de données {ds}" : $"les fichiers restent dans /srv/nas/{name}";
-            await repo.AuditAsync(await ActorAsync(), "Partage supprimé", $"{name} ({where})");
+            var detail = removed?.Dataset is { } ds
+                ? Msg.F("{0} (files remain in dataset {1})", name, ds)
+                : Msg.F("{0} (files remain in {1})", name, $"/srv/nas/{name}");
+            await repo.AuditAsync(await ActorAsync(), "Share deleted", detail);
         }
         finally { _gate.Release(); }
     }
@@ -120,13 +123,13 @@ public class NasOperations(AgentClient agent, Repo repo, IMailSender mail, Admin
         if (Rules.ValidatePoolName(name) is { } e1) throw new AgentException(e1);
         if (Rules.ValidatePoolLayout(layout, disks.Count) is { } e2) throw new AgentException(e2);
         await Audited(() => agent.CreatePoolAsync(new CreatePoolRequest(name, layout, disks)),
-            "Pool créé", $"{name} ({layout} : {string.Join(", ", disks)})");
+            "Pool created", $"{name} ({layout}: {string.Join(", ", disks)})");
     }
 
     public async Task DestroyPoolAsync(string name)
     {
-        await EnsureNoShareAsync(d => d == name || d.StartsWith(name + "/", StringComparison.Ordinal), $"le pool « {name} »");
-        await Audited(() => agent.DestroyPoolAsync(name), "Pool détruit", name);
+        await EnsureNoShareAsync(d => d == name || d.StartsWith(name + "/", StringComparison.Ordinal), Msg.F("pool “{0}”", name));
+        await Audited(() => agent.DestroyPoolAsync(name), "Pool destroyed", name);
     }
 
     /// <summary>Refuse de détruire du stockage qu'un partage utilise encore.</summary>
@@ -134,40 +137,40 @@ public class NasOperations(AgentClient agent, Repo repo, IMailSender mail, Admin
     {
         var shares = (await repo.GetSharesAsync()).Where(s => s.Dataset is not null && uses(s.Dataset)).Select(s => s.Name).ToList();
         if (shares.Count > 0)
-            throw new AgentException($"Impossible de supprimer {what} : le partage {string.Join(", ", shares)} l'utilise. Supprime ou déplace d'abord ce partage.");
+            throw new AgentException(Msg.F("Cannot delete {0}: share {1} uses it. Delete or move that share first.", what, string.Join(", ", shares)));
     }
 
     public Task ScrubPoolAsync(string name) =>
-        Audited(() => agent.ScrubPoolAsync(name), "Vérification lancée", name);
+        Audited(() => agent.ScrubPoolAsync(name), "Scrub started", name);
 
     public async Task CreateDatasetAsync(string name)
     {
         if (Rules.ValidateDatasetName(name) is { } e) throw new AgentException(e);
-        await Audited(() => agent.CreateDatasetAsync(name), "Jeu de données créé", name);
+        await Audited(() => agent.CreateDatasetAsync(name), "Dataset created", name);
     }
 
     public async Task DestroyDatasetAsync(string name)
     {
-        await EnsureNoShareAsync(d => d == name || d.StartsWith(name + "/", StringComparison.Ordinal), $"le jeu de données « {name} »");
-        await Audited(() => agent.DestroyDatasetAsync(name), "Jeu de données supprimé", name);
+        await EnsureNoShareAsync(d => d == name || d.StartsWith(name + "/", StringComparison.Ordinal), Msg.F("dataset “{0}”", name));
+        await Audited(() => agent.DestroyDatasetAsync(name), "Dataset deleted", name);
     }
 
     public async Task CreateSnapshotAsync(string dataset, string name)
     {
         if (Rules.ValidateDatasetName(dataset) is { } e1) throw new AgentException(e1);
         if (Rules.ValidateSnapshotName(name) is { } e2) throw new AgentException(e2);
-        await Audited(() => agent.CreateSnapshotAsync(dataset, name), "Instantané créé", $"{dataset}@{name}");
+        await Audited(() => agent.CreateSnapshotAsync(dataset, name), "Snapshot created", $"{dataset}@{name}");
     }
 
     public Task DestroySnapshotAsync(string fullName) =>
-        Audited(() => agent.DestroySnapshotAsync(fullName), "Instantané supprimé", fullName);
+        Audited(() => agent.DestroySnapshotAsync(fullName), "Snapshot deleted", fullName);
 
     // ---- Alertes : réglages du courriel
     public async Task SaveMailSettingsAsync(MailSettings s)
     {
         if (MailRules.Validate(s) is { } e) throw new AgentException(e);
         await repo.SaveMailSettingsAsync(s);
-        await repo.AuditAsync(await ActorAsync(), "Réglages e-mail modifiés", s.Enabled ? $"{s.Host}:{s.Port} vers {string.Join(", ", s.Recipients)}" : "envoi désactivé");
+        await repo.AuditAsync(await ActorAsync(), "Email settings changed", s.Enabled ? Msg.F("{0}:{1} to {2}", s.Host, s.Port, string.Join(", ", s.Recipients)) : "sending disabled");
     }
 
     /// <summary>Envoie un message d'essai avec les réglages enregistrés ; l'échec est expliqué à l'utilisateur.</summary>
@@ -178,13 +181,14 @@ public class NasOperations(AgentClient agent, Repo repo, IMailSender mail, Admin
         try
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-            await mail.SendAsync(s, "[UrsaNAS] Message d'essai", "Si tu lis ce message, les alertes UrsaNAS peuvent t'écrire.", cts.Token);
+            await mail.SendAsync(s, "[UrsaNAS] " + Translator.Translate("Test message", s.Language),
+                Translator.Translate("If you are reading this, UrsaNAS alerts can email you.", s.Language), cts.Token);
         }
         catch (Exception ex) when (ex is not AgentException)
         {
-            throw new AgentException($"Échec de l'envoi : {ex.Message}");
+            throw new AgentException(Msg.F("Sending failed: {0}", ex.Message));
         }
-        await repo.AuditAsync(await ActorAsync(), "E-mail d'essai envoyé", string.Join(", ", s.Recipients));
+        await repo.AuditAsync(await ActorAsync(), "Test email sent", string.Join(", ", s.Recipients));
     }
 
     async Task Audited(Func<Task> action, string what, string detail)
@@ -205,7 +209,7 @@ public class NasOperations(AgentClient agent, Repo repo, IMailSender mail, Admin
         try
         {
             await agent.ApplySharesAsync(await repo.GetSharesAsync());
-            await repo.AuditAsync(await ActorAsync(), "Partages réappliqués");
+            await repo.AuditAsync(await ActorAsync(), "Shares reapplied");
         }
         finally { _gate.Release(); }
     }

@@ -7,15 +7,15 @@
         {
             <MudAlert Severity="Severity.Error" Class="mb-3">@error</MudAlert>
         }
-        <MudTextField @bind-Value="name" Label="Identifiant" Disabled="@(busy || Existing is not null)" AutoFocus="@(Existing is null)"
-                      HelperText="Minuscules, chiffres, _ et -." />
-        <MudTextField @bind-Value="password" Label="@(Existing is null ? "Mot de passe" : "Nouveau mot de passe")" InputType="InputType.Password"
-                      Disabled="busy" AutoFocus="@(Existing is not null)" HelperText="@($"Au moins {Rules.MinPasswordLength} caractères.")" />
-        <MudTextField @bind-Value="confirm" Label="Confirmer le mot de passe" InputType="InputType.Password" Disabled="busy" />
+        <MudTextField @bind-Value="name" Label="@L["Username"]" Disabled="@(busy || Existing is not null)" AutoFocus="@(Existing is null)"
+                      HelperText="@L["Lowercase letters, digits, _ and -."]" />
+        <MudTextField @bind-Value="password" Label="@(Existing is null ? L["Password"] : L["New password"])" InputType="InputType.Password"
+                      Disabled="busy" AutoFocus="@(Existing is not null)" HelperText="@L["At least {0} characters.", Rules.MinPasswordLength]" />
+        <MudTextField @bind-Value="confirm" Label="@L["Confirm password"]" InputType="InputType.Password" Disabled="busy" />
     </DialogContent>
     <DialogActions>
-        <MudButton OnClick="() => Dialog.Cancel()" Disabled="busy">Annuler</MudButton>
-        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save" Disabled="busy">@(busy ? "Enregistrement…" : "Enregistrer")</MudButton>
+        <MudButton OnClick="() => Dialog.Cancel()" Disabled="busy">@L["Cancel"]</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save" Disabled="busy">@(busy ? L["Saving…"] : L["Save"])</MudButton>
     </DialogActions>
 </MudDialog>
 
@@ -32,7 +32,7 @@
     async Task Save()
     {
         error = null;
-        if (password != confirm) { error = "Les deux mots de passe ne correspondent pas."; return; }
+        if (password != confirm) { error = L["The two passwords do not match."]; return; }
         busy = true;
         try
         {
@@ -41,7 +41,7 @@
             Dialog.Close(DialogResult.Ok(true));
             return;
         }
-        catch (AgentException e) { error = e.Message; }
+        catch (AgentException e) { error = L.Translate(e.Message); }
         busy = false;
     }
 }

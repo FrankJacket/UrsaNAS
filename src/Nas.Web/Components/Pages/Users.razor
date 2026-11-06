@@ -5,22 +5,22 @@
 @inject IDialogService Dialogs
 @inject ISnackbar Snack
 
-<MudText Typo="Typo.h4" Class="mb-4">Utilisateurs</MudText>
+<MudText Typo="Typo.h4" Class="mb-4">@L["Users"]</MudText>
 @if (error is not null)
 {
     <MudAlert Severity="Severity.Error" Class="mb-4">@error</MudAlert>
 }
-<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PersonAdd" OnClick="Add" Class="mb-4">Ajouter un utilisateur</MudButton>
+<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PersonAdd" OnClick="Add" Class="mb-4">@L["Add a user"]</MudButton>
 <MudTable Items="users" Hover="true" Dense="true" Loading="@(!loaded)">
-    <HeaderContent><MudTh>Nom</MudTh><MudTh></MudTh></HeaderContent>
+    <HeaderContent><MudTh>@L["Name"]</MudTh><MudTh></MudTh></HeaderContent>
     <RowTemplate>
         <MudTd>@context.Name</MudTd>
         <MudTd Style="text-align:right">
-            <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Key" OnClick="() => ChangePassword(context)">Mot de passe</MudButton>
-            <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="() => Delete(context)">Supprimer</MudButton>
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Key" OnClick="() => ChangePassword(context)">@L["Password"]</MudButton>
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="() => Delete(context)">@L["Delete"]</MudButton>
         </MudTd>
     </RowTemplate>
-    <NoRecordsContent><MudText Class="pa-4">Aucun utilisateur.</MudText></NoRecordsContent>
+    <NoRecordsContent><MudText Class="pa-4">@L["No users."]</MudText></NoRecordsContent>
 </MudTable>
 
 @code {
@@ -31,7 +31,7 @@
     protected override async Task LoadAsync()
     {
         try { users = await Agent.GetUsersAsync(); error = null; }
-        catch (HttpRequestException) { error = "Agent injoignable : le service ursanas-agent est-il démarré ?"; }
+        catch (HttpRequestException) { error = L["Agent unreachable: is the ursanas-agent service running?"]; }
         loaded = true;
     }
 
@@ -39,10 +39,10 @@
 
     async Task Add()
     {
-        var dialog = await Dialogs.ShowAsync<UserDialog>("Nouvel utilisateur", Options);
+        var dialog = await Dialogs.ShowAsync<UserDialog>(L["New user"], Options);
         if (await dialog.Result is { Canceled: false })
         {
-            Snack.Add("Utilisateur créé.", Severity.Success);
+            Snack.Add(L["User created."], Severity.Success);
             await LoadAsync();
         }
     }
@@ -50,23 +50,23 @@
     async Task ChangePassword(NasUser u)
     {
         var parameters = new DialogParameters<PasswordDialog> { { x => x.UserName, u.Name } };
-        var dialog = await Dialogs.ShowAsync<PasswordDialog>($"Mot de passe de {u.Name}", parameters, Options);
-        if (await dialog.Result is { Canceled: false }) Snack.Add("Mot de passe changé.", Severity.Success);
+        var dialog = await Dialogs.ShowAsync<PasswordDialog>(L["Password of {0}", u.Name], parameters, Options);
+        if (await dialog.Result is { Canceled: false }) Snack.Add(L["Password changed."], Severity.Success);
     }
 
     async Task Delete(NasUser u)
     {
-        var ok = await Dialogs.ShowMessageBoxAsync($"Supprimer {u.Name} ?",
-            "Le compte et son accès Samba sont supprimés. Les fichiers qu'il a créés restent sur le disque.",
-            yesText: "Supprimer", cancelText: "Annuler");
+        var ok = await Dialogs.ShowMessageBoxAsync(L["Delete {0}?", u.Name],
+            L["The account and its Samba access are deleted. Files it created remain on the disk."],
+            yesText: L["Delete"], cancelText: L["Cancel"]);
         if (ok != true) return;
         try
         {
             await Ops.DeleteUserAsync(u.Name);
-            Snack.Add($"{u.Name} supprimé.", Severity.Success);
+            Snack.Add(L["{0} deleted.", u.Name], Severity.Success);
             await LoadAsync();
         }
-        catch (AgentException e) { Snack.Add(e.Message, Severity.Error); }
-        catch (HttpRequestException) { Snack.Add("Agent injoignable.", Severity.Error); }
+        catch (AgentException e) { Snack.Add(L.Translate(e.Message), Severity.Error); }
+        catch (HttpRequestException) { Snack.Add(L["Agent unreachable."], Severity.Error); }
     }
 }

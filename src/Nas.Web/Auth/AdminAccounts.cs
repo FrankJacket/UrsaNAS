@@ -56,14 +56,14 @@ public sealed class AdminAccounts(Repo repo)
         name = (name ?? "").Trim();
         if (Rules.ValidateUserName(name) is { } e1) throw new AgentException(e1);
         if (Rules.ValidatePassword(password) is { } e2) throw new AgentException(e2);
-        if (await repo.GetAdminAsync(name) is not null) throw new AgentException($"Le compte « {name} » existe déjà.");
+        if (await repo.GetAdminAsync(name) is not null) throw new AgentException(Msg.F("Account “{0}” already exists.", name));
         await repo.InsertAdminAsync(name, Hasher.HashPassword(name, password), NewStamp());
     }
 
     public async Task SetPasswordAsync(string name, string password)
     {
         if (Rules.ValidatePassword(password) is { } e) throw new AgentException(e);
-        var row = await repo.GetAdminAsync(name) ?? throw new AgentException($"Le compte « {name} » n'existe pas.");
+        var row = await repo.GetAdminAsync(name) ?? throw new AgentException(Msg.F("Account “{0}” does not exist.", name));
         await repo.UpdateAdminPasswordAsync(row.Name, Hasher.HashPassword(row.Name, password), NewStamp());
     }
 
@@ -71,9 +71,9 @@ public sealed class AdminAccounts(Repo repo)
     public async Task DeleteAsync(string name, string actor)
     {
         if (string.Equals(name, actor, StringComparison.OrdinalIgnoreCase))
-            throw new AgentException("Tu ne peux pas supprimer ton propre compte.");
-        if (await repo.GetAdminAsync(name) is null) throw new AgentException($"Le compte « {name} » n'existe pas.");
-        if (await repo.CountAdminsAsync() <= 1) throw new AgentException("Impossible de supprimer le dernier administrateur.");
+            throw new AgentException(Msg.F("You cannot delete your own account."));
+        if (await repo.GetAdminAsync(name) is null) throw new AgentException(Msg.F("Account “{0}” does not exist.", name));
+        if (await repo.CountAdminsAsync() <= 1) throw new AgentException(Msg.F("Cannot delete the last administrator."));
         await repo.DeleteAdminAsync(name);
     }
 

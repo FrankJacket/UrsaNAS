@@ -11,7 +11,7 @@ public static class SmartParser
     {
         JsonDocument doc;
         try { doc = JsonDocument.Parse(json); }
-        catch (JsonException) { return new SmartInfo(disk, "unsupported", null, null, null, null, "Réponse de smartctl illisible."); }
+        catch (JsonException) { return new SmartInfo(disk, "unsupported", null, null, null, null, "Unreadable smartctl response."); }
 
         using (doc)
         {
@@ -39,19 +39,19 @@ public static class SmartParser
             var nvmeFailing = false;
             if (root.TryGetProperty("nvme_smart_health_information_log", out var nvme))
             {
-                if ((Long(nvme, "critical_warning") ?? 0) != 0) { nvmeFailing = true; notes.Add("avertissement critique NVMe"); }
-                if ((Long(nvme, "media_errors") ?? 0) > 0) notes.Add($"{Long(nvme, "media_errors")} erreurs de média");
+                if ((Long(nvme, "critical_warning") ?? 0) != 0) { nvmeFailing = true; notes.Add("NVMe critical warning"); }
+                if ((Long(nvme, "media_errors") ?? 0) > 0) notes.Add(Msg.F("{0} media errors", Long(nvme, "media_errors")));
                 temp ??= Int(nvme, "temperature");
             }
 
             if (passed is null && !nvmeFailing)
-                return new SmartInfo(disk, "unsupported", temp, hours, reallocated, pending, FirstMessage(root) ?? "SMART indisponible sur ce disque.");
+                return new SmartInfo(disk, "unsupported", temp, hours, reallocated, pending, FirstMessage(root) ?? "SMART unavailable on this disk.");
 
-            if (reallocated > 0) notes.Add($"{reallocated} secteurs réalloués");
-            if (pending > 0) notes.Add($"{pending} secteurs en attente");
+            if (reallocated > 0) notes.Add(Msg.F("{0} reallocated sectors", reallocated));
+            if (pending > 0) notes.Add(Msg.F("{0} pending sectors", pending));
 
             var status = passed == false || nvmeFailing ? "failing" : notes.Count > 0 ? "warning" : "ok";
-            if (passed == false) notes.Insert(0, "le disque annonce sa défaillance");
+            if (passed == false) notes.Insert(0, "the disk reports its own failure");
             return new SmartInfo(disk, status, temp, hours, reallocated, pending, notes.Count > 0 ? string.Join(", ", notes) : null);
         }
     }
@@ -84,7 +84,7 @@ public sealed class SmartService(ICommandRunner run, IDiskProvider disks)
         {
             CommandResult r;
             try { r = await run.RunAsync("smartctl", ["-j", "-a", d.Path], ct: ct); }
-            catch (Win32Exception) { throw new OperationException("smartmontools n'est pas installé sur le NAS (apt install smartmontools)."); }
+            catch (Win32Exception) { throw new OperationException("smartmontools is not installed on the NAS (apt install smartmontools)."); }
 
             // smartctl renvoie un code de sortie par bits, même quand le JSON est complet : seul le JSON compte.
             result.Add(string.IsNullOrWhiteSpace(r.StdOut)

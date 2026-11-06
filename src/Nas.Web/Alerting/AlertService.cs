@@ -1,4 +1,6 @@
+using Nas.Contracts;
 using Nas.Web.Data;
+using Nas.Web.Localization;
 
 namespace Nas.Web.Alerting;
 
@@ -45,14 +47,14 @@ public sealed class AlertService(Repo repo, IMailSender mail, AlertState state)
             foreach (var c in raise)
             {
                 await repo.RaiseAlertAsync(c);
-                await repo.AuditAsync("système", "Alerte", c.Title);
-                await NotifyAsync($"{(c.Severity == AlertRules.Critical ? "CRITIQUE" : "Attention")} : {c.Title}", c.Detail, ct);
+                await repo.AuditAsync("system", "Alert", c.Title);
+                await NotifyAsync(Msg.F(c.Severity == AlertRules.Critical ? "CRITICAL: {0}" : "Warning: {0}", c.Title), c.Detail, ct);
             }
             foreach (var a in resolve)
             {
                 await repo.ResolveAlertAsync(a.Id);
-                await repo.AuditAsync("système", "Alerte résolue", a.Title);
-                await NotifyAsync($"Rétabli : {a.Title}", "Le problème n'est plus constaté.", ct);
+                await repo.AuditAsync("system", "Alert resolved", a.Title);
+                await NotifyAsync(Msg.F("Recovered: {0}", a.Title), "The problem is no longer observed.", ct);
             }
 
             var now = await repo.GetActiveAlertsAsync();
@@ -68,11 +70,13 @@ public sealed class AlertService(Repo repo, IMailSender mail, AlertState state)
         if (!settings.Enabled || MailRules.Validate(settings) is not null) return;
         try
         {
-            await mail.SendAsync(settings, $"[UrsaNAS] {subject}", $"{body}\n\n— UrsaNAS, {DateTime.Now:yyyy-MM-dd HH:mm:ss}", ct);
+            var lang = settings.Language;
+            await mail.SendAsync(settings, $"[UrsaNAS] {Translator.Translate(subject, lang)}",
+                $"{Translator.Translate(body, lang)}\n\n— UrsaNAS, {DateTime.Now:yyyy-MM-dd HH:mm:ss}", ct);
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {
-            await repo.AuditAsync("système", "E-mail non envoyé", $"{subject} : {e.Message}");
+            await repo.AuditAsync("system", "Email not sent", $"{subject}: {e.Message}");
         }
     }
 
@@ -103,7 +107,7 @@ public sealed class AlertMonitor(IServiceScopeFactory scopes, AlertService alert
         do
         {
             try { await CheckAsync(immediate: false, ct); }
-            catch (Exception e) when (e is not OperationCanceledException) { log.LogError(e, "Contrôle des alertes en échec"); }
+            catch (Exception e) when (e is not OperationCanceledException) { log.LogError(e, "Alert check failed"); }
         }
         while (await WaitAsync(timer, ct));
     }

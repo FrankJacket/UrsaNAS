@@ -3,24 +3,24 @@
 @inherits AutoRefreshBase
 @inject AgentClient Agent
 
-<MudText Typo="Typo.h4" Class="mb-4">Disques</MudText>
+<MudText Typo="Typo.h4" Class="mb-4">@L["Disks"]</MudText>
 @if (error is not null)
 {
     <MudAlert Severity="Severity.Error" Class="mb-4">@error</MudAlert>
 }
 <MudTable Items="disks" Hover="true" Dense="true" Loading="@(!loaded)">
     <HeaderContent>
-        <MudTh>Disque</MudTh><MudTh>Taille</MudTh><MudTh>Modèle</MudTh><MudTh>Série</MudTh><MudTh>Type</MudTh><MudTh>Monté sur</MudTh>
+        <MudTh>@L["Disk"]</MudTh><MudTh>@L["Size"]</MudTh><MudTh>@L["Model"]</MudTh><MudTh>@L["Serial"]</MudTh><MudTh>@L["Type"]</MudTh><MudTh>@L["Mounted on"]</MudTh>
     </HeaderContent>
     <RowTemplate>
         <MudTd>@context.Path</MudTd>
-        <MudTd>@Fmt.Size(context.SizeBytes)</MudTd>
+        <MudTd>@Fmt.Size(context.SizeBytes, L.Lang)</MudTd>
         <MudTd>@context.Model</MudTd>
         <MudTd>@context.Serial</MudTd>
         <MudTd>@(context.Rotational switch { true => "HDD", false => "SSD", null => "?" })</MudTd>
         <MudTd>@(context.MountPoints.Count > 0 ? string.Join(", ", context.MountPoints) : "—")</MudTd>
     </RowTemplate>
-    <NoRecordsContent><MudText Class="pa-4">Aucun disque détecté.</MudText></NoRecordsContent>
+    <NoRecordsContent><MudText Class="pa-4">@L["No disk detected."]</MudText></NoRecordsContent>
 </MudTable>
 
 @code {
@@ -37,7 +37,7 @@
         }
         catch (HttpRequestException)
         {
-            error = "Agent injoignable : le service ursanas-agent est-il démarré ?";
+            error = L["Agent unreachable: is the ursanas-agent service running?"];
         }
         loaded = true;
     }

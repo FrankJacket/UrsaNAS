@@ -2,13 +2,16 @@ using System.Net.Sockets;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
+using System.Globalization;
 using Microsoft.AspNetCore.Components.Authorization;
+using Microsoft.AspNetCore.Localization;
 using MudBlazor.Services;
 using Nas.Web;
 using Nas.Web.Alerting;
 using Nas.Web.Auth;
 using Nas.Web.Components;
 using Nas.Web.Data;
+using Nas.Web.Localization;
 
 var b = WebApplication.CreateBuilder(args);
 b.Services.AddRazorComponents().AddInteractiveServerComponents();
@@ -17,6 +20,7 @@ b.Services.AddScoped<ThemeState>();
 b.Services.AddSingleton<Db>();
 b.Services.AddSingleton<Repo>();
 b.Services.AddScoped<NasOperations>();
+b.Services.AddScoped<Loc>();
 
 // Authentification : cookie, tout est protégé par défaut (seules /login et /setup sont publiques).
 b.Services.AddSingleton<AdminAccounts>();
@@ -81,20 +85,39 @@ b.Services.AddHttpClient<AgentClient>(c => c.BaseAddress = new Uri(agentUrl ?? "
 
 var app = b.Build();
 app.Services.GetRequiredService<Db>().Init();
-await app.Services.GetRequiredService<Repo>().AuditAsync("système", "Démarrage", "Interface UrsaNAS démarrée.");
+await app.Services.GetRequiredService<Repo>().AuditAsync("system", "Startup", "UrsaNAS interface started.");
 
 // Premier démarrage : aucun compte, donc un jeton d'installation est exigé pour créer le premier administrateur.
 if (await app.Services.GetRequiredService<AdminAccounts>().CountAsync() == 0)
 {
     var setup = app.Services.GetRequiredService<SetupToken>();
     var token = setup.Create(app.Services.GetRequiredService<Db>().DataDir);
-    app.Logger.LogWarning("Aucun administrateur. Ouvre /setup et saisis le jeton d'installation : {Token} (aussi dans {File})", token, setup.FilePath);
+    app.Logger.LogWarning("No administrator yet. Open /setup and enter the setup token: {Token} (also in {File})", token, setup.FilePath);
 }
+
+// Langue : cookie choisi par l'utilisateur, sinon langue du navigateur, sinon anglais (aussi pour toute langue non prise en charge).
+var cultures = Translator.Supported.Select(c => new CultureInfo(c)).ToList();
+var localization = new RequestLocalizationOptions
+{
+    DefaultRequestCulture = new RequestCulture("en"),
+    SupportedCultures = cultures,
+    SupportedUICultures = cultures,
+};
+localization.RequestCultureProviders.Insert(0, new CookieRequestCultureProvider { CookieName = Loc.Cookie });
+app.UseRequestLocalization(localization);
 
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();
 app.MapStaticAssets().AllowAnonymous(); // feuilles de style et scripts : nécessaires à la page de connexion
+app.MapGet("/lang/{code}", (string code, string? returnUrl, HttpContext ctx) =>
+{
+    ctx.Response.Cookies.Append(Loc.Cookie, CookieRequestCultureProvider.MakeCookieValue(new RequestCulture(Translator.Normalize(code))),
+        new CookieOptions { Path = "/", MaxAge = TimeSpan.FromDays(365), SameSite = SameSiteMode.Lax });
+    // Seules les adresses locales sont acceptées (pas de redirection vers un autre site).
+    var local = !string.IsNullOrEmpty(returnUrl) && returnUrl[0] == '/' && !returnUrl.StartsWith("//") && !returnUrl.StartsWith("/\\");
+    return Results.Redirect(local ? returnUrl! : "/");
+}).AllowAnonymous();
 app.MapGet("/logout", async (HttpContext ctx) =>
 {
     await ctx.SignOutAsync();

@@ -6,24 +6,24 @@
         {
             <MudAlert Severity="Severity.Error" Class="mb-3">@error</MudAlert>
         }
-        <MudTextField @bind-Value="name" Label="Nom du pool" Immediate="true" Disabled="busy" AutoFocus="true"
-                      HelperText="@($"Monté sur /srv/zfs/{name}")" />
-        <MudSelect T="string" @bind-Value="layout" Label="Type" Disabled="busy" HelperText="@LayoutHelp">
-            <MudSelectItem T="string" Value="@("mirror")">Miroir (2 disques ou plus, tout est copié)</MudSelectItem>
-            <MudSelectItem T="string" Value="@("raidz1")">RAIDZ1 (3 disques ou plus, tolère 1 panne)</MudSelectItem>
-            <MudSelectItem T="string" Value="@("raidz2")">RAIDZ2 (4 disques ou plus, tolère 2 pannes)</MudSelectItem>
+        <MudTextField @bind-Value="name" Label="@L["Pool name"]" Immediate="true" Disabled="busy" AutoFocus="true"
+                      HelperText="@L["Mounted on {0}", $"/srv/zfs/{name}"]" />
+        <MudSelect T="string" @bind-Value="layout" Label="@L["Type"]" Disabled="busy" HelperText="@LayoutHelp">
+            <MudSelectItem T="string" Value="@("mirror")">@L["Mirror (2 or more disks, everything is copied)"]</MudSelectItem>
+            <MudSelectItem T="string" Value="@("raidz1")">@L["RAIDZ1 (3 or more disks, tolerates 1 failure)"]</MudSelectItem>
+            <MudSelectItem T="string" Value="@("raidz2")">@L["RAIDZ2 (4 or more disks, tolerates 2 failures)"]</MudSelectItem>
         </MudSelect>
-        <MudSelect T="string" Label="Disques" MultiSelection="true" @bind-SelectedValues="selected" Disabled="busy"
-                   HelperText="@(FreeDisks.Count == 0 ? "Aucun disque libre." : "Tout le contenu des disques choisis sera effacé.")">
+        <MudSelect T="string" Label="@L["Disks"]" MultiSelection="true" @bind-SelectedValues="selected" Disabled="busy"
+                   HelperText="@(FreeDisks.Count == 0 ? L["No free disk."] : L["All content of the chosen disks will be erased."])">
             @foreach (var d in FreeDisks)
             {
-                <MudSelectItem T="string" Value="@d.Path">@d.Path — @Fmt.Size(d.SizeBytes) @d.Model</MudSelectItem>
+                <MudSelectItem T="string" Value="@d.Path">@d.Path — @Fmt.Size(d.SizeBytes, L.Lang) @d.Model</MudSelectItem>
             }
         </MudSelect>
     </DialogContent>
     <DialogActions>
-        <MudButton OnClick="() => Dialog.Cancel()" Disabled="busy">Annuler</MudButton>
-        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save" Disabled="busy">@(busy ? "Création…" : "Créer")</MudButton>
+        <MudButton OnClick="() => Dialog.Cancel()" Disabled="busy">@L["Cancel"]</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save" Disabled="busy">@(busy ? L["Creating…"] : L["Create"])</MudButton>
     </DialogActions>
 </MudDialog>
 
@@ -36,7 +36,7 @@
     string? error;
     bool busy;
 
-    string LayoutHelp => $"Il faut au moins {Rules.MinDisks(layout)} disques.";
+    string LayoutHelp => L["At least {0} disks are needed.", Rules.MinDisks(layout)];
 
     async Task Save()
     {
@@ -48,8 +48,8 @@
             Dialog.Close(DialogResult.Ok(true));
             return;
         }
-        catch (AgentException e) { error = e.Message; }
-        catch (HttpRequestException) { error = "Agent injoignable."; }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable."]; }
         busy = false;
     }
 }

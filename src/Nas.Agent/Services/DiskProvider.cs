@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using Nas.Contracts;
 
 namespace Nas.Agent.Services;
@@ -80,7 +80,7 @@ public sealed class LsblkDiskProvider(ICommandRunner runner) : IDiskProvider
     public async Task<IReadOnlyList<DiskInfo>> ListAsync(CancellationToken ct = default)
     {
         var r = await runner.RunAsync("lsblk", LsblkParser.Args, ct: ct);
-        if (r.ExitCode != 0) throw new InvalidOperationException($"lsblk a échoué ({r.ExitCode}) : {r.StdErr}");
+        if (r.ExitCode != 0) throw new InvalidOperationException(Msg.F("lsblk failed ({0}): {1}", r.ExitCode, r.StdErr));
         return LsblkParser.Parse(r.StdOut);
     }
 }

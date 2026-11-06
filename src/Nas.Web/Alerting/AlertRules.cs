@@ -21,37 +21,37 @@ public static class AlertRules
     {
         var result = new List<Candidate>();
         if (!s.AgentReachable)
-            result.Add(new("agent", Critical, "L'agent UrsaNAS ne répond pas",
-                "L'interface ne peut plus lire l'état du NAS. Vérifie le service ursanas-agent."));
+            result.Add(new("agent", Critical, "The UrsaNAS agent is not responding",
+                "The interface can no longer read the NAS state. Check the ursanas-agent service."));
 
         foreach (var p in s.Pools ?? [])
         {
             if (p.Health != "ONLINE")
             {
                 var bad = p.Devices.Where(d => d.Depth >= 1 && BadDeviceStates.Contains(d.State)).Select(d => $"{d.Name} ({d.State})").ToList();
-                var cause = bad.Count > 0 ? $" Périphérique(s) concerné(s) : {string.Join(", ", bad)}." : "";
-                result.Add(new($"pool:{p.Name}:health", Critical, $"Pool {p.Name} : {p.Health}",
-                    (p.Health == "DEGRADED"
-                        ? "Le pool fonctionne encore mais n'est plus redondant : remplace le disque défaillant au plus vite."
-                        : "Le pool est en panne ou inaccessible.") + cause));
+                var sentence = p.Health == "DEGRADED"
+                    ? "The pool still works but is no longer redundant: replace the failed disk as soon as possible."
+                    : "The pool is down or inaccessible.";
+                var detail = bad.Count > 0 ? Msg.F("{0} Affected devices: {1}.", sentence, string.Join(", ", bad)) : sentence;
+                result.Add(new($"pool:{p.Name}:health", Critical, Msg.F("Pool {0}: {1}", p.Name, p.Health), detail));
             }
 
             if (!string.IsNullOrWhiteSpace(p.Errors) && !p.Errors.StartsWith("No known data errors", StringComparison.OrdinalIgnoreCase))
-                result.Add(new($"pool:{p.Name}:errors", Critical, $"Pool {p.Name} : erreurs de données", p.Errors));
+                result.Add(new($"pool:{p.Name}:errors", Critical, Msg.F("Pool {0}: data errors", p.Name), p.Errors));
 
             foreach (var d in p.Devices.Where(d => d.Depth >= 1))
             {
                 if (IsNonZero(d.Read) || IsNonZero(d.Write) || IsNonZero(d.Cksum))
-                    result.Add(new($"pool:{p.Name}:dev:{d.Name}", Warning, $"Pool {p.Name} : erreurs sur {d.Name}",
-                        $"Compteurs ZFS — lecture {d.Read}, écriture {d.Write}, somme de contrôle {d.Cksum}."));
+                    result.Add(new($"pool:{p.Name}:dev:{d.Name}", Warning, Msg.F("Pool {0}: errors on {1}", p.Name, d.Name),
+                        Msg.F("ZFS counters — read {0}, write {1}, checksum {2}.", d.Read, d.Write, d.Cksum)));
             }
 
             if (p.SizeBytes > 0)
             {
                 var pct = 100.0 * p.AllocBytes / p.SizeBytes;
                 if (pct >= 90)
-                    result.Add(new($"pool:{p.Name}:space", pct >= 95 ? Critical : Warning, $"Pool {p.Name} : {pct:0}% plein",
-                        "Un pool presque plein ralentit et risque de refuser les écritures : libère de l'espace ou ajoute des disques."));
+                    result.Add(new($"pool:{p.Name}:space", pct >= 95 ? Critical : Warning, Msg.F("Pool {0}: {1}% full", p.Name, pct.ToString("0")),
+                        "A nearly full pool slows down and may refuse writes: free up space or add disks."));
             }
         }
 
@@ -59,7 +59,8 @@ public static class AlertRules
         {
             if (d.Status is "failing" or "warning")
                 result.Add(new($"smart:{d.Disk}", d.Status == "failing" ? Critical : Warning,
-                    $"Disque {d.Disk} : SMART {(d.Status == "failing" ? "en échec" : "à surveiller")}", d.Detail ?? ""));
+                    d.Status == "failing" ? Msg.F("Disk {0}: SMART failing", d.Disk) : Msg.F("Disk {0}: SMART needs attention", d.Disk),
+                    d.Detail ?? ""));
         }
         return result;
     }

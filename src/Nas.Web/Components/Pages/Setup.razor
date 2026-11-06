@@ -7,25 +7,25 @@
 @inject Repo Repo
 @inject NavigationManager Nav
 
-<PageTitle>Installation — UrsaNAS</PageTitle>
-<h1>Installation</h1>
-<p class="hint">Crée le premier administrateur. Le jeton d'installation est dans le journal du service
-    (<code>journalctl -u ursanas-web</code>) et dans le fichier <code>setup-token.txt</code> du dossier de données.</p>
+<PageTitle>@L["Setup"] — UrsaNAS</PageTitle>
+<h1>@L["Setup"]</h1>
+<p class="hint">@L["Create the first administrator."]
+    @L["The setup token is in the service log (journalctl -u ursanas-web) and in the setup-token.txt file of the data folder."]</p>
 
 <EditForm Model="form" FormName="setup" OnValidSubmit="Submit" method="post">
-    <label for="token">Jeton d'installation</label>
+    <label for="token">@L["Setup token"]</label>
     <InputText id="token" @bind-Value="form.Token" autocomplete="off" />
-    <label for="name">Identifiant de l'administrateur</label>
+    <label for="name">@L["Administrator username"]</label>
     <InputText id="name" @bind-Value="form.Name" autocomplete="username" />
-    <label for="password">Mot de passe</label>
+    <label for="password">@L["Password"]</label>
     <InputText id="password" type="password" @bind-Value="form.Password" autocomplete="new-password" />
-    <label for="confirm">Confirmer le mot de passe</label>
+    <label for="confirm">@L["Confirm password"]</label>
     <InputText id="confirm" type="password" @bind-Value="form.Confirm" autocomplete="new-password" />
     @if (error is not null)
     {
         <div class="error">@error</div>
     }
-    <button type="submit">Créer l'administrateur</button>
+    <button type="submit">@L["Create the administrator"]</button>
 </EditForm>
 
 @code {
@@ -51,22 +51,22 @@
     {
         var ip = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "?";
         if (await Accounts.CountAsync() > 0) { Nav.NavigateTo("/login", forceLoad: true); return; }
-        if (Throttle.IsLocked("setup", ip)) { error = "Trop d'essais échoués. Réessaie dans quelques minutes."; return; }
+        if (Throttle.IsLocked("setup", ip)) { error = L["Too many failed attempts. Try again in a few minutes."]; return; }
         if (!Token.Verify(form.Token))
         {
             Throttle.Fail("setup", ip);
-            error = "Jeton d'installation incorrect.";
+            error = L["Incorrect setup token."];
             return;
         }
-        if (form.Password != form.Confirm) { error = "Les deux mots de passe ne correspondent pas."; return; }
+        if (form.Password != form.Confirm) { error = L["The two passwords do not match."]; return; }
 
         try { await Accounts.CreateAsync(form.Name, form.Password); }
-        catch (AgentException e) { error = e.Message; return; }
+        catch (AgentException e) { error = L.Translate(e.Message); return; }
 
         Token.Clear();
         var admin = (await Accounts.ValidateAsync(form.Name, form.Password))!;
         await HttpContext.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, AdminAccounts.PrincipalFor(admin));
-        await Repo.AuditAsync(admin.Name, "Premier administrateur créé", ip);
+        await Repo.AuditAsync(admin.Name, "First administrator created", ip);
         Nav.NavigateTo("/", forceLoad: true);
     }
 }

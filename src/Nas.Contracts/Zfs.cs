@@ -39,9 +39,9 @@ public static partial class Rules
     public static string? ValidatePoolName(string? name)
     {
         if (string.IsNullOrEmpty(name) || !PoolNameRegex().IsMatch(name))
-            return "Nom de pool invalide : 1 à 32 caractères (lettres, chiffres, _ et -), commençant par une lettre.";
+            return Msg.F("Invalid pool name: 1 to 32 characters (letters, digits, _ and -), starting with a letter.");
         if (ReservedPools.Contains(name) || (name.Length > 1 && name[0] is 'c' or 'C' && char.IsDigit(name[1])))
-            return $"« {name} » est un nom réservé par ZFS.";
+            return Msg.F("“{0}” is a name reserved by ZFS.", name);
         return null;
     }
 
@@ -49,27 +49,27 @@ public static partial class Rules
 
     public static string? ValidatePoolLayout(string? layout, int diskCount)
     {
-        if (layout is null || !PoolLayouts.Contains(layout)) return "Type de pool inconnu (mirror, raidz1 ou raidz2).";
-        if (diskCount < MinDisks(layout)) return $"Le type {layout} demande au moins {MinDisks(layout)} disques.";
-        if (diskCount > 24) return "Un pool est limité à 24 disques ici.";
+        if (layout is null || !PoolLayouts.Contains(layout)) return Msg.F("Unknown pool type (mirror, raidz1 or raidz2).");
+        if (diskCount < MinDisks(layout)) return Msg.F("Type {0} needs at least {1} disks.", layout, MinDisks(layout));
+        if (diskCount > 24) return Msg.F("A pool is limited to 24 disks here.");
         return null;
     }
 
     /// <summary>Nom complet d'un jeu de données : pool/segment[/segment…]. Le pool seul n'est pas un jeu de données qu'on crée ou détruit.</summary>
     public static string? ValidateDatasetName(string? name)
     {
-        if (string.IsNullOrEmpty(name) || name.Length > 200) return "Nom de jeu de données invalide.";
+        if (string.IsNullOrEmpty(name) || name.Length > 200) return Msg.F("Invalid dataset name.");
         var parts = name.Split('/');
-        if (parts.Length < 2) return "Un jeu de données s'écrit pool/nom.";
+        if (parts.Length < 2) return Msg.F("A dataset is written pool/name.");
         if (ValidatePoolName(parts[0]) is { } e) return e;
         foreach (var p in parts.Skip(1))
             if (!DatasetSegmentRegex().IsMatch(p))
-                return "Nom de jeu de données invalide : 1 à 64 caractères (lettres, chiffres, _ et -) par niveau.";
+                return Msg.F("Invalid dataset name: 1 to 64 characters (letters, digits, _ and -) per level.");
         return null;
     }
 
     public static string? ValidateSnapshotName(string? name) =>
         string.IsNullOrEmpty(name) || !SnapshotNameRegex().IsMatch(name)
-            ? "Nom d'instantané invalide : 1 à 64 caractères (lettres, chiffres, . _ : et -), sans espace."
+            ? Msg.F("Invalid snapshot name: 1 to 64 characters (letters, digits, . _ : and -), no spaces.")
             : null;
 }

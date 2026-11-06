@@ -1,4 +1,4 @@
-﻿using Nas.Agent.Services;
+using Nas.Agent.Services;
 using Nas.Contracts;
 
 namespace Nas.Agent;
@@ -21,7 +21,7 @@ public partial class Program
     {
         try { return await action(); }
         catch (OperationException e) { return Results.Problem(e.Message, statusCode: StatusCodes.Status400BadRequest); }
-        catch (System.ComponentModel.Win32Exception) { return Results.Problem("Un programme requis (zpool, zfs…) est introuvable sur cette machine.", statusCode: StatusCodes.Status400BadRequest); }
+        catch (System.ComponentModel.Win32Exception) { return Results.Problem("A required program (zpool, zfs…) was not found on this machine.", statusCode: StatusCodes.Status400BadRequest); }
     }
 
     public static void Main(string[] args)

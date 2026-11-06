@@ -6,11 +6,11 @@
             <MudAlert Severity="Severity.Error" Class="mb-3">@error</MudAlert>
         }
         <MudText Class="mb-3">@Message</MudText>
-        <MudTextField @bind-Value="typed" Label="@($"Tape « {Expected} » pour confirmer")" Immediate="true" Disabled="busy" AutoFocus="true" />
+        <MudTextField @bind-Value="typed" Label="@L["Type “{0}” to confirm", Expected]" Immediate="true" Disabled="busy" AutoFocus="true" />
     </DialogContent>
     <DialogActions>
-        <MudButton OnClick="() => Dialog.Cancel()" Disabled="busy">Annuler</MudButton>
-        <MudButton Color="Color.Error" Variant="Variant.Filled" OnClick="Confirm" Disabled="@(busy || typed != Expected)">@(busy ? "En cours…" : ButtonText)</MudButton>
+        <MudButton OnClick="() => Dialog.Cancel()" Disabled="busy">@L["Cancel"]</MudButton>
+        <MudButton Color="Color.Error" Variant="Variant.Filled" OnClick="Confirm" Disabled="@(busy || typed != Expected)">@(busy ? L["In progress…"] : L[ButtonText])</MudButton>
     </DialogActions>
 </MudDialog>
 
@@ -18,7 +18,7 @@
     [CascadingParameter] IMudDialogInstance Dialog { get; set; } = default!;
     [Parameter, EditorRequired] public string Expected { get; set; } = "";
     [Parameter, EditorRequired] public string Message { get; set; } = "";
-    [Parameter] public string ButtonText { get; set; } = "Supprimer";
+    [Parameter] public string ButtonText { get; set; } = "Delete";
     [Parameter, EditorRequired] public Func<Task> Action { get; set; } = default!;
 
     string typed = "";
@@ -35,8 +35,8 @@
             Dialog.Close(DialogResult.Ok(true));
             return;
         }
-        catch (AgentException e) { error = e.Message; }
-        catch (HttpRequestException) { error = "Agent injoignable."; }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable."]; }
         busy = false;
     }
 }

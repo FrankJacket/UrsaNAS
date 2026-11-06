@@ -56,8 +56,8 @@ public class ShareDatasetTests : IDisposable
     }
 
     [Theory]
-    [InlineData("tank/absent", "n'existe pas")]
-    [InlineData("tank/off", "point de montage")]
+    [InlineData("tank/absent", "does not exist")]
+    [InlineData("tank/off", "no mount point")]
     public async Task Refuse_un_jeu_inconnu_ou_sans_point_de_montage(string dataset, string message)
     {
         var ex = await Assert.ThrowsAsync<OperationException>(() =>
@@ -72,7 +72,7 @@ public class ShareDatasetTests : IDisposable
         SetZfs($"tank/photos\t1\t1\t1\t{Path.Combine(_dir, "pas-monte")}\n");
         var ex = await Assert.ThrowsAsync<OperationException>(() =>
             _svc.ApplyAsync([new ShareDef("photos", "", false, ["alice"], "tank/photos")]));
-        Assert.Contains("pas monté", ex.Message);
+        Assert.Contains("not mounted", ex.Message);
     }
 
     [Fact]
@@ -81,7 +81,7 @@ public class ShareDatasetTests : IDisposable
         var known = new HashSet<string> { "alice" };
         var a = new ShareDef("a", "", false, ["alice"], "tank/photos");
         Assert.Null(Rules.ValidateShares([a], known));
-        Assert.Contains("déjà utilisé", Rules.ValidateShares([a, a with { Name = "b" }], known));
+        Assert.Contains("already used", Rules.ValidateShares([a, a with { Name = "b" }], known));
         Assert.NotNull(Rules.ValidateShares([a with { Dataset = "tank" }], known)); // racine d'un pool refusée
         Assert.NotNull(Rules.ValidateShares([a with { Dataset = "tank/../x" }], known));
     }

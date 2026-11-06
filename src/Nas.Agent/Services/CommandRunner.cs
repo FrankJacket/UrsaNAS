@@ -24,7 +24,7 @@ public sealed class ProcessCommandRunner : ICommandRunner
         };
         foreach (var a in args) psi.ArgumentList.Add(a);
 
-        using var p = Process.Start(psi) ?? throw new InvalidOperationException($"Impossible de lancer {fileName}.");
+        using var p = Process.Start(psi) ?? throw new InvalidOperationException(Nas.Contracts.Msg.F("Unable to start {0}.", fileName));
         var stdout = p.StandardOutput.ReadToEndAsync(ct);
         var stderr = p.StandardError.ReadToEndAsync(ct);
         if (stdin is not null)

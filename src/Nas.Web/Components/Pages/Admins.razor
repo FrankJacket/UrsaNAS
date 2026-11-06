@@ -6,18 +6,18 @@
 @inject IDialogService Dialogs
 @inject ISnackbar Snack
 
-<MudText Typo="Typo.h4" Class="mb-4">Administrateurs</MudText>
-<MudText Class="mb-4">Comptes qui peuvent se connecter à cette interface. Ils sont distincts des utilisateurs de partages (Samba).</MudText>
-<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PersonAdd" OnClick="Add" Class="mb-4">Ajouter un administrateur</MudButton>
+<MudText Typo="Typo.h4" Class="mb-4">@L["Administrators"]</MudText>
+<MudText Class="mb-4">@L["Accounts that can sign in to this interface. They are separate from share users (Samba)."]</MudText>
+<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PersonAdd" OnClick="Add" Class="mb-4">@L["Add an administrator"]</MudButton>
 <MudTable Items="rows" Hover="true" Dense="true" Loading="@(!loaded)">
-    <HeaderContent><MudTh>Identifiant</MudTh><MudTh>Créé le</MudTh><MudTh></MudTh></HeaderContent>
+    <HeaderContent><MudTh>@L["Username"]</MudTh><MudTh>@L["Created on"]</MudTh><MudTh></MudTh></HeaderContent>
     <RowTemplate>
-        <MudTd>@context.Name @if (context.Name == me) { <MudChip T="string" Size="Size.Small" Class="ml-2">toi</MudChip> }</MudTd>
+        <MudTd>@context.Name @if (context.Name == me) { <MudChip T="string" Size="Size.Small" Class="ml-2">@L["you"]</MudChip> }</MudTd>
         <MudTd>@Fmt.Dt(context.CreatedAt)</MudTd>
         <MudTd Style="text-align:right">
-            <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Key" OnClick="() => Password(context)">Mot de passe</MudButton>
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Key" OnClick="() => Password(context)">@L["Password"]</MudButton>
             <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete"
-                       Disabled="@(context.Name == me)" OnClick="() => Delete(context)">Supprimer</MudButton>
+                       Disabled="@(context.Name == me)" OnClick="() => Delete(context)">@L["Delete"]</MudButton>
         </MudTd>
     </RowTemplate>
 </MudTable>
@@ -36,11 +36,11 @@
         loaded = true;
     }
 
-    async Task Add() => await ShowAsync(new DialogParameters<AdminDialog>(), "Nouvel administrateur", "Administrateur créé.");
+    async Task Add() => await ShowAsync(new DialogParameters<AdminDialog>(), L["New administrator"], L["Administrator created."]);
 
     async Task Password(AdminRow a) =>
-        await ShowAsync(new DialogParameters<AdminDialog> { { x => x.Existing, a.Name } }, $"Mot de passe de {a.Name}",
-            a.Name == me ? "Mot de passe changé : reconnecte-toi." : "Mot de passe changé.");
+        await ShowAsync(new DialogParameters<AdminDialog> { { x => x.Existing, a.Name } }, L["Password of {0}", a.Name],
+            a.Name == me ? L["Password changed: sign in again."] : L["Password changed."]);
 
     async Task ShowAsync(DialogParameters<AdminDialog> parameters, string title, string success)
     {
@@ -54,15 +54,15 @@
 
     async Task Delete(AdminRow a)
     {
-        var ok = await Dialogs.ShowMessageBoxAsync($"Supprimer {a.Name} ?",
-            "Ce compte ne pourra plus se connecter, et ses sessions ouvertes seront fermées.", yesText: "Supprimer", cancelText: "Annuler");
+        var ok = await Dialogs.ShowMessageBoxAsync(L["Delete {0}?", a.Name],
+            L["This account will no longer be able to sign in, and its open sessions will be closed."], yesText: L["Delete"], cancelText: L["Cancel"]);
         if (ok != true) return;
         try
         {
             await Ops.DeleteAdminAsync(a.Name);
-            Snack.Add($"{a.Name} supprimé.", Severity.Success);
+            Snack.Add(L["{0} deleted.", a.Name], Severity.Success);
             await LoadAsync();
         }
-        catch (AgentException e) { Snack.Add(e.Message, Severity.Error); }
+        catch (AgentException e) { Snack.Add(L.Translate(e.Message), Severity.Error); }
     }
 }

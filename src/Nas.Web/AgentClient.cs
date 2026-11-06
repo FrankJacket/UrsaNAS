@@ -74,6 +74,6 @@ public class AgentClient(HttpClient http)
             if (doc.RootElement.TryGetProperty("detail", out var d)) detail = d.GetString();
         }
         catch (JsonException) { }
-        throw new AgentException(detail ?? $"L'agent a répondu {(int)r.StatusCode}.");
+        throw new AgentException(detail ?? Msg.F("The agent answered {0}.", (int)r.StatusCode));
     }
 }

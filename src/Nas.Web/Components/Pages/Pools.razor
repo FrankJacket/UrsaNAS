@@ -5,18 +5,18 @@
 @inject IDialogService Dialogs
 @inject ISnackbar Snack
 
-<MudText Typo="Typo.h4" Class="mb-4">Pools ZFS</MudText>
+<MudText Typo="Typo.h4" Class="mb-4">@L["ZFS pools"]</MudText>
 @if (error is not null)
 {
     <MudAlert Severity="Severity.Error" Class="mb-4">@error</MudAlert>
 }
 <MudStack Row="true" Class="mb-4">
-    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="Create">Créer un pool</MudButton>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="Create">@L["Create a pool"]</MudButton>
 </MudStack>
 
 @if (loaded && error is null && pools.Count == 0)
 {
-    <MudText>Aucun pool. Crée-en un à partir des disques libres.</MudText>
+    <MudText>@L["No pools. Create one from the free disks."]</MudText>
 }
 @foreach (var p in pools)
 {
@@ -30,23 +30,23 @@
                 </MudStack>
             </CardHeaderContent>
             <CardHeaderActions>
-                <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.FactCheck" OnClick="() => Scrub(p)">Vérifier</MudButton>
-                <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="() => Destroy(p)">Détruire</MudButton>
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.FactCheck" OnClick="() => Scrub(p)">@L["Scrub"]</MudButton>
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="() => Destroy(p)">@L["Destroy"]</MudButton>
             </CardHeaderActions>
         </MudCardHeader>
         <MudCardContent>
-            <MudText Typo="Typo.body2">@Fmt.Size(p.AllocBytes) utilisés sur @Fmt.Size(p.SizeBytes) — @Fmt.Size(p.FreeBytes) libres</MudText>
+            <MudText Typo="Typo.body2">@L["{0} used of {1} — {2} free", Fmt.Size(p.AllocBytes, L.Lang), Fmt.Size(p.SizeBytes, L.Lang), Fmt.Size(p.FreeBytes, L.Lang)]</MudText>
             <MudProgressLinear Value="@percent" Color="@(percent > 90 ? Color.Error : percent > 80 ? Color.Warning : Color.Primary)" Class="my-2" />
             @if (!string.IsNullOrEmpty(p.Scan))
             {
-                <MudText Typo="Typo.body2" Class="mb-1">Analyse : @p.Scan</MudText>
+                <MudText Typo="Typo.body2" Class="mb-1">@L["Scan: {0}", p.Scan]</MudText>
             }
             @if (!string.IsNullOrEmpty(p.Errors))
             {
-                <MudText Typo="Typo.body2" Class="mb-2">Erreurs : @(p.Errors == "No known data errors" ? "aucune erreur connue" : p.Errors)</MudText>
+                <MudText Typo="Typo.body2" Class="mb-2">@L["Errors: {0}", p.Errors == "No known data errors" ? L["no known errors"] : p.Errors]</MudText>
             }
             <MudSimpleTable Dense="true" Hover="true">
-                <thead><tr><th>Périphérique</th><th>État</th><th>Lecture</th><th>Écriture</th><th>Somme</th></tr></thead>
+                <thead><tr><th>@L["Device"]</th><th>@L["State"]</th><th>@L["Read"]</th><th>@L["Write"]</th><th>@L["Checksum"]</th></tr></thead>
                 <tbody>
                 @foreach (var d in p.Devices)
                 {
@@ -77,13 +77,13 @@
             disks = await Agent.GetDisksAsync();
             error = null;
         }
-        catch (AgentException e) { error = e.Message; }
-        catch (HttpRequestException) { error = "Agent injoignable : le service ursanas-agent est-il démarré ?"; }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable: is the ursanas-agent service running?"]; }
         loaded = true;
     }
 
     static Color HealthColor(string h) => h switch { "ONLINE" => Color.Success, "DEGRADED" => Color.Warning, _ => Color.Error };
-    static string HealthText(string h) => h switch { "ONLINE" => "En ligne", "DEGRADED" => "Dégradé", "FAULTED" => "En panne", _ => h };
+    string HealthText(string h) => h switch { "ONLINE" => L["Online"], "DEGRADED" => L["Degraded"], "FAULTED" => L["Faulted"], _ => h };
 
     /// <summary>Un disque est libre s'il n'est monté nulle part et si aucun pool ne l'utilise (ou l'une de ses partitions).</summary>
     IReadOnlyList<DiskInfo> FreeDisks()
@@ -96,10 +96,10 @@
     {
         await LoadAsync();
         var parameters = new DialogParameters<PoolDialog> { { x => x.FreeDisks, FreeDisks() } };
-        var dialog = await Dialogs.ShowAsync<PoolDialog>("Créer un pool", parameters, Options);
+        var dialog = await Dialogs.ShowAsync<PoolDialog>(L["Create a pool"], parameters, Options);
         if (await dialog.Result is { Canceled: false })
         {
-            Snack.Add("Pool créé.", Severity.Success);
+            Snack.Add(L["Pool created."], Severity.Success);
             await LoadAsync();
         }
     }
@@ -109,11 +109,11 @@
         try
         {
             await Ops.ScrubPoolAsync(p.Name);
-            Snack.Add($"Vérification de {p.Name} lancée.", Severity.Success);
+            Snack.Add(L["Scrub of {0} started.", p.Name], Severity.Success);
             await LoadAsync();
         }
-        catch (AgentException e) { Snack.Add(e.Message, Severity.Error); }
-        catch (HttpRequestException) { Snack.Add("Agent injoignable.", Severity.Error); }
+        catch (AgentException e) { Snack.Add(L.Translate(e.Message), Severity.Error); }
+        catch (HttpRequestException) { Snack.Add(L["Agent unreachable."], Severity.Error); }
     }
 
     async Task Destroy(PoolInfo p)
@@ -121,14 +121,14 @@
         var parameters = new DialogParameters<ConfirmNameDialog>
         {
             { x => x.Expected, p.Name },
-            { x => x.Message, $"Le pool {p.Name} et toutes ses données seront détruits. Cette action est irréversible." },
-            { x => x.ButtonText, "Détruire le pool" },
+            { x => x.Message, L["Pool {0} and all its data will be destroyed. This cannot be undone.", p.Name] },
+            { x => x.ButtonText, "Destroy pool" },
             { x => x.Action, () => Ops.DestroyPoolAsync(p.Name) },
         };
-        var dialog = await Dialogs.ShowAsync<ConfirmNameDialog>($"Détruire {p.Name}", parameters, Options);
+        var dialog = await Dialogs.ShowAsync<ConfirmNameDialog>(L["Destroy {0}", p.Name], parameters, Options);
         if (await dialog.Result is { Canceled: false })
         {
-            Snack.Add($"Pool {p.Name} détruit.", Severity.Success);
+            Snack.Add(L["Pool {0} destroyed.", p.Name], Severity.Success);
             await LoadAsync();
         }
     }

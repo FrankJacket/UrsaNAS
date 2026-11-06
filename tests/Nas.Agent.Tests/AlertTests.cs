@@ -28,7 +28,7 @@ public class SmartParserTests
     {
         var s = SmartParser.Parse("/dev/sda", """{"smart_status":{"passed":false}}""");
         Assert.Equal("failing", s.Status);
-        Assert.Contains("défaillance", s.Detail);
+        Assert.Contains("failure", s.Detail);
     }
 
     [Fact]
@@ -39,7 +39,7 @@ public class SmartParserTests
         Assert.Equal("warning", s.Status);
         Assert.Equal(8, s.ReallocatedSectors);
         Assert.Equal(3, s.PendingSectors);
-        Assert.Contains("réalloués", s.Detail);
+        Assert.Contains("reallocated", s.Detail);
     }
 
     [Fact]
@@ -109,8 +109,8 @@ public class AlertRulesTests
     {
         var smart = new[]
         {
-            new SmartInfo("/dev/sda", "failing", null, null, null, null, "le disque annonce sa défaillance"),
-            new SmartInfo("/dev/sdb", "warning", null, null, 8, null, "8 secteurs réalloués"),
+            new SmartInfo("/dev/sda", "failing", null, null, null, null, "the disk reports its own failure"),
+            new SmartInfo("/dev/sdb", "warning", null, null, 8, null, "8 reallocated sectors"),
             new SmartInfo("/dev/sdc", "ok", null, null, null, null, null),
             new SmartInfo("/dev/sdd", "unsupported", null, null, null, null, "indisponible"),
         };
@@ -212,7 +212,7 @@ public class AlertServiceTests : IDisposable
         Assert.Equal("pool:tank:health", alert.Code);
         Assert.Equal((1, 1), (_state.Count, _state.CriticalCount));
         var m = Assert.Single(_mail.Sent);
-        Assert.Contains("CRITIQUE", m.Subject);
+        Assert.Contains("CRITICAL", m.Subject);
         Assert.Contains("sdd (OFFLINE)", m.Body);
 
         await _svc.ProcessAsync(Sick()); // toujours malade : pas de nouvel e-mail
@@ -222,7 +222,7 @@ public class AlertServiceTests : IDisposable
         Assert.Empty(await _repo.GetActiveAlertsAsync());
         Assert.Equal(0, _state.Count);
         Assert.Equal(2, _mail.Sent.Count);
-        Assert.StartsWith("[UrsaNAS] Rétabli", _mail.Sent[1].Subject);
+        Assert.StartsWith("[UrsaNAS] Recovered", _mail.Sent[1].Subject);
         Assert.NotNull((await _repo.GetAlertHistoryAsync()).Single().ResolvedAt);
     }
 
@@ -253,7 +253,7 @@ public class AlertServiceTests : IDisposable
         await _svc.ProcessAsync(Sick(), immediate: true);
 
         Assert.Single(await _repo.GetActiveAlertsAsync());
-        Assert.Contains(await _repo.GetAuditAsync(), a => a.Action == "E-mail non envoyé" && a.Detail!.Contains("SMTP injoignable"));
+        Assert.Contains(await _repo.GetAuditAsync(), a => a.Action == "Email not sent" && a.Detail!.Contains("SMTP injoignable"));
     }
 
     [Fact]

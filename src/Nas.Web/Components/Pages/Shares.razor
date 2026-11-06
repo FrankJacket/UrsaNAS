@@ -6,13 +6,13 @@
 @inject IDialogService Dialogs
 @inject ISnackbar Snack
 
-<MudText Typo="Typo.h4" Class="mb-4">Partages</MudText>
+<MudText Typo="Typo.h4" Class="mb-4">@L["Shares"]</MudText>
 <MudStack Row="true" Class="mb-4">
-    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.CreateNewFolder" OnClick="Add">Ajouter un partage</MudButton>
-    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Sync" OnClick="Reapply">Réappliquer</MudButton>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.CreateNewFolder" OnClick="Add">@L["Add a share"]</MudButton>
+    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Sync" OnClick="Reapply">@L["Reapply"]</MudButton>
 </MudStack>
 <MudTable Items="shares" Hover="true" Dense="true" Loading="@(!loaded)">
-    <HeaderContent><MudTh>Nom</MudTh><MudTh>Dossier</MudTh><MudTh>Accès</MudTh><MudTh>Utilisateurs</MudTh><MudTh>Description</MudTh><MudTh></MudTh></HeaderContent>
+    <HeaderContent><MudTh>@L["Name"]</MudTh><MudTh>@L["Folder"]</MudTh><MudTh>@L["Access"]</MudTh><MudTh>@L["Users"]</MudTh><MudTh>@L["Description"]</MudTh><MudTh></MudTh></HeaderContent>
     <RowTemplate>
         <MudTd>@context.Name</MudTd>
         <MudTd>
@@ -22,15 +22,15 @@
                 <MudChip T="string" Size="Size.Small" Color="Color.Info" Class="ml-2">ZFS</MudChip>
             }
         </MudTd>
-        <MudTd><MudChip T="string" Size="Size.Small" Color="@(context.ReadOnly ? Color.Default : Color.Success)">@(context.ReadOnly ? "Lecture seule" : "Lecture/écriture")</MudChip></MudTd>
+        <MudTd><MudChip T="string" Size="Size.Small" Color="@(context.ReadOnly ? Color.Default : Color.Success)">@(context.ReadOnly ? L["Read-only"] : L["Read/write"])</MudChip></MudTd>
         <MudTd>@string.Join(", ", context.ValidUsers)</MudTd>
         <MudTd>@context.Comment</MudTd>
         <MudTd Style="text-align:right">
-            <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Edit" OnClick="() => Edit(context)">Modifier</MudButton>
-            <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="() => Delete(context)">Supprimer</MudButton>
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Edit" OnClick="() => Edit(context)">@L["Edit"]</MudButton>
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="() => Delete(context)">@L["Delete"]</MudButton>
         </MudTd>
     </RowTemplate>
-    <NoRecordsContent><MudText Class="pa-4">Aucun partage.</MudText></NoRecordsContent>
+    <NoRecordsContent><MudText Class="pa-4">@L["No shares."]</MudText></NoRecordsContent>
 </MudTable>
 
 @code {
@@ -67,11 +67,11 @@
     async Task<IReadOnlyList<string>?> UserNames()
     {
         try { return (await Agent.GetUsersAsync()).Select(u => u.Name).ToList(); }
-        catch (HttpRequestException) { Snack.Add("Agent injoignable.", Severity.Error); return null; }
+        catch (HttpRequestException) { Snack.Add(L["Agent unreachable."], Severity.Error); return null; }
     }
 
-    async Task Add() => await ShowDialog(null, "Nouveau partage");
-    async Task Edit(ShareDef s) => await ShowDialog(s, $"Modifier {s.Name}");
+    async Task Add() => await ShowDialog(null, L["New share"]);
+    async Task Edit(ShareDef s) => await ShowDialog(s, L["Edit {0}", s.Name]);
 
     async Task ShowDialog(ShareDef? existing, string title)
     {
@@ -83,21 +83,21 @@
         var dialog = await Dialogs.ShowAsync<ShareDialog>(title, parameters, Options);
         if (await dialog.Result is { Canceled: false })
         {
-            Snack.Add("Partage enregistré.", Severity.Success);
+            Snack.Add(L["Share saved."], Severity.Success);
             await LoadAsync();
         }
     }
 
     async Task Delete(ShareDef s)
     {
-        var ok = await Dialogs.ShowMessageBoxAsync($"Supprimer le partage {s.Name} ?",
-            $"Le partage n'est plus accessible en réseau. Les fichiers restent dans {PathOf(s)}.",
-            yesText: "Supprimer", cancelText: "Annuler");
+        var ok = await Dialogs.ShowMessageBoxAsync(L["Delete share {0}?", s.Name],
+            L["The share is no longer reachable over the network. Files remain in {0}.", PathOf(s)],
+            yesText: L["Delete"], cancelText: L["Cancel"]);
         if (ok != true) return;
-        await Run(() => Ops.DeleteShareAsync(s.Name), $"Partage {s.Name} supprimé.");
+        await Run(() => Ops.DeleteShareAsync(s.Name), L["Share {0} deleted.", s.Name]);
     }
 
-    async Task Reapply() => await Run(Ops.ReapplySharesAsync, "Partages réappliqués.");
+    async Task Reapply() => await Run(Ops.ReapplySharesAsync, L["Shares reapplied."]);
 
     async Task Run(Func<Task> action, string success)
     {
@@ -107,7 +107,7 @@
             Snack.Add(success, Severity.Success);
             await LoadAsync();
         }
-        catch (AgentException e) { Snack.Add(e.Message, Severity.Error); }
-        catch (HttpRequestException) { Snack.Add("Agent injoignable.", Severity.Error); }
+        catch (AgentException e) { Snack.Add(L.Translate(e.Message), Severity.Error); }
+        catch (HttpRequestException) { Snack.Add(L["Agent unreachable."], Severity.Error); }
     }
 }
