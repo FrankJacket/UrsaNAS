@@ -79,10 +79,12 @@ public class NasOperations(AgentClient agent, Repo repo)
         await _gate.WaitAsync();
         try
         {
-            var next = (await repo.GetSharesAsync()).Where(s => !s.Name.Equals(name, StringComparison.OrdinalIgnoreCase)).ToList();
-            await agent.ApplySharesAsync(next);
+            var all = await repo.GetSharesAsync();
+            var removed = all.FirstOrDefault(s => s.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+            await agent.ApplySharesAsync(all.Where(s => s != removed).ToList());
             await repo.DeleteShareAsync(name);
-            await repo.AuditAsync(Actor, "Partage supprimé", $"{name} (les fichiers restent dans /srv/nas/{name})");
+            var where = removed?.Dataset is { } ds ? $"les fichiers restent dans le jeu de données {ds}" : $"les fichiers restent dans /srv/nas/{name}";
+            await repo.AuditAsync(Actor, "Partage supprimé", $"{name} ({where})");
         }
         finally { _gate.Release(); }
     }
@@ -96,8 +98,19 @@ public class NasOperations(AgentClient agent, Repo repo)
             "Pool créé", $"{name} ({layout} : {string.Join(", ", disks)})");
     }
 
-    public Task DestroyPoolAsync(string name) =>
-        Audited(() => agent.DestroyPoolAsync(name), "Pool détruit", name);
+    public async Task DestroyPoolAsync(string name)
+    {
+        await EnsureNoShareAsync(d => d == name || d.StartsWith(name + "/", StringComparison.Ordinal), $"le pool « {name} »");
+        await Audited(() => agent.DestroyPoolAsync(name), "Pool détruit", name);
+    }
+
+    /// <summary>Refuse de détruire du stockage qu'un partage utilise encore.</summary>
+    async Task EnsureNoShareAsync(Func<string, bool> uses, string what)
+    {
+        var shares = (await repo.GetSharesAsync()).Where(s => s.Dataset is not null && uses(s.Dataset)).Select(s => s.Name).ToList();
+        if (shares.Count > 0)
+            throw new AgentException($"Impossible de supprimer {what} : le partage {string.Join(", ", shares)} l'utilise. Supprime ou déplace d'abord ce partage.");
+    }
 
     public Task ScrubPoolAsync(string name) =>
         Audited(() => agent.ScrubPoolAsync(name), "Vérification lancée", name);
@@ -108,8 +121,11 @@ public class NasOperations(AgentClient agent, Repo repo)
         await Audited(() => agent.CreateDatasetAsync(name), "Jeu de données créé", name);
     }
 
-    public Task DestroyDatasetAsync(string name) =>
-        Audited(() => agent.DestroyDatasetAsync(name), "Jeu de données supprimé", name);
+    public async Task DestroyDatasetAsync(string name)
+    {
+        await EnsureNoShareAsync(d => d == name || d.StartsWith(name + "/", StringComparison.Ordinal), $"le jeu de données « {name} »");
+        await Audited(() => agent.DestroyDatasetAsync(name), "Jeu de données supprimé", name);
+    }
 
     public async Task CreateSnapshotAsync(string dataset, string name)
     {

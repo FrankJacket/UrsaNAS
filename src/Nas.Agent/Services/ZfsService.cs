@@ -106,6 +106,10 @@ public sealed class ZfsService(ICommandRunner run, IDiskProvider disks, IConfigu
         var existing = ZfsParser.ParsePoolList(Check(await run.RunAsync("zpool", ZfsParser.PoolListArgs, ct: ct), "Liste des pools"));
         if (existing.Any(x => x.Name.Equals(r.Name, StringComparison.OrdinalIgnoreCase))) throw new OperationException($"Le pool « {r.Name} » existe déjà.");
 
+        // L'UMask 0007 de l'unité systemd rendrait le dossier racine inaccessible aux utilisateurs du NAS : on le remet en 0755.
+        Check(await run.RunAsync("mkdir", ["-p", MountRoot], ct: ct), "Création du dossier des pools");
+        Check(await run.RunAsync("chmod", ["0755", MountRoot], ct: ct), "chmod");
+
         List<string> args =
         [
             "create", "-o", "ashift=12",

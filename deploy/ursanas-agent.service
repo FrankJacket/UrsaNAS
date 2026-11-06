@@ -15,8 +15,8 @@ ExecStart=/opt/ursanas/agent/Nas.Agent
 Restart=on-failure
 UMask=0007
 NoNewPrivileges=true
-ProtectHome=true
-PrivateTmp=true
+# Pas de ProtectHome ni PrivateTmp : ils isolent l'espace de montage de l'agent. Les jeux de données ZFS qu'il monte
+# resteraient invisibles pour Samba (et disparaîtraient au redémarrage de l'agent).
 
 [Install]
 WantedBy=multi-user.target

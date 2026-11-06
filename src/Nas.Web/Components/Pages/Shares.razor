@@ -15,7 +15,13 @@
     <HeaderContent><MudTh>Nom</MudTh><MudTh>Dossier</MudTh><MudTh>Accès</MudTh><MudTh>Utilisateurs</MudTh><MudTh>Description</MudTh><MudTh></MudTh></HeaderContent>
     <RowTemplate>
         <MudTd>@context.Name</MudTd>
-        <MudTd><code>/srv/nas/@context.Name</code></MudTd>
+        <MudTd>
+            <code>@PathOf(context)</code>
+            @if (context.Dataset is not null)
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Info" Class="ml-2">ZFS</MudChip>
+            }
+        </MudTd>
         <MudTd><MudChip T="string" Size="Size.Small" Color="@(context.ReadOnly ? Color.Default : Color.Success)">@(context.ReadOnly ? "Lecture seule" : "Lecture/écriture")</MudChip></MudTd>
         <MudTd>@string.Join(", ", context.ValidUsers)</MudTd>
         <MudTd>@context.Comment</MudTd>
@@ -29,13 +35,32 @@
 
 @code {
     List<ShareDef> shares = new();
+    Dictionary<string, string> mountpoints = new();
     bool loaded;
 
     protected override async Task LoadAsync()
     {
         shares = await Repo.GetSharesAsync();
+        await LoadDatasetsAsync();
         loaded = true;
     }
+
+    /// <summary>Jeux de données ZFS et leur point de montage ; vide si ZFS est absent ou l'agent injoignable.</summary>
+    async Task<IReadOnlyList<DatasetInfo>> LoadDatasetsAsync()
+    {
+        try
+        {
+            var list = await Agent.GetDatasetsAsync();
+            mountpoints = list.ToDictionary(d => d.Name, d => d.Mountpoint);
+            return list;
+        }
+        catch (AgentException) { }
+        catch (HttpRequestException) { }
+        return [];
+    }
+
+    string PathOf(ShareDef s) =>
+        s.Dataset is null ? $"/srv/nas/{s.Name}" : mountpoints.GetValueOrDefault(s.Dataset, s.Dataset);
 
     static readonly DialogOptions Options = new() { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true, BackdropClick = false };
 
@@ -51,7 +76,10 @@
     async Task ShowDialog(ShareDef? existing, string title)
     {
         if (await UserNames() is not { } users) return;
-        var parameters = new DialogParameters<ShareDialog> { { x => x.Existing, existing }, { x => x.Users, users } };
+        // Seuls les jeux de données (pas la racine d'un pool) que aucun autre partage n'utilise.
+        var taken = shares.Where(s => s.Dataset is not null && s.Name != existing?.Name).Select(s => s.Dataset!).ToHashSet();
+        var free = (await LoadDatasetsAsync()).Select(d => d.Name).Where(n => n.Contains('/') && !taken.Contains(n)).ToList();
+        var parameters = new DialogParameters<ShareDialog> { { x => x.Existing, existing }, { x => x.Users, users }, { x => x.Datasets, free } };
         var dialog = await Dialogs.ShowAsync<ShareDialog>(title, parameters, Options);
         if (await dialog.Result is { Canceled: false })
         {
@@ -63,7 +91,7 @@
     async Task Delete(ShareDef s)
     {
         var ok = await Dialogs.ShowMessageBoxAsync($"Supprimer le partage {s.Name} ?",
-            $"Le partage n'est plus accessible en réseau. Les fichiers restent dans /srv/nas/{s.Name}.",
+            $"Le partage n'est plus accessible en réseau. Les fichiers restent dans {PathOf(s)}.",
             yesText: "Supprimer", cancelText: "Annuler");
         if (ok != true) return;
         await Run(() => Ops.DeleteShareAsync(s.Name), $"Partage {s.Name} supprimé.");

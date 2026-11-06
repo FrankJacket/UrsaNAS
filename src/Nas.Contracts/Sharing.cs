@@ -9,8 +9,11 @@ public sealed record CreateUserRequest(string Name, string Password);
 
 public sealed record SetPasswordRequest(string Password);
 
-/// <summary>Un partage SMB. Son dossier est toujours <c>/srv/nas/&lt;Name&gt;</c> : le chemin n'est jamais fourni par l'appelant.</summary>
-public sealed record ShareDef(string Name, string Comment, bool ReadOnly, IReadOnlyList<string> ValidUsers);
+/// <summary>
+/// Un partage SMB. Le chemin n'est jamais fourni par l'appelant : sans <c>Dataset</c>, le dossier est
+/// <c>/srv/nas/&lt;Name&gt;</c> ; avec <c>Dataset</c> (ex. <c>tank/photos</c>), c'est le point de montage de ce jeu de données ZFS.
+/// </summary>
+public sealed record ShareDef(string Name, string Comment, bool ReadOnly, IReadOnlyList<string> ValidUsers, string? Dataset = null);
 
 /// <summary>L'ensemble complet des partages à appliquer (remplace l'existant).</summary>
 public sealed record ApplySharesRequest(IReadOnlyList<ShareDef> Shares);
@@ -71,11 +74,17 @@ public static partial class Rules
     public static string? ValidateShares(IReadOnlyList<ShareDef> shares, IReadOnlySet<string> knownUsers)
     {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var datasets = new HashSet<string>(StringComparer.Ordinal);
         foreach (var s in shares)
         {
             if (ValidateShareName(s.Name) is { } e1) return e1;
             if (ValidateComment(s.Comment) is { } e2) return e2;
             if (!seen.Add(s.Name)) return $"Le partage « {s.Name} » est en double.";
+            if (s.Dataset is not null)
+            {
+                if (ValidateDatasetName(s.Dataset) is { } e3) return e3;
+                if (!datasets.Add(s.Dataset)) return $"Le jeu de données « {s.Dataset} » est déjà utilisé par un autre partage.";
+            }
             if (s.ValidUsers is null || s.ValidUsers.Count == 0) return $"Le partage « {s.Name} » doit avoir au moins un utilisateur.";
             foreach (var u in s.ValidUsers)
                 if (!knownUsers.Contains(u)) return $"Le partage « {s.Name} » référence l'utilisateur inconnu « {u} ».";

@@ -152,6 +152,9 @@ public class ZfsServiceTests
         Assert.Contains("ashift=12", create.Args);
         Assert.Equal(["/srv/zfs/tank"], create.Args.SkipWhile(a => a != "-m").Skip(1).Take(1));
         Assert.Equal(["tank", "raidz1", "/dev/sdb", "/dev/sdc", "/dev/sdd"], create.Args.TakeLast(5));
+        // Dossier racine traversable (l'UMask de l'agent le rendrait privé), créé avant le pool.
+        var chmod = _run.Calls.FindIndex(c => c.File == "chmod" && c.Args[0] == "0755" && c.Args[1] == "/srv/zfs");
+        Assert.True(chmod >= 0 && chmod < _run.Calls.IndexOf(create));
     }
 
     [Fact]

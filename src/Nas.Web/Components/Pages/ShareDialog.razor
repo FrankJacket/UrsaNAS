@@ -8,7 +8,14 @@
             <MudAlert Severity="Severity.Error" Class="mb-3">@error</MudAlert>
         }
         <MudTextField @bind-Value="name" Label="Nom du partage" Immediate="true" Disabled="@(busy || Existing is not null)" AutoFocus="@(Existing is null)"
-                      HelperText="@($"Dossier : /srv/nas/{name}")" />
+                      HelperText="@(storage == Plain ? $"Dossier : /srv/nas/{name}" : null)" />
+        <MudSelect T="string" @bind-Value="storage" Label="Stockage" Disabled="busy" HelperText="@StorageHelp">
+            <MudSelectItem T="string" Value="@Plain">Dossier simple (/srv/nas/@name)</MudSelectItem>
+            @foreach (var d in Datasets)
+            {
+                <MudSelectItem T="string" Value="@d">Jeu de données ZFS : @d</MudSelectItem>
+            }
+        </MudSelect>
         <MudTextField @bind-Value="comment" Label="Description" Disabled="busy" />
         <MudSelect T="string" Label="Utilisateurs autorisés" MultiSelection="true" @bind-SelectedValues="selected" Disabled="busy"
                    HelperText="@(Users.Count == 0 ? "Crée d'abord un utilisateur." : null)">
@@ -30,8 +37,16 @@
     [Parameter] public ShareDef? Existing { get; set; }
     [Parameter, EditorRequired] public IReadOnlyList<string> Users { get; set; } = [];
 
-    string name = "", comment = "";
+    /// <summary>Jeux de données ZFS que ce partage peut utiliser (ceux qu'aucun autre partage n'utilise).</summary>
+    [Parameter] public IReadOnlyList<string> Datasets { get; set; } = [];
+
+    const string Plain = "__plain";
+    string name = "", comment = "", storage = Plain;
     bool readOnly;
+
+    string? StorageHelp => Existing is not null && (Existing.Dataset ?? Plain) != storage
+        ? "Les fichiers existants ne sont pas déplacés : copie-les vers le nouvel emplacement."
+        : Datasets.Count == 0 ? "Crée un jeu de données dans la page « Jeux de données » pour le choisir ici." : null;
     IReadOnlyCollection<string> selected = [];
     string? error;
     bool busy;
@@ -42,6 +57,7 @@
         name = Existing.Name;
         comment = Existing.Comment;
         readOnly = Existing.ReadOnly;
+        storage = Existing.Dataset ?? Plain;
         selected = Existing.ValidUsers.ToList();
     }
 
@@ -51,7 +67,7 @@
         busy = true;
         try
         {
-            await Ops.SaveShareAsync(new ShareDef(name.Trim(), comment.Trim(), readOnly, selected.OrderBy(u => u, StringComparer.Ordinal).ToList()), isNew: Existing is null);
+            await Ops.SaveShareAsync(new ShareDef(name.Trim(), comment.Trim(), readOnly, selected.OrderBy(u => u, StringComparer.Ordinal).ToList(), storage == Plain ? null : storage), isNew: Existing is null);
             Dialog.Close(DialogResult.Ok(true));
             return;
         }

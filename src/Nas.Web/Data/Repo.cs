@@ -18,8 +18,9 @@ class ShareRow
     public string Comment { get; set; } = "";
     public bool ReadOnly { get; set; }
     public string ValidUsers { get; set; } = "";
+    public string? Dataset { get; set; }
 
-    public ShareDef ToDef() => new(Name, Comment, ReadOnly, ValidUsers.Split(' ', StringSplitOptions.RemoveEmptyEntries));
+    public ShareDef ToDef() => new(Name, Comment, ReadOnly, ValidUsers.Split(' ', StringSplitOptions.RemoveEmptyEntries), Dataset);
 }
 
 public class Repo(Db db)
@@ -44,7 +45,7 @@ public class Repo(Db db)
     public async Task<List<ShareDef>> GetSharesAsync()
     {
         using var c = db.Open();
-        return (await c.QueryAsync<ShareRow>("SELECT Name,Comment,ReadOnly,ValidUsers FROM Shares ORDER BY Name"))
+        return (await c.QueryAsync<ShareRow>("SELECT Name,Comment,ReadOnly,ValidUsers,Dataset FROM Shares ORDER BY Name"))
             .Select(r => r.ToDef()).ToList();
     }
 
@@ -52,9 +53,9 @@ public class Repo(Db db)
     {
         using var c = db.Open();
         await c.ExecuteAsync("""
-            INSERT INTO Shares(Name,Comment,ReadOnly,ValidUsers) VALUES(@Name,@Comment,@ReadOnly,@Users)
-            ON CONFLICT(Name) DO UPDATE SET Comment=@Comment, ReadOnly=@ReadOnly, ValidUsers=@Users
-            """, new { s.Name, s.Comment, s.ReadOnly, Users = string.Join(' ', s.ValidUsers) });
+            INSERT INTO Shares(Name,Comment,ReadOnly,ValidUsers,Dataset) VALUES(@Name,@Comment,@ReadOnly,@Users,@Dataset)
+            ON CONFLICT(Name) DO UPDATE SET Comment=@Comment, ReadOnly=@ReadOnly, ValidUsers=@Users, Dataset=@Dataset
+            """, new { s.Name, s.Comment, s.ReadOnly, Users = string.Join(' ', s.ValidUsers), s.Dataset });
     }
 
     public async Task DeleteShareAsync(string name)

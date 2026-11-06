@@ -32,6 +32,7 @@ public class Db
         CREATE INDEX IF NOT EXISTS IX_AuditLog_At ON AuditLog(At);
         CREATE TABLE IF NOT EXISTS Shares(Name TEXT PRIMARY KEY COLLATE NOCASE, Comment TEXT NOT NULL DEFAULT '', ReadOnly INTEGER NOT NULL DEFAULT 0, ValidUsers TEXT NOT NULL); -- ValidUsers : noms séparés par des espaces
         """);
+        AddColumn(c, "Shares", "Dataset", "TEXT NULL"); // jeu de données ZFS ; NULL = dossier simple dans /srv/nas
     }
 
     static void AddColumn(SqliteConnection c, string table, string column, string ddl)

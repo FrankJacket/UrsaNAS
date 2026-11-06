@@ -6,7 +6,8 @@ namespace Nas.Agent.Services;
 /// <summary>Génère le fichier de configuration Samba des partages gérés par UrsaNAS.</summary>
 public static class ShareConf
 {
-    public static string Render(IReadOnlyList<ShareDef> shares, string shareRoot)
+    /// <param name="datasetPaths">Point de montage de chaque jeu de données ZFS utilisé par un partage.</param>
+    public static string Render(IReadOnlyList<ShareDef> shares, string shareRoot, IReadOnlyDictionary<string, string>? datasetPaths = null)
     {
         var sb = new StringBuilder();
         sb.Append("; Généré par UrsaNAS. Ne pas modifier à la main : ce fichier est réécrit à chaque changement.\n");
@@ -14,7 +15,7 @@ public static class ShareConf
         {
             sb.Append('\n').Append('[').Append(s.Name).Append("]\n");
             if (!string.IsNullOrWhiteSpace(s.Comment)) sb.Append("   comment = ").Append(s.Comment.Trim().Replace("%", "%%")).Append('\n');
-            sb.Append("   path = ").Append(PathFor(shareRoot, s.Name)).Append('\n');
+            sb.Append("   path = ").Append(s.Dataset is not null && datasetPaths is not null && datasetPaths.TryGetValue(s.Dataset, out var p) ? p : PathFor(shareRoot, s.Name)).Append('\n');
             sb.Append("   read only = ").Append(s.ReadOnly ? "yes" : "no").Append('\n');
             sb.Append("   guest ok = no\n");
             sb.Append("   browseable = yes\n");
@@ -68,6 +69,8 @@ public sealed class ShareService(ICommandRunner run, UserService users, IConfigu
         var known = (await users.ListAsync(ct)).Select(u => u.Name).ToHashSet();
         if (Rules.ValidateShares(shares, known) is { } error) throw new OperationException(error);
 
+        var datasetPaths = await ResolveDatasetsAsync(shares, ct); // avant toute écriture : un jeu absent ne laisse aucune trace
+
         await EnsureIncludeAsync(ct);
 
         // Le dossier racine doit être traversable par tous les utilisateurs : l'unité systemd de l'agent a un UMask 0007,
@@ -77,14 +80,19 @@ public sealed class ShareService(ICommandRunner run, UserService users, IConfigu
 
         foreach (var s in shares)
         {
-            var dir = ShareConf.PathFor(ShareRoot, s.Name);
-            Directory.CreateDirectory(dir);
+            string dir;
+            if (s.Dataset is not null) dir = datasetPaths[s.Dataset]; // déjà monté par ZFS
+            else
+            {
+                dir = ShareConf.PathFor(ShareRoot, s.Name);
+                Directory.CreateDirectory(dir);
+            }
             Check(await run.RunAsync("chgrp", [UserService.Group, dir], ct: ct), "chgrp");
             Check(await run.RunAsync("chmod", ["2770", dir], ct: ct), "chmod");
         }
 
         var previous = File.Exists(ConfPath) ? await File.ReadAllTextAsync(ConfPath, ct) : null;
-        await File.WriteAllTextAsync(ConfPath, ShareConf.Render(shares, ShareRoot), ct);
+        await File.WriteAllTextAsync(ConfPath, ShareConf.Render(shares, ShareRoot, datasetPaths), ct);
 
         var test = await run.RunAsync("testparm", ["-s", MainConfPath], ct: ct);
         if (test.ExitCode != 0)
@@ -94,6 +102,25 @@ public sealed class ShareService(ICommandRunner run, UserService users, IConfigu
         }
 
         Check(await run.RunAsync("smbcontrol", ["all", "reload-config"], ct: ct), "Rechargement de Samba");
+    }
+
+    /// <summary>Trouve le point de montage de chaque jeu de données choisi ; refuse un jeu inconnu ou non monté.</summary>
+    async Task<Dictionary<string, string>> ResolveDatasetsAsync(IReadOnlyList<ShareDef> shares, CancellationToken ct)
+    {
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (!shares.Any(s => s.Dataset is not null)) return result;
+
+        var list = await run.RunAsync("zfs", ZfsParser.DatasetListArgs, ct: ct);
+        Check(list, "Liste des jeux de données");
+        var known = ZfsParser.ParseDatasets(list.StdOut).ToDictionary(d => d.Name, d => d.Mountpoint);
+        foreach (var s in shares.Where(s => s.Dataset is not null))
+        {
+            if (!known.TryGetValue(s.Dataset!, out var mp)) throw new OperationException($"Le jeu de données « {s.Dataset} » n'existe pas.");
+            if (!Path.IsPathRooted(mp)) throw new OperationException($"Le jeu de données « {s.Dataset} » n'a pas de point de montage.");
+            if (!Directory.Exists(mp)) throw new OperationException($"Le jeu de données « {s.Dataset} » n'est pas monté ({mp}).");
+            result[s.Dataset!] = mp;
+        }
+        return result;
     }
 
     async Task EnsureIncludeAsync(CancellationToken ct)
