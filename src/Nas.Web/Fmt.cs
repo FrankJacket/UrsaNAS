@@ -21,6 +21,9 @@ public static class Fmt
         };
     }
 
+    /// <summary>Débit : « 581 B/s », « 3.2 KB/s » (« 581 o/s », « 3,2 Ko/s » en français).</summary>
+    public static string Rate(double bytesPerSec, string lang = "en") => Size((long)Math.Max(0, bytesPerSec), lang) + "/s";
+
     /// <summary>Date UTC affichée à l'heure locale du serveur.</summary>
     public static string Dt(DateTime utc) => DateTime.SpecifyKind(utc, DateTimeKind.Utc).ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
 }

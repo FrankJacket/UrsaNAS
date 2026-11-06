@@ -27,6 +27,13 @@ public class AgentClient(HttpClient http)
     public async Task ApplySharesAsync(IReadOnlyList<ShareDef> shares, CancellationToken ct = default) =>
         await EnsureOkAsync(await http.PutAsJsonAsync("shares", new ApplySharesRequest(shares), ct), ct);
 
+    public async Task<SystemStats> GetStatsAsync(CancellationToken ct = default)
+    {
+        using var r = await http.GetAsync("stats", ct);
+        await EnsureOkAsync(r, ct);
+        return await r.Content.ReadFromJsonAsync<SystemStats>(ct) ?? throw new AgentException(Msg.F("The agent answered {0}.", 204));
+    }
+
     public Task<IReadOnlyList<SmartInfo>> GetSmartAsync(CancellationToken ct = default) => GetListAsync<SmartInfo>("smart", ct);
 
     // ---- ZFS

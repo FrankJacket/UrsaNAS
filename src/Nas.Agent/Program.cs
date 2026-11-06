@@ -40,6 +40,11 @@ public partial class Program
         else
             builder.Services.AddSingleton<IDiskProvider, LsblkDiskProvider>();
 
+        if (builder.Configuration["URSANAS_FAKE"] == "1")
+            builder.Services.AddSingleton<IStatsProvider, FakeStatsProvider>();
+        else
+            builder.Services.AddSingleton<IStatsProvider, ProcStatsProvider>();
+
         builder.Services.AddSingleton<UserService>();
         builder.Services.AddSingleton<ShareService>();
         builder.Services.AddSingleton<ZfsService>();
@@ -49,6 +54,8 @@ public partial class Program
 
         app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
         app.MapGet("/disks", async (IDiskProvider disks, CancellationToken ct) => Results.Ok(await disks.ListAsync(ct)));
+
+        app.MapGet("/stats", (IStatsProvider s) => Results.Ok(s.Read()));
 
         app.MapGet("/users", async (UserService u, CancellationToken ct) => Results.Ok(await u.ListAsync(ct)));
         app.MapPost("/users", (CreateUserRequest r, UserService u, CancellationToken ct) =>

@@ -1,0 +1,178 @@
+@page "/"
+@inherits AutoRefreshBase
+@inject AgentClient Agent
+
+<MudText Typo="Typo.h4" Class="mb-4">@L["Dashboard"]</MudText>
+@if (error is not null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">@error</MudAlert>
+}
+
+<div class="dash-cards">
+    <MudPaper Class="dash-card" Elevation="0">
+        <div class="dash-title"><MudIcon Icon="@Icons.Material.Filled.Dns" /> @(stats?.Hostname ?? "—")</div>
+        <div class="dash-label mt-6">@L["Uptime"]</div>
+        <div class="dash-value">@(stats is null ? "—" : Uptime(stats.UptimeSeconds))</div>
+    </MudPaper>
+
+    <MudPaper Class="dash-card" Elevation="0">
+        <div class="dash-title"><MudIcon Icon="@Icons.Material.Filled.Memory" /> @L["CPU"]</div>
+        <div class="dash-row">
+            <div>
+                <div class="dash-label mt-4">@L["Temperature"]</div>
+                <div class="dash-value">@(stats?.CpuTempC is { } t ? $"{t:0}°C" : "—")</div>
+            </div>
+            @Gauge(rates?.CpuPercent, Color.Primary)
+        </div>
+    </MudPaper>
+
+    <MudPaper Class="dash-card" Elevation="0">
+        <div class="dash-title"><MudIcon Icon="@Icons.Material.Filled.Sd" /> @L["Memory"]</div>
+        <div class="dash-row">
+            <div>
+                <div class="dash-label mt-4">@L["Used"]</div>
+                <div class="dash-value">@(stats is null ? "—" : Fmt.Size(stats.MemTotalBytes - stats.MemAvailableBytes, L.Lang))</div>
+            </div>
+            @Gauge(MemPercent, Color.Primary)
+        </div>
+    </MudPaper>
+
+    <MudPaper Class="dash-card" Elevation="0">
+        <div class="dash-title"><MudIcon Icon="@Icons.Material.Filled.Public" /> @L["Network"]</div>
+        <div class="dash-row mt-4">
+            <div>
+                <div class="dash-label">@L["Send"]</div>
+                <div class="dash-value">↑ @Rate(rates?.NetTxPerSec)</div>
+            </div>
+            <div>
+                <div class="dash-label">@L["Receive"]</div>
+                <div class="dash-value">↓ @Rate(rates?.NetRxPerSec)</div>
+            </div>
+        </div>
+    </MudPaper>
+
+    <MudPaper Class="dash-card" Elevation="0">
+        <div class="dash-title"><MudIcon Icon="@Icons.Material.Filled.Storage" /> @L["Hard drive"]</div>
+        <div class="dash-row mt-4">
+            <div>
+                <div class="dash-label">@L["Read"]</div>
+                <div class="dash-value">@Rate(rates?.DiskReadPerSec)</div>
+            </div>
+            <div>
+                <div class="dash-label">@L["Write"]</div>
+                <div class="dash-value">@Rate(rates?.DiskWritePerSec)</div>
+            </div>
+        </div>
+    </MudPaper>
+</div>
+
+<MudText Typo="Typo.h6" Class="mt-8 mb-2">@L["Drive information"]</MudText>
+<MudSimpleTable Dense="true" Hover="true" Elevation="0">
+    <thead>
+        <tr><th></th><th>@L["Internal drives"]</th><th>@L["Temperature"]</th><th>@L["Busy"]</th><th>@L["Read"]</th><th>@L["Write"]</th><th>@L["Used in"]</th></tr>
+    </thead>
+    <tbody>
+        @foreach (var (d, i) in disks.Select((d, i) => (d, i)))
+        {
+            var rate = rates is not null && rates.Disks.TryGetValue(d.Name, out var r) ? r : null;
+            var temp = smart.FirstOrDefault(s => s.Disk == d.Path)?.TemperatureC;
+            <tr>
+                <td>@(i + 1)</td>
+                <td>
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                        <MudIcon Icon="@(d.Rotational == false ? Icons.Material.Filled.SdStorage : Icons.Material.Filled.Storage)" />
+                        <span>@Fmt.Size(d.SizeBytes, L.Lang)</span>
+                        @if (d.MountPoints.Contains("/")) { <MudChip T="string" Size="Size.Small" Color="Color.Info">OS</MudChip> }
+                        <MudText Typo="Typo.caption">@d.Model</MudText>
+                    </MudStack>
+                </td>
+                <td>@(temp is { } c ? $"{c}°C" : "—")</td>
+                <td>@(rate is null ? "—" : $"{rate.BusyPercent:0}%")</td>
+                <td>@Rate(rate?.ReadPerSec)</td>
+                <td>@Rate(rate?.WritePerSec)</td>
+                <td>@UsedIn(d)</td>
+            </tr>
+        }
+        @if (loaded && disks.Count == 0)
+        {
+            <tr><td colspan="7">@L["No disk detected."]</td></tr>
+        }
+    </tbody>
+</MudSimpleTable>
+
+<style>
+    .dash-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
+    .dash-card { padding: 18px 20px; border-radius: 16px; background: var(--mud-palette-background-gray); min-height: 130px; }
+    .dash-title { display: flex; align-items: center; gap: 10px; font-size: 1.1rem; font-weight: 500; }
+    .dash-label { font-size: .8rem; opacity: .7; }
+    .dash-value { font-size: 1rem; font-weight: 600; margin-top: 2px; }
+    .dash-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+    .gauge { position: relative; width: 72px; height: 72px; flex: none; }
+    .gauge .gauge-track, .gauge .gauge-arc { position: absolute; inset: 0; }
+    .gauge .gauge-track { opacity: .25; }
+    .gauge .pct { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: .95rem; }
+</style>
+
+@code {
+    SystemStats? stats;
+    SystemRates? rates;
+    IReadOnlyList<DiskInfo> disks = [];
+    IReadOnlyList<PoolInfo> pools = [];
+    IReadOnlyList<SmartInfo> smart = [];
+    string? error;
+    bool loaded;
+    int ticks;
+    DateTime smartAt = DateTime.MinValue;
+
+    // Les débits se calculent entre deux lectures : on rafraîchit vite, les listes de disques plus rarement.
+    protected override TimeSpan Interval => TimeSpan.FromSeconds(2);
+
+    double? MemPercent => stats is { MemTotalBytes: > 0 } s ? 100.0 * (s.MemTotalBytes - s.MemAvailableBytes) / s.MemTotalBytes : null;
+
+    RenderFragment Gauge(double? percent, Color color) => @<div class="gauge">
+        <MudProgressCircular Value="100" Color="Color.Default" Size="Size.Large" StrokeWidth="5" Class="gauge-track" Style="width:72px;height:72px" />
+        <MudProgressCircular Value="@(percent ?? 0)" Color="@color" Size="Size.Large" StrokeWidth="5" Class="gauge-arc" Style="width:72px;height:72px" />
+        <div class="pct">@(percent is { } p ? $"{p:0}%" : "—")</div>
+    </div>;
+
+    string Rate(double? perSec) => perSec is { } v ? Fmt.Rate(v, L.Lang) : "—";
+
+    string Uptime(double seconds)
+    {
+        var t = TimeSpan.FromSeconds(seconds);
+        return L["{0} d {1} h {2} min {3} sec", (int)t.TotalDays, t.Hours, t.Minutes, t.Seconds];
+    }
+
+    string UsedIn(DiskInfo d)
+    {
+        var pool = pools.FirstOrDefault(p => p.Devices.Any(x => x.Name == d.Name
+            || (x.Name.StartsWith(d.Name, StringComparison.Ordinal) && x.Name[d.Name.Length..].All(char.IsDigit))));
+        if (pool is not null) return L["Pool {0}", pool.Name];
+        return d.MountPoints.Count > 0 ? string.Join(", ", d.MountPoints) : "—";
+    }
+
+    protected override async Task LoadAsync()
+    {
+        try
+        {
+            var current = await Agent.GetStatsAsync();
+            rates = StatsMath.Rates(stats, current) ?? rates;
+            stats = current;
+            error = null;
+
+            if (ticks++ % 5 == 0) // disques et pools toutes les ~10 s
+            {
+                disks = await Agent.GetDisksAsync();
+                try { pools = await Agent.GetPoolsAsync(); } catch (AgentException) { pools = []; }
+            }
+            if (DateTime.UtcNow - smartAt > TimeSpan.FromMinutes(1)) // smartctl est lent : une fois par minute
+            {
+                smartAt = DateTime.UtcNow;
+                try { smart = await Agent.GetSmartAsync(); } catch (AgentException) { smart = []; }
+            }
+        }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable: is the ursanas-agent service running?"]; }
+        loaded = true;
+    }
+}
