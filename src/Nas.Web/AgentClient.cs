@@ -61,8 +61,8 @@ public class AgentClient(HttpClient http)
     public async Task CopyFolderAsync(CopyFolderRequest req, CancellationToken ct = default) =>
         await EnsureOkAsync(await http.PostAsJsonAsync("acl/folder/copy", req, ct), ct);
 
-    public async Task DeleteFolderAsync(string share, string path, CancellationToken ct = default) =>
-        await EnsureOkAsync(await http.DeleteAsync($"acl/folder?share={Uri.EscapeDataString(share)}&path={Uri.EscapeDataString(path)}", ct), ct);
+    public async Task DeleteFolderAsync(string share, string path, bool isFile = false, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.DeleteAsync($"acl/folder?share={Uri.EscapeDataString(share)}&path={Uri.EscapeDataString(path)}&file={(isFile ? "true" : "false")}", ct), ct);
 
     public async Task<SystemStats> GetStatsAsync(CancellationToken ct = default)
     {

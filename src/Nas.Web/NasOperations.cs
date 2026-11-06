@@ -251,7 +251,7 @@ public class NasOperations(AgentClient agent, Repo repo, IMailSender mail, Admin
     /// Déplace ou renomme (même parent, autre nom). Les droits propres suivent le dossier ; ceux qu'il héritait
     /// de l'ancien parent laissent la place à ceux du nouveau.
     /// </summary>
-    public async Task MoveFolderAsync(string share, string path, string destParent, string newName)
+    public async Task MoveFolderAsync(string share, string path, string destParent, string newName, bool isFile = false)
     {
         CheckFolderArgs(share, path, destParent, newName);
         await _gate.WaitAsync();
@@ -259,16 +259,18 @@ public class NasOperations(AgentClient agent, Repo repo, IMailSender mail, Admin
         {
             await RequireAclShareAsync(share);
             var newPath = JoinPath(destParent, newName);
-            await agent.MoveFolderAsync(new MoveFolderRequest(share, path, destParent, newName));
-            await repo.RenameFolderStatesAsync(share, path, newPath);
-            if (destParent != ParentOf(path)) await ReapplyFolderAsync(share, newPath, await repo.GetFolderStatesAsync(share));
+            await agent.MoveFolderAsync(new MoveFolderRequest(share, path, destParent, newName, isFile));
+            if (!isFile) await repo.RenameFolderStatesAsync(share, path, newPath);
+            // Un fichier change de dossier : le dossier d'arrivée repropage ses droits (le fichier perd ceux de l'ancien parent).
+            if (destParent != ParentOf(path))
+                await ReapplyFolderAsync(share, isFile ? destParent : newPath, await repo.GetFolderStatesAsync(share));
             await repo.AuditAsync(await ActorAsync(), destParent == ParentOf(path) ? "Folder renamed" : "Folder moved", $"{share}/{path} → {share}/{newPath}");
         }
         finally { _gate.Release(); }
     }
 
     /// <summary>Copie un dossier : la copie garde les règles propres de l'original et reçoit l'héritage de sa destination.</summary>
-    public async Task CopyFolderAsync(string share, string path, string destParent, string newName)
+    public async Task CopyFolderAsync(string share, string path, string destParent, string newName, bool isFile = false)
     {
         CheckFolderArgs(share, path, destParent, newName);
         await _gate.WaitAsync();
@@ -276,7 +278,13 @@ public class NasOperations(AgentClient agent, Repo repo, IMailSender mail, Admin
         {
             await RequireAclShareAsync(share);
             var newPath = JoinPath(destParent, newName);
-            await agent.CopyFolderAsync(new CopyFolderRequest(share, path, destParent, newName));
+            await agent.CopyFolderAsync(new CopyFolderRequest(share, path, destParent, newName, isFile));
+            if (isFile)
+            {
+                await ReapplyFolderAsync(share, destParent, await repo.GetFolderStatesAsync(share)); // le fichier reçoit l'héritage de sa destination
+                await repo.AuditAsync(await ActorAsync(), "Folder copied", $"{share}/{path} → {share}/{newPath}");
+                return;
+            }
             await repo.CopyFolderStatesAsync(share, path, newPath);
             var states = await repo.GetFolderStatesAsync(share);
             // De haut en bas : chaque dossier à règles propres est réécrit après son parent.
@@ -287,7 +295,7 @@ public class NasOperations(AgentClient agent, Repo repo, IMailSender mail, Admin
         finally { _gate.Release(); }
     }
 
-    public async Task DeleteFolderAsync(string share, string path)
+    public async Task DeleteFolderAsync(string share, string path, bool isFile = false)
     {
         if (Rules.ValidateShareName(share) is { } e1) throw new AgentException(e1);
         if (path.Length == 0) throw new AgentException(Msg.F("The share root cannot be deleted."));
@@ -296,8 +304,8 @@ public class NasOperations(AgentClient agent, Repo repo, IMailSender mail, Admin
         try
         {
             await RequireAclShareAsync(share);
-            await agent.DeleteFolderAsync(share, path);
-            await repo.DeleteFolderStatesAsync(share, path);
+            await agent.DeleteFolderAsync(share, path, isFile);
+            if (!isFile) await repo.DeleteFolderStatesAsync(share, path);
             await repo.AuditAsync(await ActorAsync(), "Folder deleted", $"{share}/{path}");
         }
         finally { _gate.Release(); }

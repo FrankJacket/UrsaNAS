@@ -6,7 +6,7 @@
             <MudAlert Severity="Severity.Error" Class="mb-3">@error</MudAlert>
         }
         <MudText Typo="Typo.body2" Class="mb-2">@(Message ?? L["Create in {0}", Location])</MudText>
-        <MudTextField @bind-Value="name" Label="@L["Folder name"]" Immediate="true" AutoFocus="true" OnKeyDown="OnKey" />
+        <MudTextField @bind-Value="name" Label="@L["Name"]" Immediate="true" AutoFocus="true" OnKeyDown="OnKey" />
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="() => Dialog.Cancel()">@L["Cancel"]</MudButton>

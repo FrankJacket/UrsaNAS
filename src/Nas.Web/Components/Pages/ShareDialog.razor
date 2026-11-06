@@ -24,16 +24,24 @@
             }
         </MudSelect>
         <MudTextField @bind-Value="comment" Label="@L["Description"]" Disabled="busy" />
-        <MudSelect T="string" Label="@L["Allowed users"]" MultiSelection="true" @bind-SelectedValues="selected" Disabled="busy"
-                   HelperText="@(Users.Count == 0 ? L["Create a user first."] : null)">
-            @foreach (var u in Users)
-            {
-                <MudSelectItem T="string" Value="@u">@u</MudSelectItem>
-            }
-        </MudSelect>
-        <MudSwitch T="bool" @bind-Value="acl" Label="@L["Advanced permissions"]" Color="Color.Primary" Disabled="@(busy || Existing?.Acl == true)" />
-        <MudText Typo="Typo.caption" Class="d-block">@(acl ? L["Who can do what is set per folder in the Permissions page. The users above only get their current access to start with."] : L["Per-folder permissions, groups, deny rules. Can be turned on later."])</MudText>
-        <MudSwitch T="bool" @bind-Value="readOnly" Label="@L["Read-only"]" Color="Color.Primary" Disabled="busy" />
+        @if (Existing is null)
+        {
+            <MudText Typo="Typo.caption" Class="d-block mt-2">@L["Permissions are set right after creation: nobody has access until you add some."]</MudText>
+        }
+        else if (!Existing.Acl)
+        {
+            @* Partage créé avant les permissions avancées : on peut encore régler l'ancien mode ou passer au nouveau. *@
+            <MudSelect T="string" Label="@L["Allowed users"]" MultiSelection="true" @bind-SelectedValues="selected" Disabled="busy"
+                       HelperText="@(Users.Count == 0 ? L["Create a user first."] : null)">
+                @foreach (var u in Users)
+                {
+                    <MudSelectItem T="string" Value="@u">@u</MudSelectItem>
+                }
+            </MudSelect>
+            <MudSwitch T="bool" @bind-Value="acl" Label="@L["Advanced permissions"]" Color="Color.Primary" Disabled="busy" />
+            <MudText Typo="Typo.caption" Class="d-block">@(acl ? L["Who can do what is set per folder in the Permissions page. The users above only get their current access to start with."] : L["Per-folder permissions, groups, deny rules. Can be turned on later."])</MudText>
+            <MudSwitch T="bool" @bind-Value="readOnly" Label="@L["Read-only"]" Color="Color.Primary" Disabled="busy" />
+        }
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="() => Dialog.Cancel()" Disabled="busy">@L["Cancel"]</MudButton>
@@ -56,7 +64,7 @@
     const string NewPrefix = "__new:";
     string? created; // jeu de données déjà créé par une tentative précédente de ce dialogue
     string name = "", comment = "", storage = Plain;
-    bool readOnly, acl;
+    bool readOnly, acl = true; // un nouveau partage est toujours en permissions avancées
 
     string? StorageHelp => Existing is not null && (Existing.Dataset ?? Plain) != storage
         ? L["Existing files are not moved: copy them to the new location."]
@@ -90,7 +98,7 @@
                 created = storage = dataset; // si l'enregistrement du partage échoue, on ne recrée pas le jeu de données
             }
             await Ops.SaveShareAsync(new ShareDef(name.Trim(), comment.Trim(), readOnly, selected.OrderBy(u => u, StringComparer.Ordinal).ToList(), storage == Plain ? null : storage, acl), isNew: Existing is null);
-            Dialog.Close(DialogResult.Ok(true));
+            Dialog.Close(DialogResult.Ok(name.Trim()));
             return;
         }
         catch (AgentException e) { error = L.Translate(e.Message); }

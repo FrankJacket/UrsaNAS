@@ -56,10 +56,10 @@ public sealed record CreateFolderRequest(string Share, string Path, string Name)
 public sealed record ResetAclRequest(string Share, string Path = "");
 
 /// <summary>Déplace ou renomme un dossier : il devient <c>DestParent/NewName</c> (renommer = même parent, autre nom).</summary>
-public sealed record MoveFolderRequest(string Share, string Path, string DestParent, string NewName);
+public sealed record MoveFolderRequest(string Share, string Path, string DestParent, string NewName, bool IsFile = false);
 
 /// <summary>Copie un dossier (contenu compris) vers <c>DestParent/NewName</c> ; la copie reçoit les permissions héritées de sa destination.</summary>
-public sealed record CopyFolderRequest(string Share, string Path, string DestParent, string NewName);
+public sealed record CopyFolderRequest(string Share, string Path, string DestParent, string NewName, bool IsFile = false);
 
 /// <summary>Un groupe du NAS (groupe Linux géré par UrsaNAS) et ses membres.</summary>
 public sealed record NasGroup(string Name, IReadOnlyList<string> Members);

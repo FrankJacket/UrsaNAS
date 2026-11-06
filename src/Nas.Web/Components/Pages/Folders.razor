@@ -109,7 +109,10 @@ else if (share is not null)
     }
 
     <MudMenu @ref="menu" PositionAtCursor="true">
-        <MudMenuItem Icon="@Icons.Material.Filled.CreateNewFolder" OnClick="() => NewFolder(menuNode)">@L["New folder"]</MudMenuItem>
+        @if (menuNode is { IsFile: false })
+        {
+            <MudMenuItem Icon="@Icons.Material.Filled.CreateNewFolder" OnClick="() => NewFolder(menuNode)">@L["New folder"]</MudMenuItem>
+        }
         @if (menuNode is { Path.Length: > 0 })
         {
             <MudMenuItem Icon="@Icons.Material.Filled.DriveFileRenameOutline" OnClick="() => Rename(menuNode)">@L["Rename"]</MudMenuItem>
@@ -117,9 +120,12 @@ else if (share is not null)
             <MudMenuItem Icon="@Icons.Material.Filled.ContentCopy" OnClick="() => MoveTo(menuNode, copy: true)">@L["Copy"]</MudMenuItem>
             <MudMenuItem Icon="@Icons.Material.Filled.Delete" IconColor="Color.Error" OnClick="() => Delete(menuNode)">@L["Delete"]</MudMenuItem>
         }
-        <MudMenuItem Icon="@Icons.Material.Filled.Lock" OnClick="() => OpenPermissions(menuNode)">@L["Permissions"]</MudMenuItem>
-        <MudDivider />
-        <MudMenuItem Icon="@Icons.Material.Filled.Refresh" OnClick="() => Reload(menuNode)">@L["Refresh"]</MudMenuItem>
+        @if (menuNode is { IsFile: false })
+        {
+            <MudMenuItem Icon="@Icons.Material.Filled.Lock" OnClick="() => OpenPermissions(menuNode)">@L["Permissions"]</MudMenuItem>
+            <MudDivider />
+            <MudMenuItem Icon="@Icons.Material.Filled.Refresh" OnClick="() => Reload(menuNode)">@L["Refresh"]</MudMenuItem>
+        }
     </MudMenu>
 }
 
@@ -164,7 +170,7 @@ else if (share is not null)
     bool loaded;
 
     bool CanFolder => selected is { IsFile: false };
-    bool CanModify => selected is { IsFile: false, Path.Length: > 0 };
+    bool CanModify => selected is { Path.Length: > 0 };
 
     string CurrentLocation => share is null ? "" : "/" + share + (selected is { Path.Length: > 0 } ? "/" + selected.Path : "");
 
@@ -202,7 +208,7 @@ else if (share is not null)
             if (child is null) break;
             n.Expanded = true;
             n = child;
-            await Load(n);
+            if (!n.IsFile) await Load(n);
         }
         selected = n;
     }
@@ -295,7 +301,7 @@ else if (share is not null)
     {
         selected = n;
         menuNode = n;
-        if (!n.IsFile && menu is not null) await menu.OpenMenuAsync(e);
+        if (menu is not null) await menu.OpenMenuAsync(e);
     }
 
     static readonly DialogOptions SmallOptions = new() { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true, BackdropClick = false };
@@ -349,7 +355,8 @@ else if (share is not null)
         if (await dialog.Result is { Canceled: false, Data: string name } && name != n.Name)
         {
             var parent = NasOperations.ParentOf(n.Path);
-            await Run(() => Ops.MoveFolderAsync(sh, n.Path, parent, name), L["Folder renamed."], Join(parent, name));
+            var file = n.IsFile;
+            await Run(() => Ops.MoveFolderAsync(sh, n.Path, parent, name, file), file ? L["File renamed."] : L["Folder renamed."], Join(parent, name));
         }
     }
 
@@ -367,10 +374,16 @@ else if (share is not null)
         if (await dialog.Result is not { Canceled: false, Data: string dest }) return;
         var parent = NasOperations.ParentOf(n.Path);
         if (dest == parent && !copy) return; // déjà là
-        var name = dest == parent ? L["{0} - copy", n.Name] : n.Name; // copier au même endroit : il faut un autre nom
+        var name = n.Name;
+        if (dest == parent) // copier au même endroit : il faut un autre nom (« a - copie.txt » pour un fichier)
+        {
+            var dot = n.IsFile ? n.Name.LastIndexOf('.') : -1;
+            name = dot > 0 ? L["{0} - copy", n.Name[..dot]] + n.Name[dot..] : L["{0} - copy", n.Name];
+        }
         var path = n.Path;
-        await Run(() => copy ? Ops.CopyFolderAsync(sh, path, dest, name) : Ops.MoveFolderAsync(sh, path, dest, name),
-            copy ? L["Folder copied."] : L["Folder moved."], Join(dest, name));
+        var file = n.IsFile;
+        await Run(() => copy ? Ops.CopyFolderAsync(sh, path, dest, name, file) : Ops.MoveFolderAsync(sh, path, dest, name, file),
+            copy ? (file ? L["File copied."] : L["Folder copied."]) : (file ? L["File moved."] : L["Folder moved."]), Join(dest, name));
     }
 
     async Task Delete(Node? n)
@@ -378,6 +391,14 @@ else if (share is not null)
         if (n is null || share is null || n.Path.Length == 0) return;
         var sh = share;
         var path = n.Path;
+        if (n.IsFile)
+        {
+            var ok = await Dialogs.ShowMessageBoxAsync(L["Delete {0}", n.Name], L["File {0} will be deleted. This cannot be undone.", Loc(n)],
+                yesText: L["Delete"], cancelText: L["Cancel"]);
+            if (ok != true) return;
+            await Run(() => Ops.DeleteFolderAsync(sh, path, true), L["File deleted."], NasOperations.ParentOf(path));
+            return;
+        }
         var parameters = new DialogParameters<ConfirmNameDialog>
         {
             { x => x.Expected, n.Name },

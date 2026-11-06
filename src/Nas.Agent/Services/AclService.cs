@@ -109,7 +109,7 @@ public sealed class AclService(ICommandRunner run, UserService users, GroupServi
         Validate(share, path);
         var svc = await EnsureServiceAccountAsync(ct);
         var root = await SharePathAsync(share, ct);
-        Dir(root, path);
+        Dir(root, path, File.Exists(Path.Combine(root, path)));
         var sddl = $"D:(A;;FA;;;{svc})";
         var batch = new List<string>();
 
@@ -139,7 +139,11 @@ public sealed class AclService(ICommandRunner run, UserService users, GroupServi
     {
         var options = new EnumerationOptions { RecurseSubdirectories = false, IgnoreInaccessible = true, AttributesToSkip = FileAttributes.ReparsePoint };
         var stack = new Stack<string>();
-        if (start.Length > 0) yield return start;
+        if (start.Length > 0)
+        {
+            yield return start;
+            if (!Directory.Exists(Path.Combine(root, start))) yield break; // un fichier : rien dessous
+        }
         stack.Push(start);
         while (stack.Count > 0)
         {
@@ -156,50 +160,52 @@ public sealed class AclService(ICommandRunner run, UserService users, GroupServi
     }
 
     /// <summary>Dossier réel d'un chemin relatif ; refuse tout segment absent ou qui serait un lien symbolique.</summary>
-    static string Dir(string root, string rel)
+    static string Dir(string root, string rel, bool file = false)
     {
         var cur = root;
-        foreach (var seg in rel.Split('/', StringSplitOptions.RemoveEmptyEntries))
+        var segs = rel.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        for (var i = 0; i < segs.Length; i++)
         {
-            cur = Path.Combine(cur, seg);
-            var d = new DirectoryInfo(cur);
+            cur = Path.Combine(cur, segs[i]);
+            FileSystemInfo d = file && i == segs.Length - 1 ? new FileInfo(cur) : new DirectoryInfo(cur); // « file » : le dernier élément est un fichier
             if (!d.Exists || d.LinkTarget is not null) throw new OperationException(Msg.F("Invalid folder path."));
         }
         return cur;
     }
 
     /// <summary>Contrôles communs à déplacer et copier ; renvoie le dossier source et le dossier cible.</summary>
-    async Task<(string Source, string Target)> PlanAsync(string share, string path, string destParent, string newName, CancellationToken ct)
+    async Task<(string Source, string Target)> PlanAsync(string share, string path, string destParent, string newName, bool isFile, CancellationToken ct)
     {
         Validate(share, path);
         Validate(share, destParent);
         if (path.Length == 0) throw new OperationException(Msg.F("The share root has no parent folder."));
         if (AclRules.ValidateNewFolderName(newName) is { } e) throw new OperationException(e);
-        if (destParent == path || destParent.StartsWith(path + "/", StringComparison.Ordinal))
+        if (!isFile && (destParent == path || destParent.StartsWith(path + "/", StringComparison.Ordinal)))
             throw new OperationException(Msg.F("A folder cannot be moved or copied into itself."));
         var root = await SharePathAsync(share, ct);
-        var source = Dir(root, path);
+        var source = Dir(root, path, isFile);
         var destDir = Dir(root, destParent);
         var target = Path.Combine(destDir, newName);
         // Les clients Windows ignorent la casse : « Docs » et « docs » sont en collision, sauf s'il s'agit du même dossier qu'on renomme.
         if (new DirectoryInfo(destDir).EnumerateFileSystemInfos().Any(x => string.Equals(x.Name, newName, StringComparison.OrdinalIgnoreCase)
                 && !string.Equals(x.FullName, source, StringComparison.Ordinal)))
-            throw new OperationException(Msg.F("A folder named “{0}” already exists.", newName));
+            throw new OperationException(isFile ? Msg.F("An item named “{0}” already exists.", newName) : Msg.F("A folder named “{0}” already exists.", newName));
         return (source, target);
     }
 
+    /// <summary>Déplace ou renomme un dossier ou un fichier.</summary>
     public async Task MoveFolderAsync(MoveFolderRequest r, CancellationToken ct = default)
     {
-        var (source, target) = await PlanAsync(r.Share, r.Path, r.DestParent, r.NewName, ct);
-        try { Directory.Move(source, target); } // rename(2) : l'ACL et les dates suivent
+        var (source, target) = await PlanAsync(r.Share, r.Path, r.DestParent, r.NewName, r.IsFile, ct);
+        try { if (r.IsFile) File.Move(source, target); else Directory.Move(source, target); } // rename(2) : l'ACL et les dates suivent
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         { throw new OperationException(Msg.F("{0} failed ({1}): {2}", "Moving the folder", 1, e.Message)); }
     }
 
     public async Task CopyFolderAsync(CopyFolderRequest r, CancellationToken ct = default)
     {
-        var (source, target) = await PlanAsync(r.Share, r.Path, r.DestParent, r.NewName, ct);
-        try { CopyDir(new DirectoryInfo(source), target); }
+        var (source, target) = await PlanAsync(r.Share, r.Path, r.DestParent, r.NewName, r.IsFile, ct);
+        try { if (r.IsFile) File.Copy(source, target); else CopyDir(new DirectoryInfo(source), target); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         { throw new OperationException(Msg.F("{0} failed ({1}): {2}", "Copying the folder", 1, e.Message)); }
         // La copie appartient à l'agent : groupe et droits Unix de base comme partout, puis une ACL neutre
@@ -221,12 +227,12 @@ public sealed class AclService(ICommandRunner run, UserService users, GroupServi
     }
 
     /// <summary>Supprime un dossier et tout son contenu (jamais la racine du partage ; les liens symboliques ne sont pas suivis).</summary>
-    public async Task DeleteFolderAsync(string share, string path, CancellationToken ct = default)
+    public async Task DeleteFolderAsync(string share, string path, bool isFile = false, CancellationToken ct = default)
     {
         Validate(share, path);
         if (path.Length == 0) throw new OperationException(Msg.F("The share root cannot be deleted."));
-        var dir = Dir(await SharePathAsync(share, ct), path);
-        try { Directory.Delete(dir, recursive: true); }
+        var dir = Dir(await SharePathAsync(share, ct), path, isFile);
+        try { if (isFile) File.Delete(dir); else Directory.Delete(dir, recursive: true); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         { throw new OperationException(Msg.F("{0} failed ({1}): {2}", "Deleting the folder", 1, e.Message)); }
     }

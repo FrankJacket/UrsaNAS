@@ -90,8 +90,8 @@ public partial class Program
             Guard(async () => { await a.MoveFolderAsync(r, ct); return Results.NoContent(); }));
         app.MapPost("/acl/folder/copy", (CopyFolderRequest r, AclService a, CancellationToken ct) =>
             Guard(async () => { await a.CopyFolderAsync(r, ct); return Results.NoContent(); }));
-        app.MapDelete("/acl/folder", (string share, string path, AclService a, CancellationToken ct) =>
-            Guard(async () => { await a.DeleteFolderAsync(share, path, ct); return Results.NoContent(); }));
+        app.MapDelete("/acl/folder", (string share, string path, bool? file, AclService a, CancellationToken ct) =>
+            Guard(async () => { await a.DeleteFolderAsync(share, path, file == true, ct); return Results.NoContent(); }));
         app.MapPost("/acl/reset", (ResetAclRequest r, AclService a, CancellationToken ct) =>
             Guard(async () => { await a.ResetTreeAsync(r.Share, r.Path, ct); return Results.NoContent(); }));
 

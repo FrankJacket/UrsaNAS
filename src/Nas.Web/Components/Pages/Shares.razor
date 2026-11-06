@@ -88,10 +88,17 @@
         catch (HttpRequestException) { }
         var parameters = new DialogParameters<ShareDialog> { { x => x.Existing, existing }, { x => x.Users, users }, { x => x.Datasets, free }, { x => x.Pools, pools } };
         var dialog = await Dialogs.ShowAsync<ShareDialog>(title, parameters, Options);
-        if (await dialog.Result is { Canceled: false })
+        if (await dialog.Result is { Canceled: false } result)
         {
             Snack.Add(L["Share saved."], Severity.Success);
             await LoadAsync();
+            // Un nouveau partage n'est accessible à personne : on enchaîne sur ses permissions.
+            if (existing is null && result.Data is string created)
+            {
+                var permParameters = new DialogParameters<FolderPermissionsDialog> { { x => x.Share, created }, { x => x.Path, "" } };
+                var big = new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true, CloseButton = true, BackdropClick = false };
+                await (await Dialogs.ShowAsync<FolderPermissionsDialog>(L["Permissions of {0}", "/" + created], permParameters, big)).Result;
+            }
         }
     }
 
