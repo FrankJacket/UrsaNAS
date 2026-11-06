@@ -1,126 +1,128 @@
 # UrsaNAS
 
-UrsaNAS est un NAS maison : une interface web (français / anglais) pour gérer, sur un Debian, les disques, le stockage ZFS, le partage de fichiers, les comptes, la surveillance et les sauvegardes sur disque USB.
+UrsaNAS is a home NAS: a web interface (English / French) to manage disks, ZFS storage, file sharing, accounts, monitoring and backups to a USB disk on a Debian machine.
 
-Il est écrit en C# (.NET 10) avec MudBlazor, SQLite et Dapper.
+It is written in C# (.NET 10) with MudBlazor, SQLite and Dapper.
 
-## Ce que l'application permet de faire
+## What you can do with it
 
-Le menu est rangé en quatre groupes.
+The menu is organised in four groups.
 
-| Groupe | Pages | À quoi ça sert |
+| Group | Pages | Purpose |
 |---|---|---|
-| **Storage** | Disks, Pools, Datasets, Backups | Voir les disques, créer des pools et des datasets ZFS, prendre des snapshots, sauvegarder sur un disque USB |
-| **Sharing** | Shares, Folders, Services | Partager des dossiers en SMB, NFS et FTP, régler les permissions (ACL) par dossier, démarrer ou arrêter les services |
-| **Accounts** | Users, Groups, Admins | Comptes du NAS, groupes, administrateurs de l'interface |
-| **Monitoring** | Dashboard, Alerts, Audit log | État de santé, alertes (avec courriel), journal des actions |
+| **Storage** | Disks, Pools, Datasets, Backups | Inspect disks, create ZFS pools and datasets, take snapshots, back up to a USB disk |
+| **Sharing** | Shares, Folders, Services | Share folders over SMB, NFS and FTP, set per-folder permissions (ACLs), start or stop services |
+| **Accounts** | Users, Groups, Admins | NAS accounts, groups, web interface administrators |
+| **Monitoring** | Dashboard, Alerts, Audit log | Health overview, alerts (with email), log of actions |
 
-### Partages
+### Sharing
 
-- **SMB (Samba)** : permissions fines par dossier (ACL, utilisateurs et groupes).
-- **NFS** : par partage, avec la liste des clients autorisés.
-- **FTP (vsftpd)** : avec les comptes du NAS, chacun enfermé dans son dossier. Le service s'active depuis la page *Services*.
+- **SMB (Samba)**: fine-grained per-folder permissions (ACLs, users and groups).
+- **NFS**: per share, with a list of allowed clients.
+- **FTP (vsftpd)**: uses the NAS accounts, each user locked into their own folder. The service is enabled from the *Services* page.
 
-Les ACL ne s'appliquent qu'à SMB. NFS et FTP donnent l'accès du partage entier.
+ACLs only apply to SMB. NFS and FTP give access to the whole share.
 
-### Sauvegardes
+### Backups
 
-La page **Backups** copie un partage (ou certains dossiers) vers un **disque USB branché au NAS**. La copie est faite par le moteur [Ursacopy](https://github.com/FrankJacket/Ursacopy), inclus comme sous-module Git.
+The **Backups** page copies a share (or some of its folders) to a **USB disk plugged into the NAS**. The copy is done by the [Ursacopy](https://github.com/FrankJacket/Ursacopy) engine, included as a Git submodule.
 
-- **C'est une copie lisible, pas une image restaurable.** Les fichiers sont copiés tels quels, sans permissions ni ACL. Le disque se lit sur n'importe quel ordinateur (NTFS et exFAT conviennent).
-- **Un travail = un partage** (ou quelques dossiers) copié dans un dossier du disque. Plusieurs travaux peuvent partager le même disque.
-- **Planification** : à la main, tous les jours à une heure donnée, ou dès que le disque est branché.
-- **Option snapshot ZFS** : pour un partage sur un dataset ZFS, la copie part d'un snapshot temporaire. Les fichiers qui bougent pendant la copie (bases de données, disques virtuels) sont donc copiés de façon cohérente. Le snapshot est supprimé ensuite.
-- **Corbeille** : les fichiers supprimés ou remplacés sont gardés N jours (30 par défaut) sur le disque.
-- **Vérification** : option pour relire chaque fichier copié.
-- **Alertes** : une copie en échec, ou un travail planifié sans copie réussie depuis 3 jours, déclenche une alerte.
+- **It is a readable copy, not a restorable image.** Files are copied as they are, without permissions or ACLs. The disk can be read on any computer (NTFS and exFAT work well).
+- **One job = one share** (or a few folders) copied into a folder on the disk. Several jobs can share the same disk.
+- **Scheduling**: manual, every day at a given time, or whenever the disk is connected.
+- **ZFS snapshot option**: for a share on a ZFS dataset, the copy reads from a temporary snapshot, so files that change during the copy (databases, virtual disks) are copied consistently. The snapshot is deleted afterwards.
+- **Trash**: deleted or replaced files are kept for N days (30 by default) on the disk.
+- **Verification**: optionally re-read every copied file.
+- **Alerts**: a failed copy, or a scheduled job with no successful copy for 3 days, raises an alert.
 
-**Premier usage**
+**First use**
 
-1. Branchez le disque et **montez-le à la main** sous `/mnt` ou `/media`. L'interface ne monte pas les disques.
-2. Dans *Backups*, créez un travail et choisissez le disque.
-3. Cliquez sur **Initialiser le disque**. Un petit fichier marqueur (`.ursacopy-target`) est écrit à la racine. Il évite d'écrire sur un autre disque monté au même endroit.
-4. Cliquez sur **Lancer maintenant**.
+1. Plug the disk and **mount it by hand** under `/mnt` or `/media`. The interface does not mount disks.
+2. In *Backups*, create a job and pick the disk.
+3. Click **Initialise the disk**. A small marker file (`.ursacopy-target`) is written at its root. It prevents writing to a different disk mounted at the same place.
+4. Click **Run now**.
 
-Sécurité : l'agent n'accepte comme cible qu'un point de montage sous `/mnt`, `/media` ou `/run/media`. L'interface n'envoie jamais de chemin source : l'agent retrouve lui-même le dossier du partage.
+Safety: the agent only accepts a mount point under `/mnt`, `/media` or `/run/media` as a target. The web interface never sends a source path: the agent resolves the share folder itself.
 
 ## Architecture
 
 ```
-Navigateur ──HTTP :8080──▶ Nas.Web ──socket unix──▶ Nas.Agent (root) ──▶ zfs, smb, nfs, vsftpd, ACL, copie…
-                              │
-                           SQLite (partages, historique, alertes, journal)
+Browser ──HTTP :8080──▶ Nas.Web ──unix socket──▶ Nas.Agent (root) ──▶ zfs, smb, nfs, vsftpd, ACLs, copy…
+                           │
+                        SQLite (shares, history, alerts, audit log)
 ```
 
-| Projet | Rôle |
+| Project | Role |
 |---|---|
-| `src/Nas.Agent` | Service qui tourne en root. Exécute les commandes système et les copies. Écoute uniquement sur `/run/ursanas/agent.sock`. |
-| `src/Nas.Web` | Interface et base de données. Ne touche pas au système : elle demande tout à l'agent. Gère aussi le planificateur de sauvegardes et les alertes. |
-| `src/Nas.Contracts` | Types et règles de validation partagés (noms de partage, ACL, NFS, FTP, sauvegardes). |
-| `external/Ursacopy` | Sous-module Git : moteur de copie. |
-| `tests/` | Tests unitaires (xUnit), dont la vérification que tous les textes de l'interface ont leur traduction française. |
-| `deploy/` | Script de déploiement, installation, services systemd. |
+| `src/Nas.Agent` | Service running as root. Runs system commands and copies. Listens only on `/run/ursanas/agent.sock`. |
+| `src/Nas.Web` | Interface and database. Never touches the system: it asks the agent for everything. Also runs the backup scheduler and the alerts. |
+| `src/Nas.Contracts` | Shared types and validation rules (share names, ACLs, NFS, FTP, backups). |
+| `external/Ursacopy` | Git submodule: the copy engine. |
+| `tests/` | Unit tests (xUnit), including a check that every interface text has a French translation. |
+| `deploy/` | Deployment script, install script, systemd services. |
 
-Principe : **l'agent est le seul à avoir les droits root**, et il vérifie tout ce que l'interface lui demande. Pendant la copie, l'agent garde l'avancement en mémoire. L'interface enregistre le résultat dans l'historique, puis demande à l'agent de l'oublier.
+Principle: **the agent is the only part with root rights**, and it validates everything the interface asks for. During a copy, the agent keeps progress in memory. The web app records the result in the history, then asks the agent to forget it.
 
-## Installer
+## Install
 
-### Prérequis sur la cible
+### Target requirements
 
-Un Debian 13 avec ZFS (pour les pools et datasets) et un accès SSH avec `sudo`. Le script installe lui-même NFS, vsftpd et openssl, laissés arrêtés jusqu'à leur activation dans la page *Services*. Pour des disques de sauvegarde exFAT, installez `exfatprogs`.
+Debian 13 with ZFS (for pools and datasets) and SSH access with `sudo`. The install script installs NFS, vsftpd and openssl itself, leaving the services stopped until they are enabled from the *Services* page. For exFAT backup disks, install `exfatprogs`.
 
-### Déployer depuis Windows
+### Deploy from Windows
 
-Le script publie l'agent et l'interface pour `linux-x64` (sans .NET sur la cible), les copie par SSH et redémarre les services.
+The script publishes the agent and the interface for `linux-x64` (self-contained, no .NET needed on the target), copies them over SSH and restarts the services.
 
 ```powershell
 git clone --recurse-submodules https://github.com/FrankJacket/UrsaNAS.git
 cd UrsaNAS
-./deploy/deploy.ps1                       # cible par défaut : ursanas@Ursa.mshome.net
-./deploy/deploy.ps1 -Target user@mon-nas  # autre cible
+./deploy/deploy.ps1                       # default target: ursanas@Ursa.mshome.net
+./deploy/deploy.ps1 -Target user@my-nas   # another target
 ```
 
-L'interface est ensuite sur `http://<adresse-du-nas>:8080`. À la première visite, un formulaire crée le premier administrateur.
+The interface is then at `http://<nas-address>:8080`. On the first visit, a form creates the first administrator.
 
-Si vous avez cloné sans `--recurse-submodules` :
+If you cloned without `--recurse-submodules`:
 
 ```bash
 git submodule update --init
 ```
 
-Le dépôt d'Ursacopy est privé : il faut y avoir accès avec votre compte GitHub.
+The Ursacopy repository is private: your GitHub account needs access to it.
 
-## Développer
+## Develop
 
 ```bash
-dotnet test        # tous les tests
+dotnet test        # all tests
 ```
 
-Mode simulé, sans système réel ni droits root (utile sous Windows) :
+Fake mode, with no real system and no root rights (handy on Windows):
 
 ```powershell
 $env:URSANAS_FAKE = '1'
 $env:ASPNETCORE_ENVIRONMENT = 'Development'
-$env:Backup__Roots__0 = 'C:/temp/mnt'        # dossier qui tient lieu de /mnt
-$env:Backup__RequireMountPoint = 'false'     # accepte un simple dossier comme disque
+$env:Backup__Roots__0 = 'C:/temp/mnt'        # folder standing in for /mnt
+$env:Backup__RequireMountPoint = 'false'     # accept a plain folder as a disk
 $env:ASPNETCORE_URLS = 'http://localhost:5190'
 dotnet run --project src/Nas.Agent --no-launch-profile
-# dans un autre terminal :
+# in another terminal:
 $env:ASPNETCORE_URLS = 'http://localhost:5199'; $env:Agent__Url = 'http://localhost:5190/'
 dotnet run --project src/Nas.Web --no-launch-profile
 ```
 
-En mode simulé, les commandes système répondent « OK » sans rien faire. Pour que la liste des disques de sauvegarde ne soit pas vide, définissez `Backup__MountInfo` : un fichier au format `/proc/self/mountinfo` qui déclare votre faux disque. `Backup__RequireMountPoint=false` seul suffit pour tester une copie, pas pour faire apparaître le disque dans la liste.
+In fake mode, system commands answer "OK" and do nothing. For the list of backup disks to be non-empty, set `Backup__MountInfo` to a file in the `/proc/self/mountinfo` format declaring your fake disk. `Backup__RequireMountPoint=false` alone is enough to test a copy, but it does not make the disk appear in the list.
 
-### Textes de l'interface
+In Visual Studio, a first-chance `NavigationException` at start-up on `/setup` is normal (Blazor's way of redirecting while rendering on the server, when no account exists yet). Continue, or untick "Break when this exception type is thrown".
 
-Les textes sont écrits en anglais dans le code, par exemple `L["Save"]`. Chaque texte doit avoir sa traduction dans `src/Nas.Web/Localization/French.cs`, sinon un test échoue.
+### Interface texts
 
-## Configuration utile
+Texts are written in English in the code, for example `L["Save"]`. Each text needs its translation in `src/Nas.Web/Localization/French.cs`, otherwise a test fails.
 
-| Clé | Défaut | Effet |
+## Useful configuration
+
+| Key | Default | Effect |
 |---|---|---|
-| `Backup:Roots` | `/mnt`, `/media`, `/run/media` | Dossiers sous lesquels un disque de sauvegarde peut être monté |
-| `Backup:RequireMountPoint` | `true` | `false` accepte un simple dossier (développement seulement) |
-| `Backups:IntervalSeconds` | `20` | Fréquence du planificateur de sauvegardes |
-| `DataDir` | `/var/lib/ursanas-web` | Dossier de la base SQLite de l'interface |
+| `Backup:Roots` | `/mnt`, `/media`, `/run/media` | Folders under which a backup disk may be mounted |
+| `Backup:RequireMountPoint` | `true` | `false` accepts a plain folder (development only) |
+| `Backups:IntervalSeconds` | `20` | How often the backup scheduler runs |
+| `DataDir` | `/var/lib/ursanas-web` | Folder holding the interface's SQLite database |
