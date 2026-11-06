@@ -1,5 +1,6 @@
 using Dapper;
 using Nas.Contracts;
+using Nas.Web.Alerting;
 
 namespace Nas.Web.Data;
 
@@ -10,6 +11,17 @@ public class AuditRow
     public string Actor { get; set; } = "";
     public string Action { get; set; } = "";
     public string? Detail { get; set; }
+}
+
+public class AlertRow
+{
+    public long Id { get; set; }
+    public string Code { get; set; } = "";
+    public string Severity { get; set; } = "";
+    public string Title { get; set; } = "";
+    public string? Detail { get; set; }
+    public DateTime RaisedAt { get; set; }
+    public DateTime? ResolvedAt { get; set; }
 }
 
 class ShareRow
@@ -62,5 +74,62 @@ public class Repo(Db db)
     {
         using var c = db.Open();
         await c.ExecuteAsync("DELETE FROM Shares WHERE Name=@name", new { name });
+    }
+
+    // ---- Alertes
+    public async Task<List<AlertRow>> GetActiveAlertsAsync()
+    {
+        using var c = db.Open();
+        return (await c.QueryAsync<AlertRow>(
+            "SELECT Id,Code,Severity,Title,Detail,RaisedAt,ResolvedAt FROM Alerts WHERE ResolvedAt IS NULL ORDER BY Id")).ToList();
+    }
+
+    public async Task<List<AlertRow>> GetAlertHistoryAsync(int limit = 100)
+    {
+        using var c = db.Open();
+        return (await c.QueryAsync<AlertRow>(
+            "SELECT Id,Code,Severity,Title,Detail,RaisedAt,ResolvedAt FROM Alerts ORDER BY Id DESC LIMIT @limit", new { limit })).ToList();
+    }
+
+    public async Task RaiseAlertAsync(Candidate a)
+    {
+        using var c = db.Open();
+        await c.ExecuteAsync("INSERT INTO Alerts(Code,Severity,Title,Detail,RaisedAt) VALUES(@Code,@Severity,@Title,@Detail,@at)",
+            new { a.Code, a.Severity, a.Title, a.Detail, at = DateTime.UtcNow });
+    }
+
+    public async Task ResolveAlertAsync(long id)
+    {
+        using var c = db.Open();
+        await c.ExecuteAsync("UPDATE Alerts SET ResolvedAt=@at WHERE Id=@id AND ResolvedAt IS NULL", new { id, at = DateTime.UtcNow });
+    }
+
+    // ---- Réglages (clé/valeur)
+    public async Task<MailSettings> GetMailSettingsAsync()
+    {
+        using var c = db.Open();
+        var v = (await c.QueryAsync<(string Name, string Value)>("SELECT Name,Value FROM Settings WHERE Name LIKE 'mail.%'"))
+            .ToDictionary(x => x.Name, x => x.Value);
+        string S(string k, string d) => v.GetValueOrDefault("mail." + k, d);
+        var d = MailSettings.Default;
+        return new MailSettings(S("enabled", "0") == "1", S("host", d.Host), int.TryParse(S("port", ""), out var p) ? p : d.Port,
+            S("security", d.Security), S("user", ""), S("password", ""), S("from", ""), S("to", ""));
+    }
+
+    /// <summary>Un mot de passe vide conserve celui qui est déjà enregistré.</summary>
+    public async Task SaveMailSettingsAsync(MailSettings s)
+    {
+        using var c = db.Open();
+        using var tx = c.BeginTransaction();
+        var pairs = new Dictionary<string, string>
+        {
+            ["enabled"] = s.Enabled ? "1" : "0", ["host"] = s.Host, ["port"] = s.Port.ToString(), ["security"] = s.Security,
+            ["user"] = s.User, ["from"] = s.From, ["to"] = s.To,
+        };
+        if (s.Password.Length > 0) pairs["password"] = s.Password;
+        foreach (var (k, val) in pairs)
+            await c.ExecuteAsync("INSERT INTO Settings(Name,Value) VALUES(@n,@v) ON CONFLICT(Name) DO UPDATE SET Value=@v",
+                new { n = "mail." + k, v = val }, tx);
+        tx.Commit();
     }
 }

@@ -1,0 +1,146 @@
+@page "/alerts"
+@inherits AutoRefreshBase
+@inject Repo Repo
+@inject NasOperations Ops
+@inject AlertMonitor Monitor
+@inject ISnackbar Snack
+
+<MudText Typo="Typo.h4" Class="mb-4">Alertes</MudText>
+
+<MudStack Row="true" Class="mb-4" AlignItems="AlignItems.Center">
+    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="CheckNow" Disabled="checking">@(checking ? "Contrôle…" : "Vérifier maintenant")</MudButton>
+    <MudText Typo="Typo.body2">Pools toutes les minutes, disques (SMART) toutes les dix minutes. Une alerte est signalée après deux constats consécutifs.</MudText>
+</MudStack>
+
+@if (active.Count == 0 && loaded)
+{
+    <MudAlert Severity="Severity.Success" Class="mb-4">Aucun problème constaté.</MudAlert>
+}
+@foreach (var a in active)
+{
+    <MudAlert Severity="@(a.Severity == "critical" ? Severity.Error : Severity.Warning)" Class="mb-2">
+        <b>@a.Title</b> — depuis @Fmt.Dt(a.RaisedAt)
+        @if (!string.IsNullOrWhiteSpace(a.Detail)) { <div>@a.Detail</div> }
+    </MudAlert>
+}
+
+<MudText Typo="Typo.h5" Class="mt-8 mb-2">Envoi par e-mail</MudText>
+<MudPaper Class="pa-4 mb-8" Style="max-width:640px">
+    @if (formError is not null)
+    {
+        <MudAlert Severity="Severity.Error" Class="mb-3">@formError</MudAlert>
+    }
+    <MudSwitch T="bool" @bind-Value="mail.Enabled" Label="Envoyer un e-mail à chaque alerte" Color="Color.Primary" />
+    <MudStack Row="true">
+        <MudTextField @bind-Value="mail.Host" Label="Serveur SMTP" Style="flex:3" />
+        <MudNumericField T="int" @bind-Value="mail.Port" Label="Port" Min="1" Max="65535" HideSpinButtons="true" Style="flex:1" />
+    </MudStack>
+    <MudSelect T="string" @bind-Value="mail.Security" Label="Connexion sécurisée">
+        <MudSelectItem T="string" Value="@("starttls")">STARTTLS (port 587)</MudSelectItem>
+        <MudSelectItem T="string" Value="@("ssl")">SSL/TLS (port 465)</MudSelectItem>
+        <MudSelectItem T="string" Value="@("none")">Aucune (réseau local seulement)</MudSelectItem>
+    </MudSelect>
+    <MudTextField @bind-Value="mail.User" Label="Identifiant (facultatif)" />
+    <MudTextField @bind-Value="mail.Password" Label="Mot de passe" InputType="InputType.Password"
+                  HelperText="@(hasPassword ? "Un mot de passe est enregistré ; laisse vide pour le conserver." : null)" />
+    <MudTextField @bind-Value="mail.From" Label="Expéditeur" />
+    <MudTextField @bind-Value="mail.To" Label="Destinataires" HelperText="Jusqu'à cinq adresses, séparées par des virgules." />
+    <MudStack Row="true" Class="mt-4">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Save" Disabled="busy">Enregistrer</MudButton>
+        <MudButton Variant="Variant.Outlined" OnClick="SendTest" Disabled="busy">@(busy ? "Envoi…" : "Envoyer un e-mail d'essai")</MudButton>
+    </MudStack>
+    <MudText Typo="Typo.caption" Class="mt-2">L'essai utilise les réglages enregistrés.</MudText>
+</MudPaper>
+
+<MudText Typo="Typo.h5" Class="mb-2">Historique</MudText>
+<MudTable Items="history" Hover="true" Dense="true">
+    <HeaderContent><MudTh>Ouverte</MudTh><MudTh>Gravité</MudTh><MudTh>Alerte</MudTh><MudTh>Résolue</MudTh></HeaderContent>
+    <RowTemplate>
+        <MudTd>@Fmt.Dt(context.RaisedAt)</MudTd>
+        <MudTd><MudChip T="string" Size="Size.Small" Color="@(context.Severity == "critical" ? Color.Error : Color.Warning)">@(context.Severity == "critical" ? "Critique" : "Attention")</MudChip></MudTd>
+        <MudTd>@context.Title</MudTd>
+        <MudTd>@(context.ResolvedAt is { } r ? Fmt.Dt(r) : "—")</MudTd>
+    </RowTemplate>
+    <NoRecordsContent><MudText Class="pa-4">Aucune alerte pour l'instant.</MudText></NoRecordsContent>
+</MudTable>
+
+@code {
+    List<AlertRow> active = new(), history = new();
+    /// <summary>Copie modifiable des réglages (MailSettings est un enregistrement immuable).</summary>
+    sealed class MailForm
+    {
+        public bool Enabled { get; set; }
+        public string Host { get; set; } = "";
+        public int Port { get; set; } = 587;
+        public string Security { get; set; } = "starttls";
+        public string User { get; set; } = "";
+        public string Password { get; set; } = "";
+        public string From { get; set; } = "";
+        public string To { get; set; } = "";
+
+        public static MailForm Of(MailSettings s) => new()
+        {
+            Enabled = s.Enabled, Host = s.Host, Port = s.Port, Security = s.Security, User = s.User, Password = "", From = s.From, To = s.To,
+        };
+
+        public MailSettings ToSettings() => new(Enabled, Host.Trim(), Port, Security, User.Trim(), Password, From.Trim(), To.Trim());
+    }
+
+    MailForm mail = new();
+    bool loaded, hasPassword, busy, checking, formLoaded;
+    string? formError;
+
+    protected override async Task LoadAsync()
+    {
+        active = await Repo.GetActiveAlertsAsync();
+        history = await Repo.GetAlertHistoryAsync();
+        if (!formLoaded) await LoadFormAsync(); // une seule fois : le rafraîchissement ne doit pas effacer ce qu'on tape
+        loaded = true;
+    }
+
+    async Task LoadFormAsync()
+    {
+        var saved = await Repo.GetMailSettingsAsync();
+        hasPassword = saved.Password.Length > 0;
+        mail = MailForm.Of(saved);
+        formLoaded = true;
+    }
+
+    async Task CheckNow()
+    {
+        checking = true;
+        try
+        {
+            await Monitor.CheckNowAsync();
+            await LoadAsync();
+        }
+        finally { checking = false; }
+    }
+
+    async Task Save()
+    {
+        formError = null;
+        busy = true;
+        try
+        {
+            await Ops.SaveMailSettingsAsync(mail.ToSettings());
+            await LoadFormAsync();
+            Snack.Add("Réglages enregistrés.", Severity.Success);
+        }
+        catch (AgentException e) { formError = e.Message; }
+        finally { busy = false; }
+    }
+
+    async Task SendTest()
+    {
+        formError = null;
+        busy = true;
+        try
+        {
+            await Ops.SendTestMailAsync();
+            Snack.Add("E-mail d'essai envoyé.", Severity.Success);
+        }
+        catch (AgentException e) { formError = e.Message; }
+        finally { busy = false; }
+    }
+}

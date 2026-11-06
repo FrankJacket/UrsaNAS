@@ -1,6 +1,7 @@
 using System.Net.Sockets;
 using MudBlazor.Services;
 using Nas.Web;
+using Nas.Web.Alerting;
 using Nas.Web.Components;
 using Nas.Web.Data;
 
@@ -11,6 +12,11 @@ b.Services.AddScoped<ThemeState>();
 b.Services.AddSingleton<Db>();
 b.Services.AddSingleton<Repo>();
 b.Services.AddScoped<NasOperations>();
+b.Services.AddSingleton<IMailSender, MailKitSender>();
+b.Services.AddSingleton<AlertState>();
+b.Services.AddSingleton<AlertService>();
+b.Services.AddSingleton<AlertMonitor>();
+b.Services.AddHostedService(sp => sp.GetRequiredService<AlertMonitor>());
 
 // L'interface ne touche jamais au système : elle parle à l'agent par socket Unix (ou par URL en développement).
 var socketPath = b.Configuration["Agent:SocketPath"];

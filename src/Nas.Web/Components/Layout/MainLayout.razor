@@ -1,6 +1,7 @@
 @inherits LayoutComponentBase
 @implements IDisposable
 @inject ThemeState Theme
+@inject Nas.Web.Alerting.AlertState Alerts
 @inject IJSRuntime JS
 
 <MudThemeProvider IsDarkMode="@Theme.IsDark" />
@@ -26,6 +27,13 @@
             <MudNavLink Href="/datasets" Icon="@Icons.Material.Filled.FolderCopy">Jeux de données</MudNavLink>
             <MudNavLink Href="/users" Icon="@Icons.Material.Filled.People">Utilisateurs</MudNavLink>
             <MudNavLink Href="/shares" Icon="@Icons.Material.Filled.FolderShared">Partages</MudNavLink>
+            <MudNavLink Href="/alerts" Icon="@Icons.Material.Filled.NotificationsActive">
+                Alertes
+                @if (Alerts.Count > 0)
+                {
+                    <MudChip T="string" Size="Size.Small" Color="@(Alerts.CriticalCount > 0 ? Color.Error : Color.Warning)" Class="ml-2">@Alerts.Count</MudChip>
+                }
+            </MudNavLink>
             <MudNavLink Href="/journal" Icon="@Icons.Material.Filled.History">Journal</MudNavLink>
         </MudNavMenu>
     </MudDrawer>
@@ -33,7 +41,11 @@
 </MudLayout>
 
 @code {
-    protected override void OnInitialized() => Theme.Changed += OnThemeChanged;
+    protected override void OnInitialized()
+    {
+        Theme.Changed += OnThemeChanged;
+        Alerts.Changed += OnThemeChanged; // même rafraîchissement : la pastille d'alertes suit le contrôle périodique
+    }
     void OnThemeChanged() => InvokeAsync(StateHasChanged);
 
     async Task SetTheme(bool dark)
@@ -42,5 +54,9 @@
         await JS.InvokeVoidAsync("ursanasSetTheme", dark ? "dark" : "light");
     }
 
-    public void Dispose() => Theme.Changed -= OnThemeChanged;
+    public void Dispose()
+    {
+        Theme.Changed -= OnThemeChanged;
+        Alerts.Changed -= OnThemeChanged;
+    }
 }

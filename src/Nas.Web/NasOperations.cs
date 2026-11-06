@@ -1,4 +1,5 @@
 using Nas.Contracts;
+using Nas.Web.Alerting;
 using Nas.Web.Data;
 
 namespace Nas.Web;
@@ -7,7 +8,7 @@ namespace Nas.Web;
 /// Les opérations de l'interface : valide, demande à l'agent d'agir, enregistre l'état voulu en base puis journalise.
 /// L'agent est appelé en premier : si Samba refuse un changement, la base n'est pas modifiée.
 /// </summary>
-public class NasOperations(AgentClient agent, Repo repo)
+public class NasOperations(AgentClient agent, Repo repo, IMailSender mail)
 {
     // Statique : partagé par tous les circuits, car l'instance vit le temps d'une session.
     static readonly SemaphoreSlim _gate = new(1, 1);
@@ -136,6 +137,31 @@ public class NasOperations(AgentClient agent, Repo repo)
 
     public Task DestroySnapshotAsync(string fullName) =>
         Audited(() => agent.DestroySnapshotAsync(fullName), "Instantané supprimé", fullName);
+
+    // ---- Alertes : réglages du courriel
+    public async Task SaveMailSettingsAsync(MailSettings s)
+    {
+        if (MailRules.Validate(s) is { } e) throw new AgentException(e);
+        await repo.SaveMailSettingsAsync(s);
+        await repo.AuditAsync(Actor, "Réglages e-mail modifiés", s.Enabled ? $"{s.Host}:{s.Port} vers {string.Join(", ", s.Recipients)}" : "envoi désactivé");
+    }
+
+    /// <summary>Envoie un message d'essai avec les réglages enregistrés ; l'échec est expliqué à l'utilisateur.</summary>
+    public async Task SendTestMailAsync()
+    {
+        var s = await repo.GetMailSettingsAsync() with { Enabled = true };
+        if (MailRules.Validate(s) is { } e) throw new AgentException(e);
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            await mail.SendAsync(s, "[UrsaNAS] Message d'essai", "Si tu lis ce message, les alertes UrsaNAS peuvent t'écrire.", cts.Token);
+        }
+        catch (Exception ex) when (ex is not AgentException)
+        {
+            throw new AgentException($"Échec de l'envoi : {ex.Message}");
+        }
+        await repo.AuditAsync(Actor, "E-mail d'essai envoyé", string.Join(", ", s.Recipients));
+    }
 
     async Task Audited(Func<Task> action, string what, string detail)
     {

@@ -21,7 +21,7 @@ public partial class Program
     {
         try { return await action(); }
         catch (OperationException e) { return Results.Problem(e.Message, statusCode: StatusCodes.Status400BadRequest); }
-        catch (System.ComponentModel.Win32Exception) { return Results.Problem("ZFS n'est pas installé sur cette machine.", statusCode: StatusCodes.Status400BadRequest); }
+        catch (System.ComponentModel.Win32Exception) { return Results.Problem("Un programme requis (zpool, zfs…) est introuvable sur cette machine.", statusCode: StatusCodes.Status400BadRequest); }
     }
 
     public static void Main(string[] args)
@@ -43,6 +43,7 @@ public partial class Program
         builder.Services.AddSingleton<UserService>();
         builder.Services.AddSingleton<ShareService>();
         builder.Services.AddSingleton<ZfsService>();
+        builder.Services.AddSingleton<SmartService>();
 
         var app = builder.Build();
 
@@ -59,7 +60,9 @@ public partial class Program
         app.MapPut("/shares", (ApplySharesRequest r, ShareService s, CancellationToken ct) =>
             Guard(async () => { await s.ApplyAsync(r.Shares, ct); return Results.NoContent(); }));
 
-        app.MapGet("/zfs/pools", (ZfsService z, CancellationToken ct) => Read(async () => Results.Ok(await z.ListPoolsAsync(ct))));
+        app.MapGet("/smart", (SmartService s, CancellationToken ct) => Read(async () => Results.Ok(await s.ListAsync(ct))));
+
+        app.MapGet("/zfs/pools",(ZfsService z, CancellationToken ct) => Read(async () => Results.Ok(await z.ListPoolsAsync(ct))));
         app.MapPost("/zfs/pools", (CreatePoolRequest r, ZfsService z, CancellationToken ct) =>
             Guard(async () => { await z.CreatePoolAsync(r, ct); return Results.NoContent(); }));
         app.MapDelete("/zfs/pools/{name}", (string name, ZfsService z, CancellationToken ct) =>

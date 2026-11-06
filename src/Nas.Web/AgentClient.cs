@@ -27,6 +27,8 @@ public class AgentClient(HttpClient http)
     public async Task ApplySharesAsync(IReadOnlyList<ShareDef> shares, CancellationToken ct = default) =>
         await EnsureOkAsync(await http.PutAsJsonAsync("shares", new ApplySharesRequest(shares), ct), ct);
 
+    public Task<IReadOnlyList<SmartInfo>> GetSmartAsync(CancellationToken ct = default) => GetListAsync<SmartInfo>("smart", ct);
+
     // ---- ZFS
     public Task<IReadOnlyList<PoolInfo>> GetPoolsAsync(CancellationToken ct = default) => GetListAsync<PoolInfo>("zfs/pools", ct);
     public Task<IReadOnlyList<DatasetInfo>> GetDatasetsAsync(CancellationToken ct = default) => GetListAsync<DatasetInfo>("zfs/datasets", ct);
