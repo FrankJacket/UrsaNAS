@@ -11,9 +11,16 @@
                       HelperText="@(storage == Plain ? L["Folder: {0}", $"/srv/nas/{name}"] : null)" />
         <MudSelect T="string" @bind-Value="storage" Label="@L["Storage"]" Disabled="busy" HelperText="@StorageHelp">
             <MudSelectItem T="string" Value="@Plain">@L["Plain folder ({0})", $"/srv/nas/{name}"]</MudSelectItem>
-            @foreach (var d in Datasets)
+            @foreach (var d in Datasets.Concat(created is null ? [] : [created]))
             {
                 <MudSelectItem T="string" Value="@d">@L["ZFS dataset: {0}", d]</MudSelectItem>
+            }
+            @if (Existing is null)
+            {
+                @foreach (var p in Pools)
+                {
+                    <MudSelectItem T="string" Value="@(NewPrefix + p)">@L["New ZFS dataset on pool {0}", $"{p} ({p}/{name})"]</MudSelectItem>
+                }
             }
         </MudSelect>
         <MudTextField @bind-Value="comment" Label="@L["Description"]" Disabled="busy" />
@@ -42,7 +49,12 @@
     /// <summary>Jeux de données ZFS que ce partage peut utiliser (ceux qu'aucun autre partage n'utilise).</summary>
     [Parameter] public IReadOnlyList<string> Datasets { get; set; } = [];
 
+    /// <summary>Pools ZFS sur lesquels un nouveau jeu de données (du nom du partage) peut être créé en même temps que le partage.</summary>
+    [Parameter] public IReadOnlyList<string> Pools { get; set; } = [];
+
     const string Plain = "__plain";
+    const string NewPrefix = "__new:";
+    string? created; // jeu de données déjà créé par une tentative précédente de ce dialogue
     string name = "", comment = "", storage = Plain;
     bool readOnly, acl;
 
@@ -70,6 +82,13 @@
         busy = true;
         try
         {
+            if (storage.StartsWith(NewPrefix, StringComparison.Ordinal))
+            {
+                if (Rules.ValidateShareName(name.Trim()) is { } bad) throw new AgentException(bad);
+                var dataset = $"{storage[NewPrefix.Length..]}/{name.Trim()}";
+                await Ops.CreateDatasetAsync(dataset);
+                created = storage = dataset; // si l'enregistrement du partage échoue, on ne recrée pas le jeu de données
+            }
             await Ops.SaveShareAsync(new ShareDef(name.Trim(), comment.Trim(), readOnly, selected.OrderBy(u => u, StringComparer.Ordinal).ToList(), storage == Plain ? null : storage, acl), isNew: Existing is null);
             Dialog.Close(DialogResult.Ok(true));
             return;

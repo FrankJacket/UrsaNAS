@@ -39,9 +39,9 @@ public class AgentClient(HttpClient http)
     public async Task DeleteGroupAsync(string name, CancellationToken ct = default) =>
         await EnsureOkAsync(await http.DeleteAsync($"groups/{Uri.EscapeDataString(name)}", ct), ct);
 
-    public async Task<FolderListing> GetFoldersAsync(string share, string path, CancellationToken ct = default)
+    public async Task<FolderListing> GetFoldersAsync(string share, string path, bool files = false, CancellationToken ct = default)
     {
-        using var r = await http.GetAsync($"acl/folders?share={Uri.EscapeDataString(share)}&path={Uri.EscapeDataString(path)}", ct);
+        using var r = await http.GetAsync($"acl/folders?share={Uri.EscapeDataString(share)}&path={Uri.EscapeDataString(path)}&files={(files ? "true" : "false")}", ct);
         await EnsureOkAsync(r, ct);
         return await r.Content.ReadFromJsonAsync<FolderListing>(ct) ?? new FolderListing(path, []);
     }

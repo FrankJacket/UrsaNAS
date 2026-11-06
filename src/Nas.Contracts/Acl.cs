@@ -71,7 +71,10 @@ public sealed record CreateGroupRequest(string Name, IReadOnlyList<string> Membe
 /// <summary>Sous-dossiers directs d'un dossier d'un partage, pour l'arborescence de l'interface.</summary>
 public sealed record FolderEntry(string Name, DateTime ModifiedUtc);
 
-public sealed record FolderListing(string Path, IReadOnlyList<FolderEntry> Folders);
+public sealed record FileEntry(string Name, long Size, DateTime ModifiedUtc);
+
+/// <summary>Contenu d'un dossier : sous-dossiers, et fichiers si on les a demandés.</summary>
+public sealed record FolderListing(string Path, IReadOnlyList<FolderEntry> Folders, IReadOnlyList<FileEntry>? Files = null);
 
 /// <summary>
 /// Calcule les droits effectifs d'un utilisateur sur un dossier ou un fichier, avec la même logique que Windows/Samba :

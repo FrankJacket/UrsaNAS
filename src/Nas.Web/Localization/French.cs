@@ -441,6 +441,10 @@ public static class French
         ["Creating the folder"] = "Création du dossier",
 
         // Renommer, déplacer, copier, supprimer un dossier ; vue en colonnes
+        ["File Manager"] = "Gestionnaire de fichiers",
+        ["New ZFS dataset on pool {0}"] = "Nouveau jeu de données ZFS sur le pool {0}",
+        ["No group yet."] = "Aucun groupe pour l'instant.",
+        ["Choose at least one user or group."] = "Choisissez au moins un utilisateur ou un groupe.",
         ["Rename"] = "Renommer",
         ["Move"] = "Déplacer",
         ["Copy"] = "Copier",

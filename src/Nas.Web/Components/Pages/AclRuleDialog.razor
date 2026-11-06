@@ -6,13 +6,16 @@
             <MudAlert Severity="Severity.Error" Class="mb-3">@error</MudAlert>
         }
         <MudText Typo="Typo.subtitle2">@L["Object"]</MudText>
-        <MudStack Row="true" AlignItems="AlignItems.Center">
-            <MudRadioGroup T="AclSubjectKind" @bind-Value="kind">
-                <MudRadio T="AclSubjectKind" Value="AclSubjectKind.User">@L["User"]</MudRadio>
-                <MudRadio T="AclSubjectKind" Value="AclSubjectKind.Group">@L["Group"]</MudRadio>
-            </MudRadioGroup>
-            <MudSelect T="string" @bind-Value="name" Label="@(kind == AclSubjectKind.User ? L["User"] : L["Group"])" Dense="true" Style="min-width:200px">
-                @foreach (var n in kind == AclSubjectKind.User ? Users : Groups)
+        <MudStack Row="true" Spacing="2" Wrap="Wrap.Wrap">
+            <MudSelect T="string" Label="@L["Groups"]" MultiSelection="true" @bind-SelectedValues="selGroups" Dense="true" Style="min-width:220px;flex:1"
+                       HelperText="@(Groups.Count == 0 ? L["No group yet."] : null)">
+                @foreach (var n in Groups)
+                {
+                    <MudSelectItem T="string" Value="@n">@n</MudSelectItem>
+                }
+            </MudSelect>
+            <MudSelect T="string" Label="@L["Users"]" MultiSelection="true" @bind-SelectedValues="selUsers" Dense="true" Style="min-width:220px;flex:1">
+                @foreach (var n in Users)
                 {
                     <MudSelectItem T="string" Value="@n">@n</MudSelectItem>
                 }
@@ -84,8 +87,7 @@
     [Parameter, EditorRequired] public IReadOnlyList<string> Users { get; set; } = [];
     [Parameter, EditorRequired] public IReadOnlyList<string> Groups { get; set; } = [];
 
-    AclSubjectKind kind = AclSubjectKind.User;
-    string? name;
+    IReadOnlyCollection<string> selUsers = [], selGroups = [];
     bool allow = true, firstLevel;
     AclRights rights = AclRights.Read;
     AclApply apply = AclApply.Everything;
@@ -96,7 +98,8 @@
     protected override void OnInitialized()
     {
         if (Existing is null) return;
-        (kind, name, allow, rights, apply, firstLevel) = (Existing.Kind, Existing.Name, Existing.Allow, Existing.Rights, Existing.Apply, Existing.FirstLevelOnly);
+        (allow, rights, apply, firstLevel) = (Existing.Allow, Existing.Rights, Existing.Apply, Existing.FirstLevelOnly);
+        if (Existing.Kind == AclSubjectKind.User) selUsers = [Existing.Name]; else selGroups = [Existing.Name];
     }
 
     RenderFragment Box(AclRights flag, string label) => @<MudCheckBox T="bool" Value="@rights.HasFlag(flag)" Dense="true" Label="@label"
@@ -107,9 +110,12 @@
 
     void Save()
     {
-        var rule = new AclRule(kind, name ?? "", allow, rights, apply, firstLevel && !NoInheritance);
-        if (string.IsNullOrEmpty(name)) { error = L["Choose a user or a group."]; return; }
-        if (AclRules.ValidateRule(rule) is { } e) { error = L.Translate(e); return; }
-        Dialog.Close(DialogResult.Ok(rule));
+        // Une règle identique pour chaque utilisateur et chaque groupe coché.
+        var rules = selGroups.Select(n => (AclSubjectKind.Group, n)).Concat(selUsers.Select(n => (AclSubjectKind.User, n)))
+            .Select(s => new AclRule(s.Item1, s.n, allow, rights, apply, firstLevel && !NoInheritance)).ToList();
+        if (rules.Count == 0) { error = L["Choose at least one user or group."]; return; }
+        foreach (var rule in rules)
+            if (AclRules.ValidateRule(rule) is { } e) { error = L.Translate(e); return; }
+        Dialog.Close(DialogResult.Ok(rules));
     }
 }

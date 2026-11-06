@@ -80,8 +80,8 @@ public partial class Program
         app.MapDelete("/groups/{name}", (string name, GroupService g, CancellationToken ct) =>
             Guard(async () => { await g.DeleteAsync(name, ct); return Results.NoContent(); }));
 
-        app.MapGet("/acl/folders", (string share, string? path, AclService a, CancellationToken ct) =>
-            Read(async () => Results.Ok(await a.ListFoldersAsync(share, path ?? "", ct))));
+        app.MapGet("/acl/folders", (string share, string? path, bool? files, AclService a, CancellationToken ct) =>
+            Read(async () => Results.Ok(await a.ListFoldersAsync(share, path ?? "", files == true, ct))));
         app.MapPut("/acl/folder", (SetFolderAclRequest r, AclService a, CancellationToken ct) =>
             Guard(async () => { await a.SetFolderAsync(r, ct); return Results.NoContent(); }));
         app.MapPost("/acl/folder", (CreateFolderRequest r, AclService a, CancellationToken ct) =>

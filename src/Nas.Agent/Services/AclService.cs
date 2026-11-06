@@ -232,7 +232,7 @@ public sealed class AclService(ICommandRunner run, UserService users, GroupServi
     }
 
     /// <summary>Sous-dossiers directs d'un dossier du partage, pour l'arborescence de l'interface.</summary>
-    public async Task<FolderListing> ListFoldersAsync(string share, string path, CancellationToken ct = default)
+    public async Task<FolderListing> ListFoldersAsync(string share, string path, bool withFiles = false, CancellationToken ct = default)
     {
         Validate(share, path);
         var root = await SharePathAsync(share, ct);
@@ -241,7 +241,11 @@ public sealed class AclService(ICommandRunner run, UserService users, GroupServi
         var entries = new DirectoryInfo(dir).EnumerateDirectories()
             .Where(d => d.LinkTarget is null && AclRules.ValidSegment(d.Name))
             .OrderBy(d => d.Name, StringComparer.OrdinalIgnoreCase).Select(d => new FolderEntry(d.Name, d.LastWriteTimeUtc)).ToList();
-        return new FolderListing(path, entries);
+        var files = withFiles
+            ? new DirectoryInfo(dir).EnumerateFiles().Where(f => f.LinkTarget is null && AclRules.ValidSegment(f.Name))
+                .OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase).Select(f => new FileEntry(f.Name, f.Length, f.LastWriteTimeUtc)).ToList()
+            : null;
+        return new FolderListing(path, entries, files);
     }
 
     /// <summary>Crée un dossier par Samba (compte de service) : le serveur lui applique lui-même l'héritage du parent.</summary>

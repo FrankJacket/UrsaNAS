@@ -82,7 +82,11 @@
         // Seuls les jeux de données (pas la racine d'un pool) que aucun autre partage n'utilise.
         var taken = shares.Where(s => s.Dataset is not null && s.Name != existing?.Name).Select(s => s.Dataset!).ToHashSet();
         var free = (await LoadDatasetsAsync()).Select(d => d.Name).Where(n => n.Contains('/') && !taken.Contains(n)).ToList();
-        var parameters = new DialogParameters<ShareDialog> { { x => x.Existing, existing }, { x => x.Users, users }, { x => x.Datasets, free } };
+        IReadOnlyList<string> pools = [];
+        try { pools = (await Agent.GetPoolsAsync()).Select(p => p.Name).ToList(); }
+        catch (AgentException) { }
+        catch (HttpRequestException) { }
+        var parameters = new DialogParameters<ShareDialog> { { x => x.Existing, existing }, { x => x.Users, users }, { x => x.Datasets, free }, { x => x.Pools, pools } };
         var dialog = await Dialogs.ShowAsync<ShareDialog>(title, parameters, Options);
         if (await dialog.Result is { Canceled: false })
         {

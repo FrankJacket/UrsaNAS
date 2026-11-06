@@ -6,7 +6,7 @@
 @inject IDialogService Dialogs
 @inject ISnackbar Snack
 
-<MudText Typo="Typo.h4" Class="mb-4">@L["Folders"]</MudText>
+<MudText Typo="Typo.h4" Class="mb-4">@L["File Manager"]</MudText>
 @if (error is not null)
 {
     <MudAlert Severity="Severity.Error" Class="mb-4">@error</MudAlert>
@@ -28,12 +28,12 @@ else if (share is not null)
     </MudStack>
 
     <MudStack Row="true" Spacing="2" Class="mb-3" Wrap="Wrap.Wrap" AlignItems="AlignItems.Center">
-        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.CreateNewFolder" OnClick="() => NewFolder(selected)" Disabled="@(selected is null)">@L["New folder"]</MudButton>
-        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.DriveFileRenameOutline" OnClick="() => Rename(selected)" Disabled="@(selected is null || selected.Path.Length == 0)">@L["Rename"]</MudButton>
-        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.DriveFileMove" OnClick="() => MoveTo(selected, copy: false)" Disabled="@(selected is null || selected.Path.Length == 0)">@L["Move"]</MudButton>
-        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="() => MoveTo(selected, copy: true)" Disabled="@(selected is null || selected.Path.Length == 0)">@L["Copy"]</MudButton>
-        <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="() => Delete(selected)" Disabled="@(selected is null || selected.Path.Length == 0)">@L["Delete"]</MudButton>
-        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Lock" OnClick="() => OpenPermissions(selected)" Disabled="@(selected is null)">@L["Permissions"]</MudButton>
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.CreateNewFolder" OnClick="() => NewFolder(selected)" Disabled="@(!CanFolder)">@L["New folder"]</MudButton>
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.DriveFileRenameOutline" OnClick="() => Rename(selected)" Disabled="@(!CanModify)">@L["Rename"]</MudButton>
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.DriveFileMove" OnClick="() => MoveTo(selected, copy: false)" Disabled="@(!CanModify)">@L["Move"]</MudButton>
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="() => MoveTo(selected, copy: true)" Disabled="@(!CanModify)">@L["Copy"]</MudButton>
+        <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="() => Delete(selected)" Disabled="@(!CanModify)">@L["Delete"]</MudButton>
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Lock" OnClick="() => OpenPermissions(selected)" Disabled="@(!CanFolder)">@L["Permissions"]</MudButton>
         <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="Refresh">@L["Refresh"]</MudButton>
         <MudSpacer />
         <MudToggleGroup T="bool" Value="columns" ValueChanged="SetColumns" Color="Color.Primary" Size="Size.Small">
@@ -47,7 +47,7 @@ else if (share is not null)
         <MudPaper Elevation="0" Class="explorer miller">
             @foreach (var parent in Chain())
             {
-                @if (parent.Children.Count > 0 || parent == selected)
+                @if (!parent.IsFile && (parent.Children.Count > 0 || parent == selected))
                 {
                     <div class="mil-col">
                         @foreach (var c in parent.Children)
@@ -55,14 +55,15 @@ else if (share is not null)
                             var node = c;
                             <div class="mil-item @(InChain(node) ? "sel" : "")" @onclick="() => PickColumn(node)"
                                  @oncontextmenu="e => Context(e, node)" @oncontextmenu:preventDefault="true">
-                                <MudIcon Icon="@Icons.Material.Filled.Folder" Color="Color.Info" Class="mr-2" />
+                                <MudIcon Icon="@(node.IsFile ? Icons.Material.Filled.InsertDriveFile : Icons.Material.Filled.Folder)" Color="@(node.IsFile ? Color.Default : Color.Info)" Class="mr-2" />
                                 <span class="mil-name">@node.Name</span>
-                                @if (states.GetValueOrDefault(node.Path) is { } st && (st.Rules.Count > 0 || !st.Inherit))
+                                @if (!node.IsFile && states.GetValueOrDefault(node.Path) is { } st && (st.Rules.Count > 0 || !st.Inherit))
                                 {
                                     <MudIcon Icon="@(st.Inherit ? Icons.Material.Filled.Lock : Icons.Material.Filled.LinkOff)" Size="Size.Small" Class="ml-1" />
                                 }
                                 <MudSpacer />
-                                @if (node.Loading) { <MudProgressCircular Size="Size.Small" Indeterminate="true" /> }
+                                @if (node.IsFile) { <MudText Typo="Typo.caption">@Fmt.Size(node.Size, L.Lang)</MudText> }
+                                else if (node.Loading) { <MudProgressCircular Size="Size.Small" Indeterminate="true" /> }
                                 else { <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Size="Size.Small" /> }
                             </div>
                         }
@@ -79,7 +80,7 @@ else if (share is not null)
     {
     <MudPaper Elevation="0" Class="explorer">
         <div class="ex-row ex-head">
-            <div class="ex-name">@L["Name"]</div><div class="ex-mod">@L["Modified"]</div><div class="ex-perm">@L["Permissions"]</div>
+            <div class="ex-name">@L["Name"]</div><div class="ex-mod">@L["Modified"]</div><div class="ex-size">@L["Size"]</div><div class="ex-perm">@L["Permissions"]</div>
         </div>
         @foreach (var n in Visible())
         {
@@ -89,13 +90,15 @@ else if (share is not null)
                  @oncontextmenu="e => Context(e, node)" @oncontextmenu:preventDefault="true">
                 <div class="ex-name" style="padding-left:@(node.Depth * 24)px">
                     <span class="ex-chev" @onclick="() => Toggle(node)" @onclick:stopPropagation="true">
-                        <MudIcon Icon="@(node.Expanded ? Icons.Material.Filled.ExpandMore : Icons.Material.Filled.ChevronRight)" Size="Size.Small" />
+                        @if (!node.IsFile) { <MudIcon Icon="@(node.Expanded ? Icons.Material.Filled.ExpandMore : Icons.Material.Filled.ChevronRight)" Size="Size.Small" /> }
                     </span>
-                    <MudIcon Icon="@(node.Path.Length == 0 ? Icons.Material.Filled.FolderShared : Icons.Material.Filled.Folder)" Color="Color.Info" Class="mr-2" />
+                    @if (node.IsFile) { <MudIcon Icon="@Icons.Material.Filled.InsertDriveFile" Color="Color.Default" Class="mr-2" /> }
+                    else { <MudIcon Icon="@(node.Path.Length == 0 ? Icons.Material.Filled.FolderShared : Icons.Material.Filled.Folder)" Color="Color.Info" Class="mr-2" /> }
                     <span>@node.Name</span>
                     @if (node.Loading) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="ml-2" /> }
                 </div>
                 <div class="ex-mod">@(node.Modified is { } m ? Fmt.Dt(m) : "")</div>
+                <div class="ex-size">@(node.IsFile ? Fmt.Size(node.Size, L.Lang) : "")</div>
                 <div class="ex-perm">
                     @if (st is { Inherit: false }) { <MudChip T="string" Size="Size.Small" Color="Color.Warning" Icon="@Icons.Material.Filled.LinkOff">@L["Inheritance off"]</MudChip> }
                     @if (st is { Rules.Count: > 0 }) { <MudChip T="string" Size="Size.Small" Icon="@Icons.Material.Filled.Lock">@L["{0} permission(s)", st.Rules.Count]</MudChip> }
@@ -122,13 +125,14 @@ else if (share is not null)
 
 <style>
     .explorer { border: 1px solid var(--mud-palette-lines-default); border-radius: 12px; overflow: auto; max-height: calc(100vh - 280px); }
-    .ex-row { display: grid; grid-template-columns: minmax(220px, 1fr) 170px 280px; align-items: center; padding: 6px 12px; cursor: default; user-select: none;
+    .ex-row { display: grid; grid-template-columns: minmax(220px, 1fr) 170px 100px 280px; align-items: center; padding: 6px 12px; cursor: default; user-select: none;
               border-bottom: 1px solid var(--mud-palette-lines-default); }
     .ex-row:not(.ex-head):hover { background: var(--mud-palette-action-default-hover); }
     .ex-row.sel { background: var(--mud-palette-primary-hover); }
     .ex-head { font-weight: 500; position: sticky; top: 0; background: var(--mud-palette-surface); opacity: .85; }
     .ex-name { display: flex; align-items: center; }
     .ex-chev { display: inline-flex; width: 24px; cursor: pointer; }
+    .ex-size { text-align: right; padding-right: 16px; }
     .ex-perm { display: flex; gap: 6px; flex-wrap: wrap; }
     .miller { display: flex; flex-direction: row; overflow-x: auto; min-height: 320px; }
     .mil-col { flex: 0 0 240px; border-right: 1px solid var(--mud-palette-lines-default); overflow-y: auto; max-height: calc(100vh - 280px); }
@@ -136,7 +140,7 @@ else if (share is not null)
     .mil-item:hover { background: var(--mud-palette-action-default-hover); }
     .mil-item.sel { background: var(--mud-palette-primary-hover); }
     .mil-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    @@media (max-width: 800px) { .ex-row { grid-template-columns: 1fr; } .ex-mod, .ex-perm { display: none; } }
+    @@media (max-width: 800px) { .ex-row { grid-template-columns: 1fr; } .ex-mod, .ex-size, .ex-perm { display: none; } }
 </style>
 
 @code {
@@ -147,7 +151,8 @@ else if (share is not null)
         public string Path = "", Name = "";
         public DateTime? Modified;
         public int Depth;
-        public bool Expanded, Loaded, Loading;
+        public bool Expanded, Loaded, Loading, IsFile;
+        public long Size;
         public List<Node> Children = new();
     }
 
@@ -157,6 +162,9 @@ else if (share is not null)
     MudMenu? menu;
     string? share, error;
     bool loaded;
+
+    bool CanFolder => selected is { IsFile: false };
+    bool CanModify => selected is { IsFile: false, Path.Length: > 0 };
 
     string CurrentLocation => share is null ? "" : "/" + share + (selected is { Path.Length: > 0 } ? "/" + selected.Path : "");
 
@@ -252,10 +260,12 @@ else if (share is not null)
         n.Loading = true;
         try
         {
-            var listing = await Agent.GetFoldersAsync(share!, n.Path);
-            var old = n.Children.ToDictionary(c => c.Name);
+            var listing = await Agent.GetFoldersAsync(share!, n.Path, files: true);
+            var old = n.Children.Where(c => !c.IsFile).ToDictionary(c => c.Name);
             n.Children = listing.Folders.Select(f => old.TryGetValue(f.Name, out var o) ? Touch(o, f)
                 : new Node { Name = f.Name, Path = n.Path.Length == 0 ? f.Name : n.Path + "/" + f.Name, Depth = n.Depth + 1, Modified = f.ModifiedUtc }).ToList();
+            n.Children.AddRange((listing.Files ?? []).Select(f => new Node { Name = f.Name, Path = n.Path.Length == 0 ? f.Name : n.Path + "/" + f.Name,
+                Depth = n.Depth + 1, Modified = f.ModifiedUtc, IsFile = true, Size = f.Size, Loaded = true }));
             n.Loaded = true;
             error = null;
         }
@@ -274,6 +284,7 @@ else if (share is not null)
 
     async Task Toggle(Node n)
     {
+        if (n.IsFile) return;
         if (!n.Loaded) await Load(n);
         n.Expanded = !n.Expanded;
     }
@@ -284,7 +295,7 @@ else if (share is not null)
     {
         selected = n;
         menuNode = n;
-        if (menu is not null) await menu.OpenMenuAsync(e);
+        if (!n.IsFile && menu is not null) await menu.OpenMenuAsync(e);
     }
 
     static readonly DialogOptions SmallOptions = new() { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true, BackdropClick = false };

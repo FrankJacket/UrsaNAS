@@ -138,10 +138,16 @@
             { x => x.Existing, existing }, { x => x.Users, users }, { x => x.Groups, groups.Select(g => g.Name).ToList() },
         };
         var dialog = await Dialogs.ShowAsync<AclRuleDialog>(existing is null ? L["Add a permission"] : L["Edit a permission"], parameters, RuleOptions);
-        if (await dialog.Result is { Canceled: false, Data: AclRule rule })
+        if (await dialog.Result is { Canceled: false, Data: List<AclRule> added })
         {
             var list = own;
-            if (existing is not null) list[list.IndexOf(existing)] = rule; else list.Add(rule);
+            if (existing is not null)
+            {
+                var at = list.IndexOf(existing);
+                list.RemoveAt(at);
+                list.InsertRange(at, added);
+            }
+            else list.AddRange(added);
             await Run(() => Ops.SaveFolderAclAsync(Share, Path, list), L["Permissions saved."]);
         }
     }
