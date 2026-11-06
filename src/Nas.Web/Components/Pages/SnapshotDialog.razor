@@ -1,0 +1,40 @@
+@inject NasOperations Ops
+
+<MudDialog>
+    <DialogContent>
+        @if (error is not null)
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-3">@error</MudAlert>
+        }
+        <MudText Class="mb-2">Jeu de données : <b>@Dataset</b></MudText>
+        <MudTextField @bind-Value="name" Label="Nom de l'instantané" Immediate="true" Disabled="busy" AutoFocus="true" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => Dialog.Cancel()" Disabled="busy">Annuler</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save" Disabled="busy">@(busy ? "Création…" : "Créer")</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance Dialog { get; set; } = default!;
+    [Parameter, EditorRequired] public string Dataset { get; set; } = "";
+
+    string name = $"manuel-{DateTime.Now:yyyyMMdd-HHmmss}";
+    string? error;
+    bool busy;
+
+    async Task Save()
+    {
+        error = null;
+        busy = true;
+        try
+        {
+            await Ops.CreateSnapshotAsync(Dataset, name.Trim());
+            Dialog.Close(DialogResult.Ok(true));
+            return;
+        }
+        catch (AgentException e) { error = e.Message; }
+        catch (HttpRequestException) { error = "Agent injoignable."; }
+        busy = false;
+    }
+}

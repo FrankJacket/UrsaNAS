@@ -87,6 +87,51 @@ public class NasOperations(AgentClient agent, Repo repo)
         finally { _gate.Release(); }
     }
 
+    // ---- ZFS : l'état vit dans ZFS lui-même, la base ne garde que le journal.
+    public async Task CreatePoolAsync(string name, string layout, IReadOnlyList<string> disks)
+    {
+        if (Rules.ValidatePoolName(name) is { } e1) throw new AgentException(e1);
+        if (Rules.ValidatePoolLayout(layout, disks.Count) is { } e2) throw new AgentException(e2);
+        await Audited(() => agent.CreatePoolAsync(new CreatePoolRequest(name, layout, disks)),
+            "Pool créé", $"{name} ({layout} : {string.Join(", ", disks)})");
+    }
+
+    public Task DestroyPoolAsync(string name) =>
+        Audited(() => agent.DestroyPoolAsync(name), "Pool détruit", name);
+
+    public Task ScrubPoolAsync(string name) =>
+        Audited(() => agent.ScrubPoolAsync(name), "Vérification lancée", name);
+
+    public async Task CreateDatasetAsync(string name)
+    {
+        if (Rules.ValidateDatasetName(name) is { } e) throw new AgentException(e);
+        await Audited(() => agent.CreateDatasetAsync(name), "Jeu de données créé", name);
+    }
+
+    public Task DestroyDatasetAsync(string name) =>
+        Audited(() => agent.DestroyDatasetAsync(name), "Jeu de données supprimé", name);
+
+    public async Task CreateSnapshotAsync(string dataset, string name)
+    {
+        if (Rules.ValidateDatasetName(dataset) is { } e1) throw new AgentException(e1);
+        if (Rules.ValidateSnapshotName(name) is { } e2) throw new AgentException(e2);
+        await Audited(() => agent.CreateSnapshotAsync(dataset, name), "Instantané créé", $"{dataset}@{name}");
+    }
+
+    public Task DestroySnapshotAsync(string fullName) =>
+        Audited(() => agent.DestroySnapshotAsync(fullName), "Instantané supprimé", fullName);
+
+    async Task Audited(Func<Task> action, string what, string detail)
+    {
+        await _gate.WaitAsync();
+        try
+        {
+            await action();
+            await repo.AuditAsync(Actor, what, detail);
+        }
+        finally { _gate.Release(); }
+    }
+
     /// <summary>Renvoie à l'agent la définition enregistrée (après une réinstallation de l'agent, par exemple).</summary>
     public async Task ReapplySharesAsync()
     {

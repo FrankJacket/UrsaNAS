@@ -1,0 +1,48 @@
+@inject NasOperations Ops
+
+<MudDialog>
+    <DialogContent>
+        @if (error is not null)
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-3">@error</MudAlert>
+        }
+        <MudSelect T="string" @bind-Value="parent" Label="Créer dans" Disabled="busy">
+            @foreach (var d in Parents)
+            {
+                <MudSelectItem T="string" Value="@d">@d</MudSelectItem>
+            }
+        </MudSelect>
+        <MudTextField @bind-Value="name" Label="Nom" Immediate="true" Disabled="busy" AutoFocus="true" HelperText="@($"Nom complet : {parent}/{name}")" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => Dialog.Cancel()" Disabled="busy">Annuler</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save" Disabled="busy">@(busy ? "Création…" : "Créer")</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance Dialog { get; set; } = default!;
+    /// <summary>Pools et jeux de données existants, où l'on peut créer un sous-jeu.</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<string> Parents { get; set; } = [];
+
+    string parent = "", name = "";
+    string? error;
+    bool busy;
+
+    protected override void OnInitialized() => parent = Parents.FirstOrDefault() ?? "";
+
+    async Task Save()
+    {
+        error = null;
+        busy = true;
+        try
+        {
+            await Ops.CreateDatasetAsync($"{parent}/{name.Trim()}");
+            Dialog.Close(DialogResult.Ok(true));
+            return;
+        }
+        catch (AgentException e) { error = e.Message; }
+        catch (HttpRequestException) { error = "Agent injoignable."; }
+        busy = false;
+    }
+}

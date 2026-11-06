@@ -7,6 +7,7 @@ public static class Fmt
         >= 1L << 40 => $"{bytes / (double)(1L << 40):0.0} To",
         >= 1L << 30 => $"{bytes / (double)(1L << 30):0.0} Go",
         >= 1L << 20 => $"{bytes / (double)(1L << 20):0.0} Mo",
+        >= 1L << 10 => $"{bytes / 1024.0:0.0} Ko",
         _ => $"{bytes} o",
     };
 

@@ -1,0 +1,42 @@
+@* Confirmation d'une action irréversible : il faut retaper le nom de l'objet. L'action s'exécute ici, l'erreur reste affichée dans la fenêtre. *@
+<MudDialog>
+    <DialogContent>
+        @if (error is not null)
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-3">@error</MudAlert>
+        }
+        <MudText Class="mb-3">@Message</MudText>
+        <MudTextField @bind-Value="typed" Label="@($"Tape « {Expected} » pour confirmer")" Immediate="true" Disabled="busy" AutoFocus="true" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => Dialog.Cancel()" Disabled="busy">Annuler</MudButton>
+        <MudButton Color="Color.Error" Variant="Variant.Filled" OnClick="Confirm" Disabled="@(busy || typed != Expected)">@(busy ? "En cours…" : ButtonText)</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance Dialog { get; set; } = default!;
+    [Parameter, EditorRequired] public string Expected { get; set; } = "";
+    [Parameter, EditorRequired] public string Message { get; set; } = "";
+    [Parameter] public string ButtonText { get; set; } = "Supprimer";
+    [Parameter, EditorRequired] public Func<Task> Action { get; set; } = default!;
+
+    string typed = "";
+    string? error;
+    bool busy;
+
+    async Task Confirm()
+    {
+        error = null;
+        busy = true;
+        try
+        {
+            await Action();
+            Dialog.Close(DialogResult.Ok(true));
+            return;
+        }
+        catch (AgentException e) { error = e.Message; }
+        catch (HttpRequestException) { error = "Agent injoignable."; }
+        busy = false;
+    }
+}

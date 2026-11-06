@@ -1,0 +1,135 @@
+@page "/pools"
+@inherits AutoRefreshBase
+@inject AgentClient Agent
+@inject NasOperations Ops
+@inject IDialogService Dialogs
+@inject ISnackbar Snack
+
+<MudText Typo="Typo.h4" Class="mb-4">Pools ZFS</MudText>
+@if (error is not null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">@error</MudAlert>
+}
+<MudStack Row="true" Class="mb-4">
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="Create">Créer un pool</MudButton>
+</MudStack>
+
+@if (loaded && error is null && pools.Count == 0)
+{
+    <MudText>Aucun pool. Crée-en un à partir des disques libres.</MudText>
+}
+@foreach (var p in pools)
+{
+    var percent = p.SizeBytes == 0 ? 0 : 100.0 * p.AllocBytes / p.SizeBytes;
+    <MudCard Class="mb-4">
+        <MudCardHeader>
+            <CardHeaderContent>
+                <MudStack Row="true" AlignItems="AlignItems.Center">
+                    <MudText Typo="Typo.h6">@p.Name</MudText>
+                    <MudChip T="string" Size="Size.Small" Color="@HealthColor(p.Health)">@HealthText(p.Health)</MudChip>
+                </MudStack>
+            </CardHeaderContent>
+            <CardHeaderActions>
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.FactCheck" OnClick="() => Scrub(p)">Vérifier</MudButton>
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="() => Destroy(p)">Détruire</MudButton>
+            </CardHeaderActions>
+        </MudCardHeader>
+        <MudCardContent>
+            <MudText Typo="Typo.body2">@Fmt.Size(p.AllocBytes) utilisés sur @Fmt.Size(p.SizeBytes) — @Fmt.Size(p.FreeBytes) libres</MudText>
+            <MudProgressLinear Value="@percent" Color="@(percent > 90 ? Color.Error : percent > 80 ? Color.Warning : Color.Primary)" Class="my-2" />
+            @if (!string.IsNullOrEmpty(p.Scan))
+            {
+                <MudText Typo="Typo.body2" Class="mb-1">Analyse : @p.Scan</MudText>
+            }
+            @if (!string.IsNullOrEmpty(p.Errors))
+            {
+                <MudText Typo="Typo.body2" Class="mb-2">Erreurs : @(p.Errors == "No known data errors" ? "aucune erreur connue" : p.Errors)</MudText>
+            }
+            <MudSimpleTable Dense="true" Hover="true">
+                <thead><tr><th>Périphérique</th><th>État</th><th>Lecture</th><th>Écriture</th><th>Somme</th></tr></thead>
+                <tbody>
+                @foreach (var d in p.Devices)
+                {
+                    <tr>
+                        <td style="padding-left:@(16 + d.Depth * 24)px">@d.Name</td>
+                        <td>@d.State</td><td>@d.Read</td><td>@d.Write</td><td>@d.Cksum</td>
+                    </tr>
+                }
+                </tbody>
+            </MudSimpleTable>
+        </MudCardContent>
+    </MudCard>
+}
+
+@code {
+    IReadOnlyList<PoolInfo> pools = [];
+    IReadOnlyList<DiskInfo> disks = [];
+    string? error;
+    bool loaded;
+
+    static readonly DialogOptions Options = new() { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true, BackdropClick = false };
+
+    protected override async Task LoadAsync()
+    {
+        try
+        {
+            pools = await Agent.GetPoolsAsync();
+            disks = await Agent.GetDisksAsync();
+            error = null;
+        }
+        catch (AgentException e) { error = e.Message; }
+        catch (HttpRequestException) { error = "Agent injoignable : le service ursanas-agent est-il démarré ?"; }
+        loaded = true;
+    }
+
+    static Color HealthColor(string h) => h switch { "ONLINE" => Color.Success, "DEGRADED" => Color.Warning, _ => Color.Error };
+    static string HealthText(string h) => h switch { "ONLINE" => "En ligne", "DEGRADED" => "Dégradé", "FAULTED" => "En panne", _ => h };
+
+    /// <summary>Un disque est libre s'il n'est monté nulle part et si aucun pool ne l'utilise (ou l'une de ses partitions).</summary>
+    IReadOnlyList<DiskInfo> FreeDisks()
+    {
+        var used = pools.SelectMany(p => p.Devices).Select(d => d.Name).ToHashSet();
+        return disks.Where(d => d.MountPoints.Count == 0 && !used.Any(u => u == d.Name || (u.StartsWith(d.Name, StringComparison.Ordinal) && u[d.Name.Length..].All(char.IsDigit)))).ToList();
+    }
+
+    async Task Create()
+    {
+        await LoadAsync();
+        var parameters = new DialogParameters<PoolDialog> { { x => x.FreeDisks, FreeDisks() } };
+        var dialog = await Dialogs.ShowAsync<PoolDialog>("Créer un pool", parameters, Options);
+        if (await dialog.Result is { Canceled: false })
+        {
+            Snack.Add("Pool créé.", Severity.Success);
+            await LoadAsync();
+        }
+    }
+
+    async Task Scrub(PoolInfo p)
+    {
+        try
+        {
+            await Ops.ScrubPoolAsync(p.Name);
+            Snack.Add($"Vérification de {p.Name} lancée.", Severity.Success);
+            await LoadAsync();
+        }
+        catch (AgentException e) { Snack.Add(e.Message, Severity.Error); }
+        catch (HttpRequestException) { Snack.Add("Agent injoignable.", Severity.Error); }
+    }
+
+    async Task Destroy(PoolInfo p)
+    {
+        var parameters = new DialogParameters<ConfirmNameDialog>
+        {
+            { x => x.Expected, p.Name },
+            { x => x.Message, $"Le pool {p.Name} et toutes ses données seront détruits. Cette action est irréversible." },
+            { x => x.ButtonText, "Détruire le pool" },
+            { x => x.Action, () => Ops.DestroyPoolAsync(p.Name) },
+        };
+        var dialog = await Dialogs.ShowAsync<ConfirmNameDialog>($"Détruire {p.Name}", parameters, Options);
+        if (await dialog.Result is { Canceled: false })
+        {
+            Snack.Add($"Pool {p.Name} détruit.", Severity.Success);
+            await LoadAsync();
+        }
+    }
+}

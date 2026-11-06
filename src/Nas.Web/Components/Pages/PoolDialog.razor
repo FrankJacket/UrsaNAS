@@ -1,0 +1,55 @@
+@inject NasOperations Ops
+
+<MudDialog>
+    <DialogContent>
+        @if (error is not null)
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-3">@error</MudAlert>
+        }
+        <MudTextField @bind-Value="name" Label="Nom du pool" Immediate="true" Disabled="busy" AutoFocus="true"
+                      HelperText="@($"Monté sur /srv/zfs/{name}")" />
+        <MudSelect T="string" @bind-Value="layout" Label="Type" Disabled="busy" HelperText="@LayoutHelp">
+            <MudSelectItem T="string" Value="@("mirror")">Miroir (2 disques ou plus, tout est copié)</MudSelectItem>
+            <MudSelectItem T="string" Value="@("raidz1")">RAIDZ1 (3 disques ou plus, tolère 1 panne)</MudSelectItem>
+            <MudSelectItem T="string" Value="@("raidz2")">RAIDZ2 (4 disques ou plus, tolère 2 pannes)</MudSelectItem>
+        </MudSelect>
+        <MudSelect T="string" Label="Disques" MultiSelection="true" @bind-SelectedValues="selected" Disabled="busy"
+                   HelperText="@(FreeDisks.Count == 0 ? "Aucun disque libre." : "Tout le contenu des disques choisis sera effacé.")">
+            @foreach (var d in FreeDisks)
+            {
+                <MudSelectItem T="string" Value="@d.Path">@d.Path — @Fmt.Size(d.SizeBytes) @d.Model</MudSelectItem>
+            }
+        </MudSelect>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => Dialog.Cancel()" Disabled="busy">Annuler</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save" Disabled="busy">@(busy ? "Création…" : "Créer")</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance Dialog { get; set; } = default!;
+    [Parameter, EditorRequired] public IReadOnlyList<DiskInfo> FreeDisks { get; set; } = [];
+
+    string name = "", layout = "mirror";
+    IReadOnlyCollection<string> selected = [];
+    string? error;
+    bool busy;
+
+    string LayoutHelp => $"Il faut au moins {Rules.MinDisks(layout)} disques.";
+
+    async Task Save()
+    {
+        error = null;
+        busy = true;
+        try
+        {
+            await Ops.CreatePoolAsync(name.Trim(), layout, selected.OrderBy(p => p, StringComparer.Ordinal).ToList());
+            Dialog.Close(DialogResult.Ok(true));
+            return;
+        }
+        catch (AgentException e) { error = e.Message; }
+        catch (HttpRequestException) { error = "Agent injoignable."; }
+        busy = false;
+    }
+}

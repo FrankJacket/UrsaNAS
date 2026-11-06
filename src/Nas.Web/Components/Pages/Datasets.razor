@@ -1,0 +1,108 @@
+@page "/datasets"
+@inherits AutoRefreshBase
+@inject AgentClient Agent
+@inject NasOperations Ops
+@inject IDialogService Dialogs
+@inject ISnackbar Snack
+
+<MudText Typo="Typo.h4" Class="mb-4">Jeux de données</MudText>
+@if (error is not null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">@error</MudAlert>
+}
+<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.CreateNewFolder" OnClick="Create" Class="mb-4"
+           Disabled="@(datasets.Count == 0)">Créer un jeu de données</MudButton>
+<MudTable Items="datasets" Hover="true" Dense="true" Loading="@(!loaded)" Class="mb-8">
+    <HeaderContent><MudTh>Nom</MudTh><MudTh>Utilisé</MudTh><MudTh>Disponible</MudTh><MudTh>Monté sur</MudTh><MudTh></MudTh></HeaderContent>
+    <RowTemplate>
+        <MudTd>@context.Name</MudTd>
+        <MudTd>@Fmt.Size(context.UsedBytes)</MudTd>
+        <MudTd>@Fmt.Size(context.AvailBytes)</MudTd>
+        <MudTd><code>@context.Mountpoint</code></MudTd>
+        <MudTd Style="text-align:right">
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.PhotoCamera" OnClick="() => Snapshot(context)">Instantané</MudButton>
+            @if (context.Name.Contains('/'))
+            {
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="() => Delete(context)">Supprimer</MudButton>
+            }
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent><MudText Class="pa-4">Aucun jeu de données : crée d'abord un pool.</MudText></NoRecordsContent>
+</MudTable>
+
+<MudText Typo="Typo.h5" Class="mb-2">Instantanés</MudText>
+<MudTable Items="snapshots" Hover="true" Dense="true" Loading="@(!loaded)">
+    <HeaderContent><MudTh>Jeu de données</MudTh><MudTh>Instantané</MudTh><MudTh>Créé le</MudTh><MudTh>Espace propre</MudTh><MudTh></MudTh></HeaderContent>
+    <RowTemplate>
+        <MudTd>@context.Dataset</MudTd>
+        <MudTd>@context.Snapshot</MudTd>
+        <MudTd>@Fmt.Dt(context.Created.UtcDateTime)</MudTd>
+        <MudTd>@Fmt.Size(context.UsedBytes)</MudTd>
+        <MudTd Style="text-align:right">
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="() => DeleteSnapshot(context)">Supprimer</MudButton>
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent><MudText Class="pa-4">Aucun instantané.</MudText></NoRecordsContent>
+</MudTable>
+
+@code {
+    IReadOnlyList<DatasetInfo> datasets = [];
+    IReadOnlyList<SnapshotInfo> snapshots = [];
+    string? error;
+    bool loaded;
+
+    static readonly DialogOptions Options = new() { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true, BackdropClick = false };
+
+    protected override async Task LoadAsync()
+    {
+        try
+        {
+            datasets = await Agent.GetDatasetsAsync();
+            snapshots = await Agent.GetSnapshotsAsync();
+            error = null;
+        }
+        catch (AgentException e) { error = e.Message; }
+        catch (HttpRequestException) { error = "Agent injoignable : le service ursanas-agent est-il démarré ?"; }
+        loaded = true;
+    }
+
+    async Task Create()
+    {
+        var parameters = new DialogParameters<DatasetDialog> { { x => x.Parents, datasets.Select(d => d.Name).ToList() } };
+        await ShowAsync<DatasetDialog>("Créer un jeu de données", parameters, "Jeu de données créé.");
+    }
+
+    async Task Snapshot(DatasetInfo d)
+    {
+        var parameters = new DialogParameters<SnapshotDialog> { { x => x.Dataset, d.Name } };
+        await ShowAsync<SnapshotDialog>("Créer un instantané", parameters, "Instantané créé.");
+    }
+
+    async Task Delete(DatasetInfo d) =>
+        await Confirm($"Supprimer {d.Name}",
+            $"Le jeu de données {d.Name} et ses fichiers seront supprimés. ZFS refuse si le jeu contient des instantanés ou des sous-jeux : supprime-les d'abord.",
+            d.Name, () => Ops.DestroyDatasetAsync(d.Name), $"{d.Name} supprimé.");
+
+    async Task DeleteSnapshot(SnapshotInfo s) =>
+        await Confirm($"Supprimer {s.Name}", $"L'instantané {s.Name} sera supprimé : on ne pourra plus revenir à cet état.",
+            s.Snapshot, () => Ops.DestroySnapshotAsync(s.Name), "Instantané supprimé.");
+
+    async Task ShowAsync<T>(string title, DialogParameters<T> parameters, string success) where T : Microsoft.AspNetCore.Components.IComponent
+    {
+        var dialog = await Dialogs.ShowAsync<T>(title, parameters, Options);
+        if (await dialog.Result is { Canceled: false })
+        {
+            Snack.Add(success, Severity.Success);
+            await LoadAsync();
+        }
+    }
+
+    async Task Confirm(string title, string message, string expected, Func<Task> action, string success)
+    {
+        var parameters = new DialogParameters<ConfirmNameDialog>
+        {
+            { x => x.Expected, expected }, { x => x.Message, message }, { x => x.Action, action },
+        };
+        await ShowAsync(title, parameters, success);
+    }
+}

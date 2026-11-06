@@ -16,6 +16,14 @@ public partial class Program
         finally { Gate.Release(); }
     }
 
+    /// <summary>Lecture : pas de verrou (zpool/zfs list sont sûrs en parallèle), mais les échecs restent lisibles côté interface.</summary>
+    static async Task<IResult> Read(Func<Task<IResult>> action)
+    {
+        try { return await action(); }
+        catch (OperationException e) { return Results.Problem(e.Message, statusCode: StatusCodes.Status400BadRequest); }
+        catch (System.ComponentModel.Win32Exception) { return Results.Problem("ZFS n'est pas installé sur cette machine.", statusCode: StatusCodes.Status400BadRequest); }
+    }
+
     public static void Main(string[] args)
     {
         var builder = WebApplication.CreateBuilder(args);
@@ -34,6 +42,7 @@ public partial class Program
 
         builder.Services.AddSingleton<UserService>();
         builder.Services.AddSingleton<ShareService>();
+        builder.Services.AddSingleton<ZfsService>();
 
         var app = builder.Build();
 
@@ -49,6 +58,26 @@ public partial class Program
             Guard(async () => { await u.DeleteAsync(name, ct); return Results.NoContent(); }));
         app.MapPut("/shares", (ApplySharesRequest r, ShareService s, CancellationToken ct) =>
             Guard(async () => { await s.ApplyAsync(r.Shares, ct); return Results.NoContent(); }));
+
+        app.MapGet("/zfs/pools", (ZfsService z, CancellationToken ct) => Read(async () => Results.Ok(await z.ListPoolsAsync(ct))));
+        app.MapPost("/zfs/pools", (CreatePoolRequest r, ZfsService z, CancellationToken ct) =>
+            Guard(async () => { await z.CreatePoolAsync(r, ct); return Results.NoContent(); }));
+        app.MapDelete("/zfs/pools/{name}", (string name, ZfsService z, CancellationToken ct) =>
+            Guard(async () => { await z.DestroyPoolAsync(name, ct); return Results.NoContent(); }));
+        app.MapPost("/zfs/pools/{name}/scrub", (string name, ZfsService z, CancellationToken ct) =>
+            Guard(async () => { await z.ScrubAsync(name, ct); return Results.NoContent(); }));
+
+        app.MapGet("/zfs/datasets", (ZfsService z, CancellationToken ct) => Read(async () => Results.Ok(await z.ListDatasetsAsync(ct))));
+        app.MapPost("/zfs/datasets", (CreateDatasetRequest r, ZfsService z, CancellationToken ct) =>
+            Guard(async () => { await z.CreateDatasetAsync(r.Name, ct); return Results.NoContent(); }));
+        app.MapDelete("/zfs/datasets", (string name, ZfsService z, CancellationToken ct) =>
+            Guard(async () => { await z.DestroyDatasetAsync(name, ct); return Results.NoContent(); }));
+
+        app.MapGet("/zfs/snapshots", (ZfsService z, CancellationToken ct) => Read(async () => Results.Ok(await z.ListSnapshotsAsync(ct))));
+        app.MapPost("/zfs/snapshots", (CreateSnapshotRequest r, ZfsService z, CancellationToken ct) =>
+            Guard(async () => { await z.CreateSnapshotAsync(r, ct); return Results.NoContent(); }));
+        app.MapDelete("/zfs/snapshots", (string name, ZfsService z, CancellationToken ct) =>
+            Guard(async () => { await z.DestroySnapshotAsync(name, ct); return Results.NoContent(); }));
 
         // Le socket n'est accessible qu'au propriétaire et au groupe (le groupe est celui de l'unité systemd).
         if (!string.IsNullOrWhiteSpace(socketPath))
