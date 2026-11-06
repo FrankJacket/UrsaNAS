@@ -1,5 +1,7 @@
+using Microsoft.AspNetCore.Components.Authorization;
 using Nas.Contracts;
 using Nas.Web.Alerting;
+using Nas.Web.Auth;
 using Nas.Web.Data;
 
 namespace Nas.Web;
@@ -8,11 +10,33 @@ namespace Nas.Web;
 /// Les opérations de l'interface : valide, demande à l'agent d'agir, enregistre l'état voulu en base puis journalise.
 /// L'agent est appelé en premier : si Samba refuse un changement, la base n'est pas modifiée.
 /// </summary>
-public class NasOperations(AgentClient agent, Repo repo, IMailSender mail)
+public class NasOperations(AgentClient agent, Repo repo, IMailSender mail, AdminAccounts admins, AuthenticationStateProvider auth)
 {
     // Statique : partagé par tous les circuits, car l'instance vit le temps d'une session.
     static readonly SemaphoreSlim _gate = new(1, 1);
-    const string Actor = "admin"; // pas encore d'authentification : une seule identité
+
+    /// <summary>L'administrateur connecté, tel qu'il apparaît dans le journal.</summary>
+    async Task<string> ActorAsync() => (await auth.GetAuthenticationStateAsync()).User.Identity?.Name ?? "inconnu";
+
+    // ---- Administrateurs de l'interface
+    public async Task CreateAdminAsync(string name, string password)
+    {
+        await admins.CreateAsync(name, password);
+        await repo.AuditAsync(await ActorAsync(), "Administrateur créé", name);
+    }
+
+    public async Task SetAdminPasswordAsync(string name, string password)
+    {
+        await admins.SetPasswordAsync(name, password);
+        await repo.AuditAsync(await ActorAsync(), "Mot de passe d'administrateur changé", name); // jamais le mot de passe lui-même
+    }
+
+    public async Task DeleteAdminAsync(string name)
+    {
+        var actor = await ActorAsync();
+        await admins.DeleteAsync(name, actor);
+        await repo.AuditAsync(actor, "Administrateur supprimé", name);
+    }
 
     // ---- Utilisateurs
     public async Task CreateUserAsync(string name, string password)
@@ -23,7 +47,7 @@ public class NasOperations(AgentClient agent, Repo repo, IMailSender mail)
         try
         {
             await agent.CreateUserAsync(new CreateUserRequest(name, password));
-            await repo.AuditAsync(Actor, "Utilisateur créé", name);
+            await repo.AuditAsync(await ActorAsync(), "Utilisateur créé", name);
         }
         finally { _gate.Release(); }
     }
@@ -35,7 +59,7 @@ public class NasOperations(AgentClient agent, Repo repo, IMailSender mail)
         try
         {
             await agent.SetPasswordAsync(name, password);
-            await repo.AuditAsync(Actor, "Mot de passe changé", name); // jamais le mot de passe lui-même
+            await repo.AuditAsync(await ActorAsync(), "Mot de passe changé", name); // jamais le mot de passe lui-même
         }
         finally { _gate.Release(); }
     }
@@ -49,7 +73,7 @@ public class NasOperations(AgentClient agent, Repo repo, IMailSender mail)
             if (using_.Count > 0)
                 throw new AgentException($"« {name} » est utilisé par le partage {string.Join(", ", using_)} : retire-le d'abord de ce partage.");
             await agent.DeleteUserAsync(name);
-            await repo.AuditAsync(Actor, "Utilisateur supprimé", name);
+            await repo.AuditAsync(await ActorAsync(), "Utilisateur supprimé", name);
         }
         finally { _gate.Release(); }
     }
@@ -70,7 +94,7 @@ public class NasOperations(AgentClient agent, Repo repo, IMailSender mail)
 
             await agent.ApplySharesAsync(next);
             await repo.UpsertShareAsync(share);
-            await repo.AuditAsync(Actor, isNew ? "Partage créé" : "Partage modifié", share.Name);
+            await repo.AuditAsync(await ActorAsync(), isNew ? "Partage créé" : "Partage modifié", share.Name);
         }
         finally { _gate.Release(); }
     }
@@ -85,7 +109,7 @@ public class NasOperations(AgentClient agent, Repo repo, IMailSender mail)
             await agent.ApplySharesAsync(all.Where(s => s != removed).ToList());
             await repo.DeleteShareAsync(name);
             var where = removed?.Dataset is { } ds ? $"les fichiers restent dans le jeu de données {ds}" : $"les fichiers restent dans /srv/nas/{name}";
-            await repo.AuditAsync(Actor, "Partage supprimé", $"{name} ({where})");
+            await repo.AuditAsync(await ActorAsync(), "Partage supprimé", $"{name} ({where})");
         }
         finally { _gate.Release(); }
     }
@@ -143,7 +167,7 @@ public class NasOperations(AgentClient agent, Repo repo, IMailSender mail)
     {
         if (MailRules.Validate(s) is { } e) throw new AgentException(e);
         await repo.SaveMailSettingsAsync(s);
-        await repo.AuditAsync(Actor, "Réglages e-mail modifiés", s.Enabled ? $"{s.Host}:{s.Port} vers {string.Join(", ", s.Recipients)}" : "envoi désactivé");
+        await repo.AuditAsync(await ActorAsync(), "Réglages e-mail modifiés", s.Enabled ? $"{s.Host}:{s.Port} vers {string.Join(", ", s.Recipients)}" : "envoi désactivé");
     }
 
     /// <summary>Envoie un message d'essai avec les réglages enregistrés ; l'échec est expliqué à l'utilisateur.</summary>
@@ -160,7 +184,7 @@ public class NasOperations(AgentClient agent, Repo repo, IMailSender mail)
         {
             throw new AgentException($"Échec de l'envoi : {ex.Message}");
         }
-        await repo.AuditAsync(Actor, "E-mail d'essai envoyé", string.Join(", ", s.Recipients));
+        await repo.AuditAsync(await ActorAsync(), "E-mail d'essai envoyé", string.Join(", ", s.Recipients));
     }
 
     async Task Audited(Func<Task> action, string what, string detail)
@@ -169,7 +193,7 @@ public class NasOperations(AgentClient agent, Repo repo, IMailSender mail)
         try
         {
             await action();
-            await repo.AuditAsync(Actor, what, detail);
+            await repo.AuditAsync(await ActorAsync(), what, detail);
         }
         finally { _gate.Release(); }
     }
@@ -181,7 +205,7 @@ public class NasOperations(AgentClient agent, Repo repo, IMailSender mail)
         try
         {
             await agent.ApplySharesAsync(await repo.GetSharesAsync());
-            await repo.AuditAsync(Actor, "Partages réappliqués");
+            await repo.AuditAsync(await ActorAsync(), "Partages réappliqués");
         }
         finally { _gate.Release(); }
     }

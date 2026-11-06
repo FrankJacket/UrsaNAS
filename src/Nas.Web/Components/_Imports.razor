@@ -5,7 +5,14 @@
 @using MudBlazor
 @using Nas.Contracts
 @using Nas.Web
+@using Microsoft.AspNetCore.Authentication
+@using Microsoft.AspNetCore.Authentication.Cookies
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Components.Forms
+@using Nas.Web.Auth
 @using Nas.Web.Alerting
+@attribute [Authorize]
 @using Nas.Web.Data
 @using Nas.Web.Components.Layout
 @using Microsoft.JSInterop

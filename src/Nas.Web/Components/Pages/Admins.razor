@@ -1,0 +1,68 @@
+@page "/admins"
+@inherits AutoRefreshBase
+@inject AdminAccounts Accounts
+@inject NasOperations Ops
+@inject AuthenticationStateProvider Auth
+@inject IDialogService Dialogs
+@inject ISnackbar Snack
+
+<MudText Typo="Typo.h4" Class="mb-4">Administrateurs</MudText>
+<MudText Class="mb-4">Comptes qui peuvent se connecter à cette interface. Ils sont distincts des utilisateurs de partages (Samba).</MudText>
+<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PersonAdd" OnClick="Add" Class="mb-4">Ajouter un administrateur</MudButton>
+<MudTable Items="rows" Hover="true" Dense="true" Loading="@(!loaded)">
+    <HeaderContent><MudTh>Identifiant</MudTh><MudTh>Créé le</MudTh><MudTh></MudTh></HeaderContent>
+    <RowTemplate>
+        <MudTd>@context.Name @if (context.Name == me) { <MudChip T="string" Size="Size.Small" Class="ml-2">toi</MudChip> }</MudTd>
+        <MudTd>@Fmt.Dt(context.CreatedAt)</MudTd>
+        <MudTd Style="text-align:right">
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Key" OnClick="() => Password(context)">Mot de passe</MudButton>
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete"
+                       Disabled="@(context.Name == me)" OnClick="() => Delete(context)">Supprimer</MudButton>
+        </MudTd>
+    </RowTemplate>
+</MudTable>
+
+@code {
+    List<AdminRow> rows = new();
+    string me = "";
+    bool loaded;
+
+    static readonly DialogOptions Options = new() { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true, BackdropClick = false };
+
+    protected override async Task LoadAsync()
+    {
+        me = (await Auth.GetAuthenticationStateAsync()).User.Identity?.Name ?? "";
+        rows = await Accounts.ListAsync();
+        loaded = true;
+    }
+
+    async Task Add() => await ShowAsync(new DialogParameters<AdminDialog>(), "Nouvel administrateur", "Administrateur créé.");
+
+    async Task Password(AdminRow a) =>
+        await ShowAsync(new DialogParameters<AdminDialog> { { x => x.Existing, a.Name } }, $"Mot de passe de {a.Name}",
+            a.Name == me ? "Mot de passe changé : reconnecte-toi." : "Mot de passe changé.");
+
+    async Task ShowAsync(DialogParameters<AdminDialog> parameters, string title, string success)
+    {
+        var dialog = await Dialogs.ShowAsync<AdminDialog>(title, parameters, Options);
+        if (await dialog.Result is { Canceled: false })
+        {
+            Snack.Add(success, Severity.Success);
+            await LoadAsync();
+        }
+    }
+
+    async Task Delete(AdminRow a)
+    {
+        var ok = await Dialogs.ShowMessageBoxAsync($"Supprimer {a.Name} ?",
+            "Ce compte ne pourra plus se connecter, et ses sessions ouvertes seront fermées.", yesText: "Supprimer", cancelText: "Annuler");
+        if (ok != true) return;
+        try
+        {
+            await Ops.DeleteAdminAsync(a.Name);
+            Snack.Add($"{a.Name} supprimé.", Severity.Success);
+            await LoadAsync();
+        }
+        catch (AgentException e) { Snack.Add(e.Message, Severity.Error); }
+    }
+}

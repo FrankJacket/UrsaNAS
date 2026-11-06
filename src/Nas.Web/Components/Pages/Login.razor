@@ -1,0 +1,69 @@
+@page "/login"
+@layout EmptyLayout
+@attribute [AllowAnonymous]
+@inject AdminAccounts Accounts
+@inject LoginThrottle Throttle
+@inject Repo Repo
+@inject NavigationManager Nav
+
+<PageTitle>Connexion — UrsaNAS</PageTitle>
+<h1>UrsaNAS</h1>
+<p class="hint">Connecte-toi pour gérer le NAS.</p>
+
+<EditForm Model="form" FormName="login" OnValidSubmit="Submit" method="post">
+    <label for="name">Identifiant</label>
+    <InputText id="name" @bind-Value="form.Name" autocomplete="username" autofocus />
+    <label for="password">Mot de passe</label>
+    <InputText id="password" type="password" @bind-Value="form.Password" autocomplete="current-password" />
+    @if (error is not null)
+    {
+        <div class="error">@error</div>
+    }
+    <button type="submit">Se connecter</button>
+</EditForm>
+
+@code {
+    [CascadingParameter] HttpContext HttpContext { get; set; } = default!;
+    [SupplyParameterFromQuery] string? ReturnUrl { get; set; }
+    [SupplyParameterFromForm] LoginForm form { get; set; } = default!;
+    string? error;
+
+    sealed class LoginForm
+    {
+        public string Name { get; set; } = "";
+        public string Password { get; set; } = "";
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        form ??= new();
+        // Aucun compte : on passe par l'installation plutôt que d'afficher un formulaire qui ne peut pas réussir.
+        if (await Accounts.CountAsync() == 0) Nav.NavigateTo("/setup", forceLoad: true);
+    }
+
+    async Task Submit()
+    {
+        var ip = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "?";
+        if (Throttle.IsLocked(form.Name, ip))
+        {
+            error = "Trop d'essais échoués. Réessaie dans quelques minutes.";
+            return;
+        }
+
+        var admin = await Accounts.ValidateAsync(form.Name, form.Password);
+        if (admin is null)
+        {
+            Throttle.Fail(form.Name, ip);
+            await Repo.AuditAsync("inconnu", "Connexion refusée", $"{Trunc(form.Name)} depuis {ip}");
+            error = "Identifiant ou mot de passe incorrect.";
+            return;
+        }
+
+        Throttle.Success(form.Name);
+        await HttpContext.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, AdminAccounts.PrincipalFor(admin));
+        await Repo.AuditAsync(admin.Name, "Connexion", ip);
+        Nav.NavigateTo(LocalUrl.Safe(ReturnUrl), forceLoad: true);
+    }
+
+    static string Trunc(string s) => new string(s.Where(c => !char.IsControl(c)).Take(40).ToArray());
+}

@@ -24,6 +24,14 @@ public class AlertRow
     public DateTime? ResolvedAt { get; set; }
 }
 
+public class AdminRow
+{
+    public string Name { get; set; } = "";
+    public string PasswordHash { get; set; } = "";
+    public string Stamp { get; set; } = "";
+    public DateTime CreatedAt { get; set; }
+}
+
 class ShareRow
 {
     public string Name { get; set; } = "";
@@ -74,6 +82,45 @@ public class Repo(Db db)
     {
         using var c = db.Open();
         await c.ExecuteAsync("DELETE FROM Shares WHERE Name=@name", new { name });
+    }
+
+    // ---- Comptes qui peuvent se connecter à l'interface
+    public async Task<int> CountAdminsAsync()
+    {
+        using var c = db.Open();
+        return await c.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM AdminUsers");
+    }
+
+    public async Task<AdminRow?> GetAdminAsync(string name)
+    {
+        using var c = db.Open();
+        return await c.QuerySingleOrDefaultAsync<AdminRow>(
+            "SELECT Name,PasswordHash,Stamp,CreatedAt FROM AdminUsers WHERE Name=@name", new { name });
+    }
+
+    public async Task<List<AdminRow>> ListAdminsAsync()
+    {
+        using var c = db.Open();
+        return (await c.QueryAsync<AdminRow>("SELECT Name,PasswordHash,Stamp,CreatedAt FROM AdminUsers ORDER BY Name")).ToList();
+    }
+
+    public async Task InsertAdminAsync(string name, string hash, string stamp)
+    {
+        using var c = db.Open();
+        await c.ExecuteAsync("INSERT INTO AdminUsers(Name,PasswordHash,Stamp,CreatedAt) VALUES(@name,@hash,@stamp,@at)",
+            new { name, hash, stamp, at = DateTime.UtcNow });
+    }
+
+    public async Task UpdateAdminPasswordAsync(string name, string hash, string stamp)
+    {
+        using var c = db.Open();
+        await c.ExecuteAsync("UPDATE AdminUsers SET PasswordHash=@hash, Stamp=@stamp WHERE Name=@name", new { name, hash, stamp });
+    }
+
+    public async Task DeleteAdminAsync(string name)
+    {
+        using var c = db.Open();
+        await c.ExecuteAsync("DELETE FROM AdminUsers WHERE Name=@name", new { name });
     }
 
     // ---- Alertes

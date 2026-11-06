@@ -7,10 +7,10 @@
     <title>UrsaNAS</title>
     <link href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700&display=swap" rel="stylesheet" />
     <link href="@Assets["_content/MudBlazor/MudBlazor.min.css"]" rel="stylesheet" />
-    <HeadOutlet @rendermode="RenderMode.InteractiveServer" />
+    <HeadOutlet @rendermode="PageRenderMode" />
 </head>
 <body>
-    <Routes @rendermode="RenderMode.InteractiveServer" InitialTheme="@theme" />
+    <Routes @rendermode="PageRenderMode" InitialTheme="@theme" />
     <script src="_framework/blazor.web.js"></script>
     <script src="@Assets["_content/MudBlazor/MudBlazor.min.js"]"></script>
     <script>
@@ -24,6 +24,11 @@
 
 @code {
     [CascadingParameter] HttpContext? HttpContext { get; set; }
+
+    /// <summary>Connexion et installation sont rendues côté serveur sans circuit : le cookie de session doit être posé par une vraie réponse HTTP.</summary>
+    IComponentRenderMode? PageRenderMode =>
+        HttpContext?.Request.Path.StartsWithSegments("/login") == true || HttpContext?.Request.Path.StartsWithSegments("/setup") == true
+            ? null : RenderMode.InteractiveServer;
 
     string theme => HttpContext?.Request.Cookies["ursanas-theme"] == "dark" ? "dark" : "light";
 }

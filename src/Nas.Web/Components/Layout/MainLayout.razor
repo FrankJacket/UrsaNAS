@@ -3,6 +3,7 @@
 @inject ThemeState Theme
 @inject Nas.Web.Alerting.AlertState Alerts
 @inject IJSRuntime JS
+@inject NavigationManager Nav
 
 <MudThemeProvider IsDarkMode="@Theme.IsDark" />
 <MudPopoverProvider />
@@ -14,6 +15,12 @@
         <MudIcon Icon="@Icons.Material.Filled.Storage" Class="mr-2" />
         <MudText Typo="Typo.h6">UrsaNAS</MudText>
         <MudSpacer />
+        <AuthorizeView>
+            <MudText Typo="Typo.body2" Class="mr-2">@context.User.Identity?.Name</MudText>
+            <MudTooltip Text="Se déconnecter">
+                <MudIconButton Icon="@Icons.Material.Filled.Logout" Color="Color.Inherit" OnClick="Logout" />
+            </MudTooltip>
+        </AuthorizeView>
         <MudMenu Icon="@(Theme.IsDark ? Icons.Material.Filled.DarkMode : Icons.Material.Filled.LightMode)" Color="Color.Inherit"
                  AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
             <MudMenuItem Icon="@Icons.Material.Filled.LightMode" OnClick="() => SetTheme(false)">Thème clair @(Theme.IsDark ? "" : "✓")</MudMenuItem>
@@ -34,6 +41,7 @@
                     <MudChip T="string" Size="Size.Small" Color="@(Alerts.CriticalCount > 0 ? Color.Error : Color.Warning)" Class="ml-2">@Alerts.Count</MudChip>
                 }
             </MudNavLink>
+            <MudNavLink Href="/admins" Icon="@Icons.Material.Filled.AdminPanelSettings">Administrateurs</MudNavLink>
             <MudNavLink Href="/journal" Icon="@Icons.Material.Filled.History">Journal</MudNavLink>
         </MudNavMenu>
     </MudDrawer>
@@ -47,6 +55,9 @@
         Alerts.Changed += OnThemeChanged; // même rafraîchissement : la pastille d'alertes suit le contrôle périodique
     }
     void OnThemeChanged() => InvokeAsync(StateHasChanged);
+
+    // Rechargement complet : /logout est une vraie réponse HTTP qui supprime le cookie, pas une page du routeur.
+    void Logout() => Nav.NavigateTo("/logout", forceLoad: true);
 
     async Task SetTheme(bool dark)
     {

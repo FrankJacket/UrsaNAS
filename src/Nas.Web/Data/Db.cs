@@ -33,6 +33,7 @@ public class Db
         CREATE TABLE IF NOT EXISTS Shares(Name TEXT PRIMARY KEY COLLATE NOCASE, Comment TEXT NOT NULL DEFAULT '', ReadOnly INTEGER NOT NULL DEFAULT 0, ValidUsers TEXT NOT NULL); -- ValidUsers : noms séparés par des espaces
         CREATE TABLE IF NOT EXISTS Alerts(Id INTEGER PRIMARY KEY AUTOINCREMENT, Code TEXT NOT NULL, Severity TEXT NOT NULL, Title TEXT NOT NULL, Detail TEXT, RaisedAt TEXT NOT NULL, ResolvedAt TEXT);
         CREATE INDEX IF NOT EXISTS IX_Alerts_Code ON Alerts(Code);
+        CREATE TABLE IF NOT EXISTS AdminUsers(Name TEXT PRIMARY KEY COLLATE NOCASE, PasswordHash TEXT NOT NULL, Stamp TEXT NOT NULL, CreatedAt TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS Settings(Name TEXT PRIMARY KEY, Value TEXT NOT NULL);
         """);
         AddColumn(c, "Shares", "Dataset", "TEXT NULL"); // jeu de données ZFS ; NULL = dossier simple dans /srv/nas

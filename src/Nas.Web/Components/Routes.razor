@@ -2,7 +2,14 @@
 
 <Router AppAssembly="typeof(Program).Assembly">
     <Found Context="routeData">
-        <RouteView RouteData="routeData" DefaultLayout="typeof(MainLayout)" />
+        <AuthorizeRouteView RouteData="routeData" DefaultLayout="typeof(MainLayout)">
+            <NotAuthorized>
+                <div style="padding:2rem;font-family:Roboto,sans-serif">
+                    <h2>Session expirée</h2>
+                    <p>Tu n'es plus connecté. <a href="/login" data-enhance-nav="false">Se reconnecter</a></p>
+                </div>
+            </NotAuthorized>
+        </AuthorizeRouteView>
     </Found>
     <NotFound><MudText Class="pa-4">Page introuvable.</MudText></NotFound>
 </Router>
