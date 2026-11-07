@@ -1,0 +1,158 @@
+@inject AgentClient Agent
+@inject Repo Repo
+
+@* Choix de ce que copie un travail : l'arborescence de tous les partages, avec une case à cocher par partage, dossier ou fichier.
+   Ce qui est coché dans un dossier coché est déjà inclus. Se ferme avec la liste des chemins « partage » ou « partage/dossier/fichier ». *@
+<MudDialog>
+    <DialogContent>
+        @if (error is not null)
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-3">@error</MudAlert>
+        }
+        <MudText Typo="Typo.body2" Class="mb-2">@L["Tick the shares, folders and files to copy. Everything inside a ticked folder is included."]</MudText>
+        <MudPaper Elevation="0" Class="pick">
+            @foreach (var n in Visible())
+            {
+                var node = n;
+                var inherited = Inherited(node.Full);
+                <div class="pick-row" style="padding-left:@(node.Depth * 22 + 6)px">
+                    <span class="ex-chev" @onclick="() => Toggle(node)">
+                        @if (!node.IsFile)
+                        {
+                            <MudIcon Icon="@(node.Expanded ? Icons.Material.Filled.ExpandMore : Icons.Material.Filled.ChevronRight)" Size="Size.Small" />
+                        }
+                    </span>
+                    <MudCheckBox T="bool?" Value="@State(node.Full)" ValueChanged="(bool? v) => Tick(node, v == true)" Disabled="inherited" Size="Size.Small" Class="pick-box" />
+                    <MudIcon Icon="@NodeIcon(node)" Color="@(node.IsFile ? Color.Default : Color.Info)" Size="Size.Small" Class="mr-2" />
+                    <span class="pick-name" @onclick="() => Toggle(node)">@node.Name</span>
+                    @if (node.IsFile) { <MudText Typo="Typo.caption" Class="ml-3 mud-text-secondary">@Fmt.Size(node.Size, L.Lang)</MudText> }
+                    @if (node.Loading) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="ml-2" /> }
+                </div>
+            }
+            @if (roots.Count == 0) { <MudText Class="pa-3">@L["Create a share first."]</MudText> }
+        </MudPaper>
+        <MudDivider Class="my-2" />
+        @if (selected.Count == 0)
+        {
+            <MudText Typo="Typo.caption">@L["Nothing chosen yet."]</MudText>
+        }
+        else
+        {
+            <div>
+                @foreach (var s in selected.OrderBy(x => x, StringComparer.Ordinal))
+                {
+                    var path = s;
+                    <MudChip T="string" Size="Size.Small" OnClose="() => selected.Remove(path)">/@path</MudChip>
+                }
+            </div>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => Dialog.Cancel()">@L["Cancel"]</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Done">@L["OK"]</MudButton>
+    </DialogActions>
+</MudDialog>
+
+<style>
+    .pick { border: 1px solid var(--mud-palette-lines-default); border-radius: 8px; max-height: 50vh; overflow: auto; }
+    .pick-row { display: flex; align-items: center; padding: 0 6px; cursor: default; user-select: none; }
+    .pick-row:hover { background: var(--mud-palette-action-default-hover); }
+    .pick-box { margin: 0; }
+    .pick-name { cursor: pointer; }
+    .ex-chev { display: inline-flex; width: 24px; cursor: pointer; }
+</style>
+
+@code {
+    [CascadingParameter] IMudDialogInstance Dialog { get; set; } = default!;
+    /// <summary>Chemins déjà choisis : « partage » ou « partage/dossier/fichier ».</summary>
+    [Parameter] public List<string> Selected { get; set; } = [];
+
+    sealed class Node
+    {
+        public string Share = "", Path = "", Name = "";
+        public string Full => Path.Length == 0 ? Share : Share + "/" + Path;
+        public int Depth;
+        public bool IsFile, Expanded, Loaded, Loading;
+        public long Size;
+        public List<Node> Children = new();
+    }
+
+    List<Node> roots = new();
+    HashSet<string> selected = [];
+    string? error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        selected = Selected.ToHashSet();
+        try
+        {
+            roots = (await Repo.GetSharesAsync()).OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
+                .Select(s => new Node { Share = s.Name, Name = s.Name }).ToList();
+        }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable."]; }
+    }
+
+    IEnumerable<Node> Visible()
+    {
+        var stack = new Stack<Node>(Enumerable.Reverse(roots));
+        while (stack.Count > 0)
+        {
+            var n = stack.Pop();
+            yield return n;
+            if (n.Expanded) foreach (var c in Enumerable.Reverse(n.Children)) stack.Push(c);
+        }
+    }
+
+    static string NodeIcon(Node n) => n.IsFile ? Icons.Material.Filled.InsertDriveFile : n.Path.Length == 0 ? Icons.Material.Filled.FolderShared : Icons.Material.Filled.Folder;
+
+    bool Covered(string full) => selected.Any(s => full == s || full.StartsWith(s + "/", StringComparison.Ordinal));
+    bool Inherited(string full) => selected.Any(s => full.StartsWith(s + "/", StringComparison.Ordinal));
+    bool HasChosenInside(string full) => selected.Any(s => s.StartsWith(full + "/", StringComparison.Ordinal));
+
+    /// <summary>Coché, vide, ou (null) partiellement coché : quelque chose est choisi à l'intérieur.</summary>
+    bool? State(string full) => Covered(full) ? true : HasChosenInside(full) ? null : false;
+
+    void Tick(Node n, bool on)
+    {
+        if (on)
+        {
+            selected.RemoveWhere(s => s.StartsWith(n.Full + "/", StringComparison.Ordinal)); // désormais couvert par ce dossier
+            selected.Add(n.Full);
+        }
+        else
+        {
+            selected.Remove(n.Full);
+            selected.RemoveWhere(s => s.StartsWith(n.Full + "/", StringComparison.Ordinal)); // un partiel qu'on décoche vide aussi l'intérieur
+        }
+    }
+
+    async Task Toggle(Node n)
+    {
+        if (n.IsFile) return;
+        if (!n.Loaded) await Load(n);
+        n.Expanded = !n.Expanded;
+    }
+
+    async Task Load(Node n)
+    {
+        n.Loading = true;
+        try
+        {
+            var listing = await Agent.GetFoldersAsync(n.Share, n.Path, files: true);
+            string Child(string name) => n.Path.Length == 0 ? name : n.Path + "/" + name;
+            // Les dossiers que les NAS et les systèmes créent d'eux-mêmes (@eaDir, #recycle…) n'ont pas leur place dans une sauvegarde.
+            n.Children = listing.Folders.Where(f => !BackupRules.DefaultExcludes.Contains(f.Name))
+                .Select(f => new Node { Share = n.Share, Name = f.Name, Path = Child(f.Name), Depth = n.Depth + 1 })
+                .Concat((listing.Files ?? []).Where(f => !BackupRules.DefaultExcludes.Contains(f.Name))
+                    .Select(f => new Node { Share = n.Share, Name = f.Name, Path = Child(f.Name), Depth = n.Depth + 1, IsFile = true, Size = f.Size }))
+                .ToList();
+            n.Loaded = true;
+        }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable."]; }
+        n.Loading = false;
+    }
+
+    void Done() => Dialog.Close(DialogResult.Ok(selected.OrderBy(s => s, StringComparer.Ordinal).ToList()));
+}

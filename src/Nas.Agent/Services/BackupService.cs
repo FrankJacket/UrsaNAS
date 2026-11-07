@@ -147,7 +147,6 @@ public sealed class BackupService
     async Task RunAsync(BackupJobDef job, RunState state)
     {
         var entered = false;
-        string? snapshot = null;
         try
         {
             await _gate.WaitAsync(state.Cts.Token);
@@ -155,23 +154,14 @@ public sealed class BackupService
             state.RunStartedUtc = DateTime.UtcNow;
             state.Queued = false;
 
-            var root = await _acl.SharePathAsync(job.Share, state.Cts.Token);
-            var source = root;
-            if (job.Snapshot)
+            // Une source après l'autre ; les compteurs de la progression s'additionnent. Un partage qui échoue n'empêche pas les suivants.
+            var results = new List<(BackupSource Source, CopyResult Result)>();
+            foreach (var src in job.Sources)
             {
-                snapshot = await CreateSnapshotAsync(job, root, state.Cts.Token);
-                source = $"{root.TrimEnd('/')}/.zfs/snapshot/{snapshot[(snapshot.IndexOf('@') + 1)..]}";
-                if (!Directory.Exists(source)) throw new OperationException(Msg.F("The snapshot of “{0}” cannot be read.", job.Share));
+                state.Cts.Token.ThrowIfCancellationRequested();
+                results.Add((src, await CopySourceAsync(job, src, state)));
             }
-
-            var options = new CopyOptions
-            {
-                SourceDir = source, TargetDir = job.TargetDir, TargetId = job.TargetId!, DestFolder = job.DestFolder,
-                Includes = job.Includes, Excludes = job.Excludes ?? [], MirrorDeletes = job.MirrorDeletes,
-                TrashRetentionDays = job.RetentionDays, Verify = job.Verify, WindowsDisk = job.WindowsDisk,
-            };
-            var result = await Task.Run(() => CopyEngine.Run(options, state.Progress, state.Cts.Token));
-            state.Result = new BackupResult(result.Status.ToString(), result.Message, result.ErrorSamples, result.Elapsed.TotalSeconds);
+            state.Result = Combine(job, results);
         }
         catch (OperationCanceledException) { state.Result = new BackupResult(nameof(CopyStatus.Cancelled), "Cancelled.", [], 0); }
         catch (OperationException e) { state.Result = new BackupResult(nameof(CopyStatus.Failed), e.Message, [], 0); }
@@ -183,25 +173,73 @@ public sealed class BackupService
         finally
         {
             state.Progress.Phase = "Finished";
-            if (snapshot is not null) await DestroySnapshotAsync(snapshot);
             if (entered) _gate.Release();
             state.Result ??= new BackupResult(nameof(CopyStatus.Failed), "Interrupted.", [], 0);
         }
     }
 
+    async Task<CopyResult> CopySourceAsync(BackupJobDef job, BackupSource src, RunState state)
+    {
+        string? snapshot = null;
+        try
+        {
+            var root = await _acl.SharePathAsync(src.Share, state.Cts.Token);
+            var source = root;
+            if (job.Snapshot && !string.IsNullOrEmpty(src.Dataset)) // les partages hors ZFS sont copiés tels quels
+            {
+                snapshot = await CreateSnapshotAsync(job, src, root, state.Cts.Token);
+                source = $"{root.TrimEnd('/')}/.zfs/snapshot/{snapshot[(snapshot.IndexOf('@') + 1)..]}";
+                if (!Directory.Exists(source)) throw new OperationException(Msg.F("The snapshot of “{0}” cannot be read.", src.Share));
+            }
+
+            var options = new CopyOptions
+            {
+                SourceDir = source, TargetDir = job.TargetDir, TargetId = job.TargetId!, DestFolder = job.DestFolder,
+                DestSubFolder = job.SubFolders ? src.Share : "",
+                Includes = src.Includes, Excludes = job.Excludes ?? [], MirrorDeletes = job.MirrorDeletes,
+                TrashRetentionDays = job.RetentionDays, Verify = job.Verify, WindowsDisk = job.WindowsDisk,
+            };
+            return await Task.Run(() => CopyEngine.Run(options, state.Progress, state.Cts.Token));
+        }
+        catch (OperationException e) { return new CopyResult(CopyStatus.Failed, e.Message, [], TimeSpan.Zero); }
+        finally { if (snapshot is not null) await DestroySnapshotAsync(snapshot); }
+    }
+
+    /// <summary>Résultat unique d'un travail : le pire état des sources ; un échec partiel devient « terminé avec des erreurs ».</summary>
+    static BackupResult Combine(BackupJobDef job, List<(BackupSource Source, CopyResult Result)> results)
+    {
+        var multi = job.Sources.Count > 1;
+        string Prefix(BackupSource s) => multi ? $"{s.Share}: " : "";
+        var elapsed = results.Sum(r => r.Result.Elapsed.TotalSeconds);
+        var samples = results.SelectMany(r => r.Result.ErrorSamples.Select(e => multi ? $"{r.Source.Share}/{e}" : e)).Take(20).ToList();
+
+        if (results.Any(r => r.Result.Status == CopyStatus.Cancelled))
+            return new BackupResult(nameof(CopyStatus.Cancelled), "Cancelled.", samples, elapsed);
+        var failed = results.Where(r => r.Result.Status == CopyStatus.Failed).ToList();
+        var withErrors = results.Where(r => r.Result.Status == CopyStatus.CompletedWithErrors).ToList();
+        if (failed.Count == results.Count)
+            return new BackupResult(nameof(CopyStatus.Failed), string.Join(" ", failed.Select(f => Prefix(f.Source) + f.Result.Message)), samples, elapsed);
+        if (failed.Count > 0 || withErrors.Count > 0)
+        {
+            var messages = failed.Select(f => Prefix(f.Source) + f.Result.Message).Concat(withErrors.Select(e => Prefix(e.Source) + e.Result.Message));
+            return new BackupResult(nameof(CopyStatus.CompletedWithErrors), string.Join(" ", messages), samples, elapsed);
+        }
+        return new BackupResult(nameof(CopyStatus.Success), null, samples, elapsed);
+    }
+
     // ---- Snapshot ZFS (cohérence : on copie une image figée, pas des fichiers qui changent pendant la copie)
 
-    static string SnapshotName(BackupJobDef job) => $"{job.Dataset}@ursacopy-{job.Id}";
+    static string SnapshotName(BackupJobDef job, BackupSource src) => $"{src.Dataset}@ursacopy-{job.Id}";
 
-    async Task<string> CreateSnapshotAsync(BackupJobDef job, string shareRoot, CancellationToken ct)
+    async Task<string> CreateSnapshotAsync(BackupJobDef job, BackupSource src, string shareRoot, CancellationToken ct)
     {
-        if (Rules.ValidateDatasetName(job.Dataset) is { } e) throw new OperationException(e);
+        if (Rules.ValidateDatasetName(src.Dataset) is { } e) throw new OperationException(e);
         // Le jeu de données doit bien être celui du partage : la web n'est pas crue sur parole.
-        var mp = await _run.RunAsync("zfs", ["get", "-H", "-o", "value", "mountpoint", job.Dataset!], ct: ct);
+        var mp = await _run.RunAsync("zfs", ["get", "-H", "-o", "value", "mountpoint", src.Dataset!], ct: ct);
         if (mp.ExitCode != 0 || mp.StdOut.Trim() != shareRoot)
-            throw new OperationException(Msg.F("Share “{0}” is not stored on dataset “{1}”.", job.Share, job.Dataset));
+            throw new OperationException(Msg.F("Share “{0}” is not stored on dataset “{1}”.", src.Share, src.Dataset));
 
-        var name = SnapshotName(job);
+        var name = SnapshotName(job, src);
         await _run.RunAsync("zfs", ["destroy", name], ct: ct); // reste d'une copie interrompue ; échoue sans gravité si absent
         var r = await _run.RunAsync("zfs", ["snapshot", name], ct: ct);
         if (r.ExitCode != 0)

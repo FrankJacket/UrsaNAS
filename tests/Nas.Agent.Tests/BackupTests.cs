@@ -9,7 +9,24 @@ namespace Nas.Agent.Tests;
 public class BackupRulesTests
 {
     static BackupJobDef Job(string dest = "photos", string share = "docs", IReadOnlyList<string>? includes = null, int retention = 30, bool snapshot = false, string? dataset = null) =>
-        new(1, "Photos", share, dataset, includes ?? [], "/mnt/usb", "id", dest, RetentionDays: retention, Snapshot: snapshot);
+        new(1, "Photos", [new BackupSource(share, dataset, includes ?? [])], false, "/mnt/usb", "id", dest, RetentionDays: retention, Snapshot: snapshot);
+
+
+    [Fact]
+    public void Valide_les_sources()
+    {
+        BackupJobDef Multi(params BackupSource[] s) => new(1, "N", s, true, "/mnt/usb", "id", "d");
+        Assert.Null(BackupRules.Validate(Multi(new BackupSource("docs", null, []), new BackupSource("photos", "tank/photos", ["a.txt"]))));
+        Assert.NotNull(BackupRules.Validate(Multi())); // rien à copier
+        Assert.NotNull(BackupRules.Validate(Multi(new BackupSource("docs", null, []), new BackupSource("docs", null, [])))); // partage en double
+        Assert.NotNull(BackupRules.Validate(Multi(new BackupSource("docs", null, ["../x"]))));
+        Assert.NotNull(BackupRules.Validate(Multi(new BackupSource("bad name", null, []))));
+        // Sans sous-dossiers (ancienne forme) : un seul partage.
+        Assert.NotNull(BackupRules.Validate(Multi(new BackupSource("docs", null, []), new BackupSource("photos", null, [])) with { SubFolders = false }));
+        // Le snapshot exige au moins un partage sur ZFS.
+        Assert.NotNull(BackupRules.Validate(Multi(new BackupSource("docs", null, [])) with { Snapshot = true }));
+        Assert.Null(BackupRules.Validate(Multi(new BackupSource("docs", null, []), new BackupSource("photos", "tank/photos", [])) with { Snapshot = true }));
+    }
 
     [Theory]
     [InlineData("photos", true)]
@@ -99,7 +116,7 @@ public class BackupServiceTests : IDisposable
     string Usb => _usb.Replace('\\', '/');
 
     BackupJobDef Job(string? targetId, bool snapshot = false, IReadOnlyList<string>? includes = null) =>
-        new(7, "Docs", "docs", snapshot ? "tank/docs" : null, includes ?? [], Usb, targetId, "docs-copy", Snapshot: snapshot, WindowsDisk: false, Excludes: []);
+        new(7, "Docs", [new BackupSource("docs", snapshot ? "tank/docs" : null, includes ?? [])], false, Usb, targetId, "docs-copy", Snapshot: snapshot, WindowsDisk: false, Excludes: []);
 
     async Task<BackupRunStatus> WaitDoneAsync(int id)
     {
@@ -182,6 +199,47 @@ public class BackupServiceTests : IDisposable
         await WaitDoneAsync(7);
         Assert.True(File.Exists(Path.Combine(_usb, "docs-copy", "sub", "b.txt")));
         Assert.False(File.Exists(Path.Combine(_usb, "docs-copy", "a.txt")));
+    }
+
+
+    [Fact]
+    public async Task Copie_plusieurs_partages_chacun_dans_son_sous_dossier_avec_dossiers_et_fichiers_choisis()
+    {
+        var photos = Path.Combine(_dir, "srv", "photos");
+        Directory.CreateDirectory(Path.Combine(photos, "2024"));
+        File.WriteAllText(Path.Combine(photos, "2024", "p.jpg"), "pic");
+        File.WriteAllText(Path.Combine(photos, "autre.jpg"), "other");
+        _run.Handler = c => c.File == "testparm"
+            ? new(0, (c.Args.Any(a => a.EndsWith("=photos")) ? photos : _share) + "\n", "")
+            : new(0, "", "");
+        var id = _svc.InitDisk(Usb);
+
+        var job = new BackupJobDef(7, "Tout", [new BackupSource("docs", null, ["a.txt"]), new BackupSource("photos", null, ["2024"])],
+            true, Usb, id, "mix", WindowsDisk: false, Excludes: []);
+        _svc.Start(job);
+        var done = await WaitDoneAsync(7);
+
+        Assert.Equal("Success", done.Result!.Status);
+        Assert.Equal("alpha", File.ReadAllText(Path.Combine(_usb, "mix", "docs", "a.txt")));
+        Assert.False(File.Exists(Path.Combine(_usb, "mix", "docs", "sub", "b.txt"))); // seul le fichier choisi
+        Assert.Equal("pic", File.ReadAllText(Path.Combine(_usb, "mix", "photos", "2024", "p.jpg")));
+        Assert.False(File.Exists(Path.Combine(_usb, "mix", "photos", "autre.jpg")));
+        Assert.Equal(2, done.Copied);
+    }
+
+    [Fact]
+    public async Task Un_partage_qui_echoue_n_empeche_pas_les_autres_et_le_travail_est_termine_avec_des_erreurs()
+    {
+        _run.Handler = c => c.File == "testparm"
+            ? (c.Args.Any(a => a.EndsWith("=ghost")) ? new(1, "", "unknown") : new(0, _share + "\n", ""))
+            : new(0, "", "");
+        var id = _svc.InitDisk(Usb);
+        _svc.Start(new BackupJobDef(7, "Mix", [new BackupSource("ghost", null, []), new BackupSource("docs", null, [])], true, Usb, id, "mix", WindowsDisk: false, Excludes: []));
+        var done = await WaitDoneAsync(7);
+
+        Assert.Equal("CompletedWithErrors", done.Result!.Status);
+        Assert.Contains("ghost", done.Result.Message);
+        Assert.True(File.Exists(Path.Combine(_usb, "mix", "docs", "a.txt")));
     }
 
     [Fact]

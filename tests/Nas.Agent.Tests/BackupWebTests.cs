@@ -85,6 +85,28 @@ public class BackupRepoTests : IDisposable
         Assert.True((await _repo.GetJobAsync(id))!.Snapshot);
     }
 
+
+    [Fact]
+    public void La_selection_se_lit_et_s_ecrit_dans_les_deux_formes()
+    {
+        var legacy = new BackupJobRow { Share = "photos", Includes = "2024\nnotes.txt" };
+        Assert.False(legacy.SubFolders);
+        Assert.Equal([("photos", "2024"), ("photos", "notes.txt")], legacy.Selection());
+        Assert.Equal([("photos", "")], new BackupJobRow { Share = "photos" }.Selection()); // vide = tout le partage
+
+        var multi = new BackupJobRow();
+        multi.SetSelection([("photos", ""), ("docs", "a/b.txt")], keepLegacy: false);
+        Assert.True(multi.SubFolders);
+        Assert.Equal("docs/a/b.txt\nphotos", multi.Includes);
+        Assert.Equal([("docs", "a/b.txt"), ("photos", "")], multi.Selection());
+
+        // Un ancien travail qui ne copie toujours qu'un partage garde son rangement ; avec un second partage il passe à la forme courante.
+        legacy.SetSelection([("photos", "2024")], keepLegacy: true);
+        Assert.Equal(("photos", "2024"), (legacy.Share, legacy.Includes));
+        legacy.SetSelection([("photos", ""), ("docs", "")], keepLegacy: true);
+        Assert.True(legacy.SubFolders);
+    }
+
     [Fact]
     public async Task Un_disque_initialise_est_adopte_par_les_travaux_du_meme_disque_seulement()
     {
@@ -208,6 +230,23 @@ public class BackupCoordinatorTests : IDisposable
         return job;
     }
 
+
+    [Fact]
+    public async Task La_definition_regroupe_les_chemins_par_partage_et_un_partage_entier_couvre_ses_chemins()
+    {
+        await _repo.UpsertShareAsync(new ShareDef("docs", "", false, [], null));
+        var job = new BackupJobRow { Name = "Mix", TargetDir = "/mnt/usb", TargetId = "m", DestFolder = "mix" };
+        job.SetSelection([("photos", "2024"), ("photos", "2025"), ("docs", ""), ("docs", "x")], keepLegacy: false);
+        var def = await _coordinator.BuildDefAsync(job);
+
+        Assert.True(def.SubFolders);
+        Assert.Equal(["docs", "photos"], def.Sources.Select(s => s.Share).Order());
+        Assert.Empty(def.Sources.Single(s => s.Share == "docs").Includes);
+        Assert.Equal(["2024", "2025"], def.Sources.Single(s => s.Share == "photos").Includes);
+        Assert.Equal("tank/photos", def.Sources.Single(s => s.Share == "photos").Dataset);
+        Assert.Null(BackupRules.Validate(def));
+    }
+
     [Fact]
     public async Task Demarrer_envoie_la_definition_a_l_agent_avec_le_jeu_de_donnees_du_partage()
     {
@@ -215,8 +254,8 @@ public class BackupCoordinatorTests : IDisposable
         await _coordinator.StartAsync(job, "Manual", "admin");
 
         var sent = Assert.Single(_agent.Started);
-        Assert.Equal("photos", sent.Share);
-        Assert.Equal("tank/photos", sent.Dataset);
+        Assert.Equal("photos", sent.Sources.Single().Share);
+        Assert.Equal("tank/photos", sent.Sources.Single().Dataset);
         Assert.True(sent.Snapshot);
         Assert.Equal("Running", (await _jobs.GetOpenRunAsync(job.Id))!.Status);
     }

@@ -26,10 +26,10 @@ ACLs only apply to SMB. NFS and FTP give access to the whole share.
 
 ### Backups
 
-The **Backups** page copies a share (or some of its folders) to a **USB disk plugged into the NAS**. The copy is done by the [Ursacopy](https://github.com/FrankJacket/Ursacopy) engine, included as a Git submodule.
+The **Backups** page copies shares, or only the folders and files you tick in a tree spanning all shares, to a **USB disk plugged into the NAS**. The copy is done by the [Ursacopy](https://github.com/FrankJacket/Ursacopy) engine, included as a Git submodule.
 
 - **It is a readable copy, not a restorable image.** Files are copied as they are, without permissions or ACLs. The disk can be read on any computer (NTFS and exFAT work well).
-- **One job = one share** (or a few folders) copied into a folder on the disk. Several jobs can share the same disk.
+- **One job = any selection** of shares, folders and files, copied into a folder on the disk (one sub-folder per share). Older single-share jobs keep their layout until a second share is added. Several jobs can share the same disk.
 - **Scheduling**: manual, every day at a given time, or whenever the disk is connected.
 - **ZFS snapshot option**: for a share on a ZFS dataset, the copy reads from a temporary snapshot, so files that change during the copy (databases, virtual disks) are copied consistently. The snapshot is deleted afterwards.
 - **Trash**: deleted or replaced files are kept for N days (30 by default) on the disk.

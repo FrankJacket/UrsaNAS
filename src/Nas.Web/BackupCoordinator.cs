@@ -14,16 +14,25 @@ public class BackupCoordinator(AgentClient agent, Repo repo, BackupRepo jobs)
 
     public async Task<BackupJobDef> BuildDefAsync(BackupJobRow j)
     {
-        var share = (await repo.GetSharesAsync()).FirstOrDefault(s => s.Name.Equals(j.Share, StringComparison.OrdinalIgnoreCase))
-            ?? throw new AgentException(Msg.F("Share “{0}” does not exist.", j.Share));
-        return new BackupJobDef(j.Id, j.Name, share.Name, share.Dataset, j.IncludeList(), j.TargetDir, j.TargetId, j.DestFolder,
+        var shares = await repo.GetSharesAsync();
+        var sources = new List<BackupSource>();
+        foreach (var group in j.Selection().GroupBy(s => s.Share, StringComparer.Ordinal))
+        {
+            var share = shares.FirstOrDefault(s => s.Name.Equals(group.Key, StringComparison.OrdinalIgnoreCase))
+                ?? throw new AgentException(Msg.F("Share “{0}” does not exist.", group.Key));
+            var paths = group.Select(g => g.Path).ToList();
+            // Le partage entier couvre tout ce qui est coché dedans.
+            sources.Add(new BackupSource(share.Name, share.Dataset, paths.Any(p => p.Length == 0) ? [] : paths));
+        }
+        return new BackupJobDef(j.Id, j.Name, sources, j.SubFolders, j.TargetDir, j.TargetId, j.DestFolder,
             j.MirrorDeletes, j.RetentionDays, j.Verify, j.WindowsDisk, j.ExcludeList(), j.Snapshot);
     }
 
     public static string? Validate(BackupJobRow j)
     {
         if (BackupRules.ValidateName(j.Name) is { } e0) return e0;
-        if (Rules.ValidateShareName(j.Share) is { } e1) return e1;
+        if (j.Selection().Count == 0) return Msg.F("Choose what to back up.");
+        if (j.Selection().Select(s => s.Share).Distinct().Any(s => Rules.ValidateShareName(s) is not null)) return Msg.F("Invalid folder path.");
         if (BackupRules.ValidateDestFolder(j.DestFolder) is { } e2) return e2;
         if (string.IsNullOrWhiteSpace(j.TargetDir)) return Msg.F("Choose the backup disk.");
         if (j.ScheduleMode == BackupSchedule.Daily && !TimeSpan.TryParse(j.DailyTime, out _)) return Msg.F("Invalid time.");

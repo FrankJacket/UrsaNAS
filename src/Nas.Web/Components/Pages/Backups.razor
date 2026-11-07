@@ -39,7 +39,7 @@
                 <MudCardHeader>
                     <CardHeaderContent>
                         <MudText Typo="Typo.h6">@job.Name @if (!job.Enabled) { <MudChip T="string" Size="Size.Small" Class="ml-2">@L["Disabled"]</MudChip> }</MudText>
-                        <MudText Typo="Typo.body2"><code>/@job.Share@(job.IncludeList().Length > 0 ? " (" + string.Join(", ", job.IncludeList()) + ")" : "")</code> → <code>@job.TargetDir/@job.DestFolder</code></MudText>
+                        <MudText Typo="Typo.body2"><code>@Sources(job)</code> → <code>@job.TargetDir/@job.DestFolder</code></MudText>
                     </CardHeaderContent>
                     <CardHeaderActions>
                         <MudChip T="string" Size="Size.Small" Color="@DiskColor(disk)">@DiskText(disk)</MudChip>
@@ -219,6 +219,9 @@
         var secs = (DateTime.UtcNow - start).TotalSeconds;
         return secs > 5 && run.BytesCopied > 0 ? " · " + Fmt.Rate(run.BytesCopied / secs, L.Lang) : "";
     }
+
+    /// <summary>Ce que copie le travail : « /photos, /docs/2024 » ; le partage entier s'écrit sans chemin.</summary>
+    static string Sources(BackupJobRow j) => string.Join(", ", j.Selection().Select(s => "/" + (s.Path.Length == 0 ? s.Share : s.Share + "/" + s.Path)));
 
     string ScheduleText(BackupJobRow j) => j.ScheduleMode switch
     {

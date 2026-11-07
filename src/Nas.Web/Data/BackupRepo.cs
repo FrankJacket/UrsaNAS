@@ -8,13 +8,18 @@ public static class BackupSchedule
     public const int Manual = 0, Daily = 1, OnPlug = 2;
 }
 
-/// <summary>Un travail de sauvegarde : un partage (ou des dossiers de ce partage) copié vers un dossier d'un disque externe.</summary>
+/// <summary>
+/// Un travail de sauvegarde : des partages (ou des dossiers et fichiers de ces partages) copiés vers un dossier d'un disque externe.
+/// Deux formes : ancienne (<see cref="Share"/> renseigné, un seul partage copié directement dans le dossier du disque, chemins relatifs au partage)
+/// et courante (<see cref="Share"/> vide, un sous-dossier par partage, chemins de la forme <c>partage</c> ou <c>partage/dossier/fichier</c>).
+/// </summary>
 public sealed class BackupJobRow
 {
     public int Id { get; set; }
     public string Name { get; set; } = "";
+    /// <summary>Ancienne forme : le partage unique du travail. Vide pour la forme courante.</summary>
     public string Share { get; set; } = "";
-    /// <summary>Dossiers choisis du partage, un par ligne ; vide = tout le partage.</summary>
+    /// <summary>Ce qui est copié, un chemin par ligne (voir la description de la classe) ; vide en ancienne forme = tout le partage.</summary>
     public string Includes { get; set; } = "";
     public string TargetDir { get; set; } = "";
     public string? TargetId { get; set; }
@@ -34,6 +39,34 @@ public sealed class BackupJobRow
     public long EstimatedBytes { get; set; }
 
     public string[] IncludeList() => Lines(Includes);
+
+    /// <summary>Forme courante : un sous-dossier par partage sur le disque.</summary>
+    public bool SubFolders => Share.Length == 0;
+
+    /// <summary>Ce que le travail copie, sous la forme (partage, chemin relatif ; vide = tout le partage), quelle que soit la forme.</summary>
+    public List<(string Share, string Path)> Selection()
+    {
+        var list = IncludeList();
+        if (!SubFolders) return list.Length == 0 ? [(Share, "")] : list.Select(p => (Share, p)).ToList();
+        return list.Select(p => { var i = p.IndexOf('/'); return i < 0 ? (p, "") : (p[..i], p[(i + 1)..]); }).ToList();
+    }
+
+    /// <summary>Remplit <see cref="Share"/> et <see cref="Includes"/> depuis une sélection. Un travail ancien qui ne copie toujours qu'un partage garde son rangement.</summary>
+    public void SetSelection(IEnumerable<(string Share, string Path)> selection, bool keepLegacy)
+    {
+        var items = selection.ToList();
+        var shares = items.Select(i => i.Share).Distinct(StringComparer.Ordinal).ToList();
+        if (keepLegacy && shares.Count == 1)
+        {
+            Share = shares[0];
+            Includes = items.Any(i => i.Path.Length == 0) ? "" : string.Join('\n', items.Select(i => i.Path).OrderBy(p => p, StringComparer.Ordinal));
+        }
+        else
+        {
+            Share = "";
+            Includes = string.Join('\n', items.Select(i => i.Path.Length == 0 ? i.Share : i.Share + "/" + i.Path).OrderBy(p => p, StringComparer.Ordinal));
+        }
+    }
     public string[] ExcludeList() => Lines(Excludes);
     static string[] Lines(string s) => s.Split(['\n', '\r'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 }

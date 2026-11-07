@@ -13,22 +13,19 @@
         <MudTextField @bind-Value="job.Name" Label="@L["Job name"]" Immediate="true" Disabled="busy" AutoFocus="@(job.Id == 0)" />
 
         <MudText Typo="Typo.subtitle2" Class="mt-4">@L["What to back up"]</MudText>
-        <MudSelect T="string" Value="job.Share" ValueChanged="OnShareChanged" Label="@L["Share"]" Disabled="busy"
-                   HelperText="@(shares.Count == 0 ? L["Create a share first."] : null)">
-            @foreach (var s in shares)
-            {
-                <MudSelectItem T="string" Value="@s.Name">@s.Name@(s.Dataset is null ? "" : " (ZFS)")</MudSelectItem>
-            }
-        </MudSelect>
         <div class="mt-2">
-            @foreach (var f in includes)
+            @foreach (var item in selection)
             {
-                var folder = f;
-                <MudChip T="string" Size="Size.Small" OnClose="() => includes.Remove(folder)">/@job.Share/@folder</MudChip>
+                var entry = item;
+                <MudChip T="string" Size="Size.Small" OnClose="() => selection.Remove(entry)">/@Label(entry)</MudChip>
             }
-            <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.CreateNewFolder" OnClick="AddFolder" Disabled="@(busy || string.IsNullOrEmpty(job.Share))">@L["Choose a folder"]</MudButton>
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.FactCheck" OnClick="Choose" Disabled="busy">@L["Choose what to back up"]</MudButton>
         </div>
-        <MudText Typo="Typo.caption" Class="d-block">@L["No folder chosen: the whole share is copied."]</MudText>
+        <MudText Typo="Typo.caption" Class="d-block">@L["Pick shares, folders and files across all the shares."]</MudText>
+        @if (Existing is { SubFolders: false } && SharesOf().Count > 1)
+        {
+            <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">@L["With several shares, each one is copied into its own sub-folder of the folder on the disk. What was already copied stays where it is; delete it by hand if you do not need it."]</MudAlert>
+        }
         <MudSwitch T="bool" @bind-Value="job.Snapshot" Label="@L["Copy from a ZFS snapshot"]" Color="Color.Primary" Disabled="@(busy || !HasDataset)" />
         <MudText Typo="Typo.caption" Class="d-block">@(HasDataset
             ? L["A snapshot freezes the share during the copy, so files that change (databases, virtual disks) are copied consistently."]
@@ -78,12 +75,14 @@
     BackupJobRow job = new();
     List<ShareDef> shares = new();
     IReadOnlyList<BackupTarget> targets = [];
-    List<string> includes = new();
     string excludes = "";
     string? error;
     bool busy;
 
-    bool HasDataset => shares.FirstOrDefault(s => s.Name == job.Share)?.Dataset is not null;
+    bool HasDataset => SharesOf().Any(s => shares.FirstOrDefault(x => x.Name == s)?.Dataset is not null);
+    List<(string Share, string Path)> selection = new();
+    List<string> SharesOf() => selection.Select(s => s.Share).Distinct(StringComparer.Ordinal).ToList();
+    static string Label((string Share, string Path) s) => s.Path.Length == 0 ? s.Share : s.Share + "/" + s.Path;
 
     protected override async Task OnInitializedAsync()
     {
@@ -101,12 +100,11 @@
                 MirrorDeletes = Existing.MirrorDeletes, RetentionDays = Existing.RetentionDays, Verify = Existing.Verify,
                 WindowsDisk = Existing.WindowsDisk, Snapshot = Existing.Snapshot, CreatedUtc = Existing.CreatedUtc,
             };
-            includes = Existing.IncludeList().ToList();
+            selection = Existing.Selection();
             excludes = Existing.Excludes;
         }
         else
         {
-            job.Share = shares.FirstOrDefault()?.Name ?? "";
             job.TargetDir = targets.FirstOrDefault()?.Dir ?? "";
             excludes = job.Excludes;
         }
@@ -128,24 +126,14 @@
         return string.Join(" — ", parts);
     }
 
-    void OnShareChanged(string share)
+    async Task Choose()
     {
-        job.Share = share;
-        includes.Clear(); // les dossiers choisis appartenaient à l'autre partage
-        if (!HasDataset) job.Snapshot = false;
-    }
-
-    async Task AddFolder()
-    {
-        var parameters = new DialogParameters<FolderPickerDialog> { { x => x.Share, job.Share }, { x => x.Message, L["Folder to back up"] }, { x => x.ButtonText, "Add" } };
-        var dialog = await Dialogs.ShowAsync<FolderPickerDialog>(L["Choose a folder"], parameters, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true });
-        if (await dialog.Result is { Canceled: false, Data: string path })
+        var parameters = new DialogParameters<BackupSelectDialog> { { x => x.Selected, selection.Select(Label).ToList() } };
+        var dialog = await Dialogs.ShowAsync<BackupSelectDialog>(L["Choose what to back up"], parameters, new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseButton = true });
+        if (await dialog.Result is { Canceled: false, Data: List<string> chosen })
         {
-            if (path.Length == 0) { includes.Clear(); return; } // la racine : tout le partage
-            // Un dossier déjà couvert par un dossier choisi, ou qui en couvre d'autres, remplace ou est ignoré.
-            if (includes.Any(i => path == i || path.StartsWith(i + "/", StringComparison.Ordinal))) return;
-            includes.RemoveAll(i => i.StartsWith(path + "/", StringComparison.Ordinal));
-            includes.Add(path);
+            selection = chosen.Select(p => { var i = p.IndexOf('/'); return i < 0 ? (p, "") : (p[..i], p[(i + 1)..]); }).ToList();
+            if (!HasDataset) job.Snapshot = false;
         }
     }
 
@@ -155,7 +143,8 @@
         busy = true;
         try
         {
-            job.Includes = string.Join('\n', includes.OrderBy(i => i, StringComparer.Ordinal));
+            if (!HasDataset) job.Snapshot = false;
+            job.SetSelection(selection, keepLegacy: Existing is { SubFolders: false });
             job.Excludes = excludes;
             await Ops.SaveJobAsync(job);
             Dialog.Close(DialogResult.Ok(job.Name));

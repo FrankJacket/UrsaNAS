@@ -1,17 +1,25 @@
 namespace Nas.Contracts;
 
 /// <summary>
-/// Un travail de sauvegarde : un partage (ou des dossiers de ce partage) copié vers un dossier d'un disque externe.
-/// La source est toujours un partage : l'agent en retrouve le dossier, aucun chemin source ne vient de l'extérieur.
+/// Une source d'un travail : un partage, ou des dossiers et fichiers de ce partage.
+/// </summary>
+public sealed record BackupSource(
+    string Share,
+    /// <summary>Jeu de données ZFS du partage (nécessaire pour la copie depuis un snapshot), sinon null.</summary>
+    string? Dataset,
+    /// <summary>Dossiers et fichiers du partage à copier, relatifs à sa racine ; vide = tout le partage.</summary>
+    IReadOnlyList<string> Includes);
+
+/// <summary>
+/// Un travail de sauvegarde : des partages (ou des dossiers et fichiers de ces partages) copiés vers un dossier d'un disque externe.
+/// Les sources sont toujours des partages : l'agent en retrouve le dossier, aucun chemin source ne vient de l'extérieur.
 /// </summary>
 public sealed record BackupJobDef(
     int Id,
     string Name,
-    string Share,
-    /// <summary>Jeu de données ZFS du partage (nécessaire pour la copie depuis un snapshot), sinon null.</summary>
-    string? Dataset,
-    /// <summary>Dossiers du partage à copier, relatifs à sa racine ; vide = tout le partage.</summary>
-    IReadOnlyList<string> Includes,
+    IReadOnlyList<BackupSource> Sources,
+    /// <summary>Un sous-dossier par partage sur le disque (<c>Dossier/partage/…</c>) ; sinon la source, unique, est copiée directement dans le dossier (anciens travaux).</summary>
+    bool SubFolders,
     /// <summary>Point de montage du disque externe.</summary>
     string TargetDir,
     /// <summary>Identifiant du marqueur du disque (null tant que le disque n'est pas initialisé).</summary>
@@ -64,6 +72,7 @@ public sealed record BackupRunStatus(
 public static partial class BackupRules
 {
     public const int MaxRetentionDays = 3650;
+    public const int MaxSources = 64;
 
     /// <summary>Dossiers et fichiers créés par les NAS et les systèmes d'exploitation, que personne ne veut dans une sauvegarde.</summary>
     public static readonly string[] DefaultExcludes =
@@ -99,13 +108,19 @@ public static partial class BackupRules
     public static string? Validate(BackupJobDef j)
     {
         if (ValidateName(j.Name) is { } e0) return e0;
-        if (Rules.ValidateShareName(j.Share) is { } e1) return e1;
         if (ValidateDestFolder(j.DestFolder) is { } e2) return e2;
         if (j.RetentionDays is < 0 or > MaxRetentionDays) return Msg.F("The retention must be between 0 and {0} days.", MaxRetentionDays);
-        foreach (var i in j.Includes) if (ValidateInclude(i) is { } e3) return e3;
+        if (j.Sources.Count is 0 or > MaxSources) return Msg.F("Choose what to back up.");
+        if (!j.SubFolders && j.Sources.Count != 1) return Msg.F("Choose what to back up.");
+        if (j.Sources.Select(s => s.Share).Distinct(StringComparer.Ordinal).Count() != j.Sources.Count) return Msg.F("A share appears twice in the job.");
+        foreach (var s in j.Sources)
+        {
+            if (Rules.ValidateShareName(s.Share) is { } e1) return e1;
+            foreach (var i in s.Includes) if (ValidateInclude(i) is { } e3) return e3;
+        }
         if (j.Excludes is { } ex && (ex.Count > 50 || ex.Any(p => string.IsNullOrWhiteSpace(p) || p.Length > 200 || p.Any(char.IsControl))))
             return Msg.F("Invalid exclusion patterns: 50 at most, 200 characters each.");
-        if (j.Snapshot && string.IsNullOrEmpty(j.Dataset)) return Msg.F("Copying from a snapshot needs a share on a ZFS dataset.");
+        if (j.Snapshot && j.Sources.All(s => string.IsNullOrEmpty(s.Dataset))) return Msg.F("Copying from a snapshot needs a share on a ZFS dataset.");
         return null;
     }
 }
