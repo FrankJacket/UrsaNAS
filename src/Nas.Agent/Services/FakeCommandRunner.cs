@@ -54,6 +54,8 @@ public sealed class FakeCommandRunner : ICommandRunner
             case "pdbedit":
                 var i = _users.IndexOf(a[1]);
                 return i < 0 && a[1] != AclService.ServiceUser ? Fail() : Ok($"Unix username:  {a[1]}\nUser SID:       S-1-5-21-1-2-3-{1000 + Math.Max(i, 0) + (i < 0 ? 99 : 0)}\n");
+            case "testparm" when a.Contains("--parameter-name=vfs objects"):
+                return Ok("acl_xattr\n"); // en mode simulé, tous les partages ont les permissions avancées
             case "testparm" when a.Any(x => x.StartsWith("--section-name=", StringComparison.Ordinal)):
                 return Ok(ShareDir(a.First(x => x.StartsWith("--section-name=", StringComparison.Ordinal))["--section-name=".Length..]) + "\n");
             case "smbclient":

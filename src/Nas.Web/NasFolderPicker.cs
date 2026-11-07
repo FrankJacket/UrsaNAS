@@ -33,9 +33,12 @@ public class NasFolderPicker(IDialogService dialogs, AgentClient agent, Repo rep
             { x => x.Share, share }, { x => x.Message, L["Folder of the NAS"] }, { x => x.ButtonText, "Choose" },
         };
         var dialog = await dialogs.ShowAsync<FolderPickerDialog>(L["Choose a folder"], parameters, Small);
-        if (await dialog.Result is not { Canceled: false, Data: string relative }) return null;
+        if (await dialog.Result is not { Canceled: false, Data: FolderPick { Path: var relative } }) return null;
 
         var root = (await agent.GetShareRootAsync(share)).TrimEnd('/');
         return relative.Length == 0 ? root : $"{root}/{relative.Trim('/')}";
     }
 }
+
+/// <summary>Le choix fait dans la fenêtre de sélection de dossier : l'emplacement (partage ou disque monté) et le chemin dans celui-ci.</summary>
+public sealed record FolderPick(string Location, string Path);

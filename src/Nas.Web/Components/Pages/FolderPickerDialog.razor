@@ -8,6 +8,15 @@
             <MudAlert Severity="Severity.Error" Class="mb-3">@error</MudAlert>
         }
         <MudText Typo="Typo.body2" Class="mb-2">@Message</MudText>
+        @if (Locations.Count > 1)
+        {
+            <MudSelect T="string" Value="location" ValueChanged="SwitchLocation" Label="@L["Share or disk"]" Dense="true" Class="mb-2">
+                @foreach (var (value, label) in Locations)
+                {
+                    <MudSelectItem T="string" Value="@value">@label</MudSelectItem>
+                }
+            </MudSelect>
+        }
         <MudPaper Elevation="0" Class="pick">
             @if (root is not null)
             {
@@ -27,11 +36,11 @@
                 }
             }
         </MudPaper>
-        <MudText Typo="Typo.caption" Class="mt-2">@L["Destination"] : <code>/@Share@(selected is { Path.Length: > 0 } ? "/" + selected.Path : "")</code></MudText>
+        <MudText Typo="Typo.caption" Class="mt-2">@L["Destination"] : <code>@(NasOperations.IsDisk(location) ? location : "/" + location)@(selected is { Path.Length: > 0 } ? "/" + selected.Path : "")</code></MudText>
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="() => Dialog.Cancel()">@L["Cancel"]</MudButton>
-        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="() => Dialog.Close(DialogResult.Ok(selected!.Path))" Disabled="@(selected is null)">@L[ButtonText]</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="() => Dialog.Close(DialogResult.Ok(new FolderPick(location, selected!.Path)))" Disabled="@(selected is null)">@L[ButtonText]</MudButton>
     </DialogActions>
 </MudDialog>
 
@@ -47,10 +56,14 @@
 @code {
     [CascadingParameter] IMudDialogInstance Dialog { get; set; } = default!;
     [Parameter, EditorRequired] public string Share { get; set; } = "";
+    /// <summary>Emplacements au choix (partages et disques) : s'il y en a plusieurs, la fenêtre permet d'en changer. <c>Share</c> est celui du départ.</summary>
+    [Parameter] public List<(string Value, string Label)> Locations { get; set; } = [];
     [Parameter] public string Message { get; set; } = "";
     [Parameter] public string ButtonText { get; set; } = "Move";
     /// <summary>Dossier déplacé ou copié : ni lui ni ce qu'il contient ne peuvent servir de destination.</summary>
     [Parameter] public string Exclude { get; set; } = "";
+    /// <summary>L'emplacement où se trouve <c>Exclude</c> (vide = <c>Share</c>) : il n'est exclu que dans celui-là.</summary>
+    [Parameter] public string ExcludeLocation { get; set; } = "";
 
     sealed class Node
     {
@@ -62,12 +75,17 @@
 
     Node? root, selected;
     string? error;
+    string location = "";
 
-    bool IsBlocked(Node n) => Exclude.Length > 0 && (n.Path == Exclude || n.Path.StartsWith(Exclude + "/", StringComparison.Ordinal));
+    bool IsBlocked(Node n) => Exclude.Length > 0 && location == (ExcludeLocation.Length > 0 ? ExcludeLocation : Share) && (n.Path == Exclude || n.Path.StartsWith(Exclude + "/", StringComparison.Ordinal));
 
-    protected override async Task OnInitializedAsync()
+    protected override async Task OnInitializedAsync() => await SwitchLocation(Share);
+
+    async Task SwitchLocation(string value)
     {
-        root = new Node { Name = Share, Path = "" };
+        location = value;
+        error = null;
+        root = new Node { Name = NasOperations.IsDisk(value) ? value.TrimEnd('/')[(value.TrimEnd('/').LastIndexOf('/') + 1)..] : value, Path = "" };
         selected = root;
         await Load(root);
         root.Expanded = true;
@@ -90,7 +108,7 @@
         n.Loading = true;
         try
         {
-            var listing = await Agent.GetFoldersAsync(Share, n.Path);
+            var listing = await Agent.GetFoldersAsync(location, n.Path);
             n.Children = listing.Folders.Select(f => new Node { Name = f.Name, Path = n.Path.Length == 0 ? f.Name : n.Path + "/" + f.Name, Depth = n.Depth + 1 }).ToList();
             n.Loaded = true;
         }

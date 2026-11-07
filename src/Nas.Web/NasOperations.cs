@@ -215,25 +215,28 @@ public class NasOperations(AgentClient agent, Repo repo, IMailSender mail, Admin
     /// <summary>Crée un sous-dossier par Samba : il reçoit tout seul les permissions héritées de son parent.</summary>
     public async Task CreateFolderAsync(string share, string path, string name)
     {
-        if (Rules.ValidateShareName(share) is { } e1) throw new AgentException(e1);
+        if (!IsDisk(share) && Rules.ValidateShareName(share) is { } e1) throw new AgentException(e1);
         if (AclRules.ValidateFolderPath(path) is { } e2) throw new AgentException(e2);
         if (AclRules.ValidateNewFolderName(name) is { } e3) throw new AgentException(e3);
         await _gate.WaitAsync();
         try
         {
-            await RequireAclShareAsync(share);
+            await UsesAclAsync(share);
             await agent.CreateFolderAsync(new CreateFolderRequest(share, path, name));
             await repo.AuditAsync(await ActorAsync(), "Folder created", path.Length == 0 ? $"{share}/{name}" : $"{share}/{path}/{name}");
         }
         finally { _gate.Release(); }
     }
 
+    /// <summary>Un « partage » qui commence par « / » est un disque monté (USB…) : mêmes opérations, sans permissions.</summary>
+    public static bool IsDisk(string location) => location.Contains('/'); // un nom de partage n'a jamais de barre
+
     static string JoinPath(string parent, string name) => parent.Length == 0 ? name : parent + "/" + name;
     public static string ParentOf(string path) => path.LastIndexOf('/') is var i and >= 0 ? path[..i] : "";
 
     static void CheckFolderArgs(string share, string path, string destParent, string newName)
     {
-        if (Rules.ValidateShareName(share) is { } e1) throw new AgentException(e1);
+        if (!IsDisk(share) && Rules.ValidateShareName(share) is { } e1) throw new AgentException(e1);
         if (path.Length == 0) throw new AgentException(Msg.F("The share root has no parent folder."));
         if (AclRules.ValidateFolderPath(path) is { } e2) throw new AgentException(e2);
         if (AclRules.ValidateFolderPath(destParent) is { } e3) throw new AgentException(e3);
@@ -257,9 +260,14 @@ public class NasOperations(AgentClient agent, Repo repo, IMailSender mail, Admin
         await _gate.WaitAsync();
         try
         {
-            await RequireAclShareAsync(share);
+            var acl = await UsesAclAsync(share);
             var newPath = JoinPath(destParent, newName);
             await agent.MoveFolderAsync(new MoveFolderRequest(share, path, destParent, newName, isFile));
+            if (!acl)
+            {
+                await repo.AuditAsync(await ActorAsync(), destParent == ParentOf(path) ? "Folder renamed" : "Folder moved", $"{share}/{path} → {share}/{newPath}");
+                return;
+            }
             if (!isFile) await repo.RenameFolderStatesAsync(share, path, newPath);
             // Un fichier change de dossier : le dossier d'arrivée repropage ses droits (le fichier perd ceux de l'ancien parent).
             if (destParent != ParentOf(path))
@@ -276,9 +284,14 @@ public class NasOperations(AgentClient agent, Repo repo, IMailSender mail, Admin
         await _gate.WaitAsync();
         try
         {
-            await RequireAclShareAsync(share);
+            var acl = await UsesAclAsync(share);
             var newPath = JoinPath(destParent, newName);
             await agent.CopyFolderAsync(new CopyFolderRequest(share, path, destParent, newName, isFile));
+            if (!acl)
+            {
+                await repo.AuditAsync(await ActorAsync(), "Folder copied", $"{share}/{path} → {share}/{newPath}");
+                return;
+            }
             if (isFile)
             {
                 await ReapplyFolderAsync(share, destParent, await repo.GetFolderStatesAsync(share)); // le fichier reçoit l'héritage de sa destination
@@ -295,20 +308,53 @@ public class NasOperations(AgentClient agent, Repo repo, IMailSender mail, Admin
         finally { _gate.Release(); }
     }
 
+    /// <summary>
+    /// Copie ou déplace vers un autre partage ou un disque monté. Les permissions propres du dossier ne suivent pas : dans un partage à
+    /// permissions avancées, l'élément reçoit celles de sa destination ; en quittant un partage, ses règles propres sont oubliées.
+    /// </summary>
+    public async Task TransferFolderAsync(string share, string path, string destShare, string destParent, string newName, bool isFile, bool copy)
+    {
+        CheckFolderArgs(share, path, destParent, newName);
+        if (!IsDisk(destShare) && Rules.ValidateShareName(destShare) is { } e1) throw new AgentException(e1);
+        await _gate.WaitAsync();
+        try
+        {
+            var srcAcl = await UsesAclAsync(share);
+            var dstAcl = await UsesAclAsync(destShare);
+            var newPath = JoinPath(destParent, newName);
+            if (copy) await agent.CopyFolderAsync(new CopyFolderRequest(share, path, destParent, newName, isFile, destShare));
+            else await agent.MoveFolderAsync(new MoveFolderRequest(share, path, destParent, newName, isFile, destShare));
+            if (!copy && !isFile && srcAcl) await repo.DeleteFolderStatesAsync(share, path);
+            if (dstAcl) // le nouvel élément reçoit l'héritage de son nouveau parent
+                await ReapplyFolderAsync(destShare, isFile ? destParent : newPath, await repo.GetFolderStatesAsync(destShare));
+            await repo.AuditAsync(await ActorAsync(), copy ? "Folder copied" : "Folder moved", $"{share}/{path} → {destShare}/{newPath}");
+        }
+        finally { _gate.Release(); }
+    }
+
     public async Task DeleteFolderAsync(string share, string path, bool isFile = false)
     {
-        if (Rules.ValidateShareName(share) is { } e1) throw new AgentException(e1);
+        if (!IsDisk(share) && Rules.ValidateShareName(share) is { } e1) throw new AgentException(e1);
         if (path.Length == 0) throw new AgentException(Msg.F("The share root cannot be deleted."));
         if (AclRules.ValidateFolderPath(path) is { } e2) throw new AgentException(e2);
         await _gate.WaitAsync();
         try
         {
-            await RequireAclShareAsync(share);
+            var acl = await UsesAclAsync(share);
             await agent.DeleteFolderAsync(share, path, isFile);
-            if (!isFile) await repo.DeleteFolderStatesAsync(share, path);
+            if (!isFile && acl) await repo.DeleteFolderStatesAsync(share, path);
             await repo.AuditAsync(await ActorAsync(), "Folder deleted", $"{share}/{path}");
         }
         finally { _gate.Release(); }
+    }
+
+    /// <summary>Le lieu a-t-il des permissions avancées ? Faux pour un disque monté et pour un partage ordinaire (droits Unix de base) ; refuse un partage inconnu.</summary>
+    async Task<bool> UsesAclAsync(string location)
+    {
+        if (IsDisk(location)) return false;
+        var share = (await repo.GetSharesAsync()).FirstOrDefault(s => s.Name.Equals(location, StringComparison.OrdinalIgnoreCase))
+            ?? throw new AgentException(Msg.F("Share “{0}” not found.", location));
+        return share.Acl;
     }
 
     async Task RequireAclShareAsync(string share)

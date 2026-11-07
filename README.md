@@ -19,6 +19,7 @@ The menu is organised in groups. The Docker group only appears when Docker is in
 ### Sharing
 
 - **SMB (Samba)**: fine-grained per-folder permissions (ACLs, users and groups).
+- **File Manager**: browse, create, rename, move, copy and delete folders and files on all shares (the permissions editor is only for shares with advanced permissions), and also on **mounted disks** (USB…) under `/mnt` or `/media`. Disks and plain shares have no permission editor (plain shares use basic Unix rights, disks have none). Copy and move work between shares and disks; the item takes the permissions of its destination, and a share's own rules are not carried to another location.
 - **NFS**: per share, with a list of allowed clients.
 - **FTP (vsftpd)**: uses the NAS accounts, each user locked into their own folder. The service is enabled from the *Services* page.
 

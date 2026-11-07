@@ -51,6 +51,8 @@ public partial class Program
         builder.Services.AddSingleton<UserService>();
         builder.Services.AddSingleton<ProtocolService>();
         builder.Services.AddSingleton<BackupService>();
+        builder.Services.AddSingleton<DiskFilesService>();
+        builder.Services.AddSingleton<TransferService>();
         builder.Services.AddSingleton<DockerService>();
         builder.Services.AddSingleton<ShareService>();
         builder.Services.AddSingleton<GroupService>();
@@ -87,18 +89,19 @@ public partial class Program
         app.MapDelete("/groups/{name}", (string name, GroupService g, CancellationToken ct) =>
             Guard(async () => { await g.DeleteAsync(name, ct); return Results.NoContent(); }));
 
-        app.MapGet("/acl/folders", (string share, string? path, bool? files, AclService a, CancellationToken ct) =>
-            Read(async () => Results.Ok(await a.ListFoldersAsync(share, path ?? "", files == true, ct))));
+        // Un « partage » qui commence par « / » est un disque monté (USB…) : le gestionnaire de fichiers s'en occupe, sans ACL.
+        app.MapGet("/acl/folders", (string share, string? path, bool? files, AclService a, DiskFilesService d, CancellationToken ct) =>
+            Read(async () => Results.Ok(DiskFilesService.IsDisk(share) ? d.List(share, path ?? "", files == true) : await a.ListFoldersAsync(share, path ?? "", files == true, ct))));
         app.MapPut("/acl/folder", (SetFolderAclRequest r, AclService a, CancellationToken ct) =>
             Guard(async () => { await a.SetFolderAsync(r, ct); return Results.NoContent(); }));
-        app.MapPost("/acl/folder", (CreateFolderRequest r, AclService a, CancellationToken ct) =>
-            Guard(async () => { await a.CreateFolderAsync(r, ct); return Results.NoContent(); }));
-        app.MapPost("/acl/folder/move", (MoveFolderRequest r, AclService a, CancellationToken ct) =>
-            Guard(async () => { await a.MoveFolderAsync(r, ct); return Results.NoContent(); }));
-        app.MapPost("/acl/folder/copy", (CopyFolderRequest r, AclService a, CancellationToken ct) =>
-            Guard(async () => { await a.CopyFolderAsync(r, ct); return Results.NoContent(); }));
-        app.MapDelete("/acl/folder", (string share, string path, bool? file, AclService a, CancellationToken ct) =>
-            Guard(async () => { await a.DeleteFolderAsync(share, path, file == true, ct); return Results.NoContent(); }));
+        app.MapPost("/acl/folder", (CreateFolderRequest r, AclService a, DiskFilesService d, CancellationToken ct) =>
+            Guard(async () => { if (DiskFilesService.IsDisk(r.Share)) d.CreateFolder(r); else await a.CreateFolderAsync(r, ct); return Results.NoContent(); }));
+        app.MapPost("/acl/folder/move", (MoveFolderRequest r, AclService a, DiskFilesService d, TransferService t, CancellationToken ct) =>
+            Guard(async () => { if (r.DestShare is not null && r.DestShare != r.Share) await t.MoveAsync(r, ct); else if (DiskFilesService.IsDisk(r.Share)) d.Move(r); else await a.MoveFolderAsync(r, ct); return Results.NoContent(); }));
+        app.MapPost("/acl/folder/copy", (CopyFolderRequest r, AclService a, DiskFilesService d, TransferService t, CancellationToken ct) =>
+            Guard(async () => { if (r.DestShare is not null && r.DestShare != r.Share) await t.CopyAsync(r, ct); else if (DiskFilesService.IsDisk(r.Share)) d.Copy(r); else await a.CopyFolderAsync(r, ct); return Results.NoContent(); }));
+        app.MapDelete("/acl/folder", (string share, string path, bool? file, AclService a, DiskFilesService d, CancellationToken ct) =>
+            Guard(async () => { if (DiskFilesService.IsDisk(share)) d.Delete(share, path, file == true); else await a.DeleteFolderAsync(share, path, file == true, ct); return Results.NoContent(); }));
         app.MapPost("/acl/reset", (ResetAclRequest r, AclService a, CancellationToken ct) =>
             Guard(async () => { await a.ResetTreeAsync(r.Share, r.Path, ct); return Results.NoContent(); }));
 

@@ -160,7 +160,7 @@ public sealed class AclService(ICommandRunner run, UserService users, GroupServi
     }
 
     /// <summary>Dossier réel d'un chemin relatif ; refuse tout segment absent ou qui serait un lien symbolique.</summary>
-    static string Dir(string root, string rel, bool file = false)
+    internal static string Dir(string root, string rel, bool file = false)
     {
         var cur = root;
         var segs = rel.Split('/', StringSplitOptions.RemoveEmptyEntries);
@@ -208,16 +208,22 @@ public sealed class AclService(ICommandRunner run, UserService users, GroupServi
         try { if (r.IsFile) File.Copy(source, target); else CopyDir(new DirectoryInfo(source), target); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         { throw new OperationException(Msg.F("{0} failed ({1}): {2}", "Copying the folder", 1, e.Message)); }
-        // La copie appartient à l'agent : groupe et droits Unix de base comme partout, puis une ACL neutre
-        // (sinon Samba en fabriquerait une depuis les droits Unix) avant que l'héritage de la destination ne s'y applique.
+        await ReceiveCopyAsync(r.Share, (r.DestParent.Length == 0 ? "" : r.DestParent + "/") + r.NewName, target, ct);
+    }
+
+    /// <summary>
+    /// Ce qu'une copie venue d'ailleurs reçoit dans un partage : elle appartient à l'agent, donc groupe et droits Unix de base comme partout,
+    /// puis une ACL neutre (sinon Samba en fabriquerait une depuis les droits Unix) avant que l'héritage de la destination ne s'y applique.
+    /// </summary>
+    public async Task ReceiveCopyAsync(string share, string rel, string target, CancellationToken ct)
+    {
         Check(await run.RunAsync("chgrp", ["-R", UserService.Group, target], ct: ct), "Copying the folder");
         Check(await run.RunAsync("find", [target, "-type", "d", "-exec", "chmod", "2770", "{}", "+"], ct: ct), "Copying the folder");
         Check(await run.RunAsync("find", [target, "-type", "f", "-exec", "chmod", "0660", "{}", "+"], ct: ct), "Copying the folder");
-        var rel = (r.DestParent.Length == 0 ? "" : r.DestParent + "/") + r.NewName;
-        await ResetTreeAsync(r.Share, rel, ct);
+        if (await IsAclShareAsync(share, ct)) await ResetTreeAsync(share, rel, ct); // un partage ordinaire n'a pas d'ACL à réinitialiser
     }
 
-    static void CopyDir(DirectoryInfo from, string to)
+    internal static void CopyDir(DirectoryInfo from, string to)
     {
         Directory.CreateDirectory(to);
         foreach (var f in from.EnumerateFiles())
@@ -259,6 +265,7 @@ public sealed class AclService(ICommandRunner run, UserService users, GroupServi
     {
         var parent = Validate(req.Share, req.Path);
         if (AclRules.ValidateNewFolderName(req.Name) is { } e) throw new OperationException(e);
+        if (!await IsAclShareAsync(req.Share, ct)) { await CreatePlainFolderAsync(req, ct); return; }
         await EnsureServiceAccountAsync(ct);
         var target = (parent == "/" ? "" : parent) + "/" + req.Name;
         var r = await run.RunAsync("smbclient", [$"//127.0.0.1/{req.Share}", "-A", AuthFile, "-c", $"mkdir \"{target}\""], ct: ct);
@@ -267,6 +274,27 @@ public sealed class AclService(ICommandRunner run, UserService users, GroupServi
             throw new OperationException(text.Contains("COLLISION", StringComparison.Ordinal)
                 ? Msg.F("A folder named “{0}” already exists.", req.Name)
                 : Msg.F("{0} failed ({1}): {2}", "Creating the folder", r.ExitCode, text));
+    }
+
+    /// <summary>Le partage utilise-t-il les permissions avancées (ACL NT, <c>vfs objects = acl_xattr</c>) ? Sinon ses droits sont ceux d'Unix.</summary>
+    public async Task<bool> IsAclShareAsync(string share, CancellationToken ct)
+    {
+        var r = await run.RunAsync("testparm", ["-s", "--section-name=" + share, "--parameter-name=vfs objects"], ct: ct);
+        return r.ExitCode == 0 && r.StdOut.Contains("acl_xattr", StringComparison.Ordinal);
+    }
+
+    /// <summary>Partage ordinaire : pas de compte de service ni d'ACL, l'agent crée le dossier avec les droits Unix de base du NAS.</summary>
+    async Task CreatePlainFolderAsync(CreateFolderRequest req, CancellationToken ct)
+    {
+        var parent = Dir(await SharePathAsync(req.Share, ct), req.Path);
+        if (new DirectoryInfo(parent).EnumerateFileSystemInfos().Any(x => string.Equals(x.Name, req.Name, StringComparison.OrdinalIgnoreCase)))
+            throw new OperationException(Msg.F("A folder named “{0}” already exists.", req.Name));
+        var target = Path.Combine(parent, req.Name);
+        try { Directory.CreateDirectory(target); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        { throw new OperationException(Msg.F("{0} failed ({1}): {2}", "Creating the folder", 1, e.Message)); }
+        Check(await run.RunAsync("chgrp", [UserService.Group, target], ct: ct), "Creating the folder");
+        Check(await run.RunAsync("chmod", ["2770", target], ct: ct), "Creating the folder");
     }
 
     /// <summary>Dossier d'un partage tel que Samba le connaît (la configuration générée fait foi).</summary>
