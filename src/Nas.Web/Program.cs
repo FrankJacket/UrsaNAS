@@ -25,7 +25,6 @@ b.Services.AddScoped<Loc>();
 // Authentification : cookie, tout est protégé par défaut (seules /login et /setup sont publiques).
 b.Services.AddSingleton<AdminAccounts>();
 b.Services.AddSingleton<LoginThrottle>();
-b.Services.AddSingleton<SetupToken>();
 b.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(o =>
     {
@@ -100,14 +99,6 @@ b.Services.AddHttpClient<AgentClient>(c =>
 var app = b.Build();
 app.Services.GetRequiredService<Db>().Init();
 await app.Services.GetRequiredService<Repo>().AuditAsync("system", "Startup", "UrsaNAS interface started.");
-
-// Premier démarrage : aucun compte, donc un jeton d'installation est exigé pour créer le premier administrateur.
-if (await app.Services.GetRequiredService<AdminAccounts>().CountAsync() == 0)
-{
-    var setup = app.Services.GetRequiredService<SetupToken>();
-    var token = setup.Create(app.Services.GetRequiredService<Db>().DataDir);
-    app.Logger.LogWarning("No administrator yet. Open /setup and enter the setup token: {Token} (also in {File})", token, setup.FilePath);
-}
 
 // Langue : cookie choisi par l'utilisateur, sinon langue du navigateur, sinon anglais (aussi pour toute langue non prise en charge).
 var cultures = Translator.Supported.Select(c => new CultureInfo(c)).ToList();

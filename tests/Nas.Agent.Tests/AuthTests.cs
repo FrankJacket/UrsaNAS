@@ -152,37 +152,6 @@ public class LoginThrottleTests
     }
 }
 
-public class SetupTokenTests : IDisposable
-{
-    readonly string _dir = Path.Combine(Path.GetTempPath(), "ursanas-setup-" + Guid.NewGuid().ToString("N"));
-
-    public SetupTokenTests() => Directory.CreateDirectory(_dir);
-
-    [Fact]
-    public void Le_jeton_est_ecrit_verifie_puis_supprime()
-    {
-        var s = new SetupToken();
-        Assert.False(s.Active);
-        Assert.False(s.Verify("n'importe quoi"));
-
-        var token = s.Create(_dir);
-        Assert.True(File.Exists(Path.Combine(_dir, "setup-token.txt")));
-        Assert.Equal(24, token.Length);
-        Assert.True(s.Verify(token));
-        Assert.True(s.Verify($"  {token}\n"));
-        Assert.False(s.Verify(token[..^1] + "x"));
-        Assert.False(s.Verify(null));
-        Assert.False(s.Verify(""));
-
-        s.Clear();
-        Assert.False(s.Active);
-        Assert.False(s.Verify(token));
-        Assert.False(File.Exists(Path.Combine(_dir, "setup-token.txt")));
-    }
-
-    public void Dispose() { if (Directory.Exists(_dir)) Directory.Delete(_dir, true); }
-}
-
 public class LocalUrlTests
 {
     [Theory]
