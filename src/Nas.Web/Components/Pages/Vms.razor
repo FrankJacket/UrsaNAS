@@ -1,0 +1,133 @@
+@page "/vms"
+@inherits AutoRefreshBase
+@inject AgentClient Agent
+@inject VmOperations Ops
+@inject IDialogService Dialogs
+@inject ISnackbar Snack
+
+<MudText Typo="Typo.h4" Class="mb-4">@L["Virtual machines"]</MudText>
+
+@if (error is not null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">@error</MudAlert>
+}
+else if (status is { State: VmHostState.NotInstalled })
+{
+    <MudAlert Severity="Severity.Info" Class="mb-4">@L["Virtual machines are not available: libvirt is not installed on this NAS. To install it, run on the NAS:"]</MudAlert>
+    <MudPaper Class="pa-4 mb-4"><code>sudo apt install qemu-system-x86 libvirt-daemon-system libvirt-clients virtinst ovmf swtpm</code></MudPaper>
+    <MudText>@L["This page checks again every few seconds."]</MudText>
+}
+else if (status is { State: VmHostState.Stopped })
+{
+    <MudAlert Severity="Severity.Warning" Class="mb-4">@L["libvirt is installed but its service is not running. Start it on the NAS with:"]</MudAlert>
+    <MudPaper Class="pa-4 mb-4"><code>sudo systemctl enable --now libvirtd</code></MudPaper>
+}
+else if (status is not null)
+{
+    @if (!status.Kvm)
+    {
+        <MudAlert Severity="Severity.Warning" Class="mb-4">
+            @L["Hardware virtualization (KVM) is not available: machines would be emulated and extremely slow. Enable virtualization in the BIOS (or nested virtualization if the NAS is itself a virtual machine)."]
+        </MudAlert>
+    }
+    @if (status.Bridges.Count == 0)
+    {
+        <MudAlert Severity="Severity.Info" Class="mb-4">
+            @L["No network bridge was found on the NAS: machines will use the private libvirt network (NAT) and will not be visible on the local network. See the README to set up a bridge."]
+        </MudAlert>
+    }
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="Create" Class="mb-4">@L["Create a machine"]</MudButton>
+
+    <MudTable Items="machines" Hover="true" Dense="true" Loading="@(!loaded)">
+        <HeaderContent>
+            <MudTh>@L["Name"]</MudTh><MudTh>@L["Status"]</MudTh><MudTh>@L["Processors"]</MudTh><MudTh>@L["Memory"]</MudTh><MudTh>@L["Disk"]</MudTh><MudTh></MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd><b>@context.Name</b></MudTd>
+            <MudTd><MudChip T="string" Size="Size.Small" Color="@StateColor(context.State)">@context.State</MudChip></MudTd>
+            <MudTd>@context.Vcpus</MudTd>
+            <MudTd>@Fmt.Size(context.MemoryMb * 1024 * 1024, L.Lang)</MudTd>
+            <MudTd>@(context.DiskGb > 0 ? Fmt.Size(context.DiskGb * (1L << 30), L.Lang) : "")</MudTd>
+            <MudTd Style="text-align:right; white-space:nowrap">
+                @if (context.State == "running")
+                {
+                    <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Monitor" Href="@("/vms/console/" + Uri.EscapeDataString(context.Name))">@L["Console"]</MudButton>
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="busy" OnClick='() => Act(context, "shutdown", L["Shutdown requested."])'>@L["Shut down"]</MudButton>
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning" Disabled="busy" OnClick="() => PowerOff(context)">@L["Power off"]</MudButton>
+                }
+                else
+                {
+                    <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" Disabled="busy" OnClick='() => Act(context, "start", L["Machine started."])'>@L["Start"]</MudButton>
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" Disabled="busy" OnClick="() => Delete(context)">@L["Delete"]</MudButton>
+                }
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent><MudText Class="pa-4">@L["No virtual machines."]</MudText></NoRecordsContent>
+    </MudTable>
+}
+else
+{
+    <MudProgressCircular Indeterminate="true" />
+}
+
+@code {
+    VmStatus? status;
+    IReadOnlyList<VmInfo> machines = [];
+    string? error;
+    bool loaded, busy;
+
+    protected override TimeSpan Interval => TimeSpan.FromSeconds(5);
+
+    protected override async Task LoadAsync()
+    {
+        try
+        {
+            status = await Agent.GetVmStatusAsync();
+            machines = status.State == VmHostState.Ready ? (await Agent.GetVmsAsync()).OrderBy(m => m.Name, StringComparer.OrdinalIgnoreCase).ToList() : [];
+            error = null;
+        }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable: is the ursanas-agent service running?"]; }
+        loaded = true;
+    }
+
+    static Color StateColor(string s) => s switch { "running" => Color.Success, "shut off" => Color.Default, _ => Color.Warning };
+
+    async Task Act(VmInfo m, string action, string success)
+    {
+        busy = true;
+        try { await Ops.ActionAsync(m.Name, action); Snack.Add(success, Severity.Success); }
+        catch (AgentException e) { Snack.Add(L.Translate(e.Message), Severity.Error); }
+        catch (HttpRequestException) { Snack.Add(L["Agent unreachable."], Severity.Error); }
+        busy = false;
+        await LoadAsync();
+    }
+
+    async Task PowerOff(VmInfo m)
+    {
+        var ok = await Dialogs.ShowMessageBoxAsync(L["Power off {0}?", m.Name],
+            L["The machine is cut off immediately, like unplugging it: unsaved data in the machine is lost. Prefer “Shut down” when possible."],
+            yesText: L["Power off"], cancelText: L["Cancel"]);
+        if (ok == true) await Act(m, "stop", L["Machine powered off."]);
+    }
+
+    async Task Delete(VmInfo m)
+    {
+        var ok = await Dialogs.ShowMessageBoxAsync(L["Delete {0}?", m.Name],
+            L["The machine and its virtual disk are deleted for good. The installation image is kept."],
+            yesText: L["Delete"], cancelText: L["Cancel"]);
+        if (ok == true) await Act(m, "remove", L["{0} deleted.", m.Name]);
+    }
+
+    async Task Create()
+    {
+        var parameters = new DialogParameters<VmCreateDialog> { { x => x.Bridges, status?.Bridges ?? [] } };
+        var dialog = await Dialogs.ShowAsync<VmCreateDialog>(L["Create a machine"], parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true, BackdropClick = false });
+        if (await dialog.Result is { Canceled: false })
+        {
+            Snack.Add(L["Machine created: it boots on the installation image."], Severity.Success);
+            await LoadAsync();
+        }
+    }
+}

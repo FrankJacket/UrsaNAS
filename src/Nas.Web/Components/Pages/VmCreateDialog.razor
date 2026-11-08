@@ -1,0 +1,74 @@
+@inject AgentClient Agent
+@inject Repo Repo
+@inject VmOperations Ops
+
+<MudDialog>
+    <DialogContent>
+        @if (error is not null)
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-3">@error</MudAlert>
+        }
+        <MudTextField @bind-Value="name" Label="@L["Name"]" Immediate="true" Disabled="busy" AutoFocus="true" />
+        <MudStack Row="true" Class="mt-2">
+            <MudNumericField T="int" @bind-Value="vcpus" Label="@L["Processors"]" Min="1" Max="@Rules.MaxVmCpus" HideSpinButtons="true" Disabled="busy" />
+            <MudNumericField T="int" @bind-Value="memoryMb" Label="@L["Memory (MB)"]" Min="64" HideSpinButtons="true" Disabled="busy" />
+            <MudNumericField T="int" @bind-Value="diskGb" Label="@L["Disk (GB)"]" Min="1" HideSpinButtons="true" Disabled="busy" />
+        </MudStack>
+        <MudSelect T="string" @bind-Value="iso" Label="@L["Installation image (.iso)"]" Class="mt-2" Disabled="busy"
+                   HelperText="@(isos.Count == 0 && loaded ? L["No .iso file found in the shares or on the mounted disks. Copy one with the File Manager or Windows."] : null)">
+            @foreach (var i in isos)
+            {
+                <MudSelectItem T="string" Value="@Key(i)">@(Place(i.Location) + "/" + i.Path) (@Fmt.Size(i.SizeBytes, L.Lang))</MudSelectItem>
+            }
+        </MudSelect>
+        <MudSelect T="string" @bind-Value="bridge" Label="@L["Network"]" Class="mt-2" Disabled="busy">
+            <MudSelectItem T="string" Value="@("")">@L["Private libvirt network (NAT)"]</MudSelectItem>
+            @foreach (var b in Bridges)
+            {
+                <MudSelectItem T="string" Value="@b">@L["Bridge {0} (local network)", b]</MudSelectItem>
+            }
+        </MudSelect>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => Dialog.Cancel()" Disabled="busy">@L["Cancel"]</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save" Disabled="@(busy || name.Trim().Length == 0 || iso.Length == 0)">@(busy ? L["In progress…"] : L["Create"])</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance Dialog { get; set; } = default!;
+    [Parameter] public IReadOnlyList<string> Bridges { get; set; } = [];
+
+    string name = "", iso = "", bridge = "";
+    int vcpus = 2, memoryMb = 2048, diskGb = 32;
+    IReadOnlyList<IsoFile> isos = [];
+    string? error;
+    bool busy, loaded;
+
+    static string Key(IsoFile i) => i.Location + "\n" + i.Path;
+    static string Place(string location) => location.Contains('/') ? location : "/" + location;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Bridges.Count > 0) bridge = Bridges[0];
+        try { isos = await Agent.GetIsosAsync((await Repo.GetSharesAsync()).Select(s => s.Name)); }
+        catch (Exception e) when (e is AgentException or HttpRequestException) { error = e is AgentException a ? L.Translate(a.Message) : L["Agent unreachable."]; }
+        loaded = true;
+    }
+
+    async Task Save()
+    {
+        error = null;
+        busy = true;
+        try
+        {
+            var parts = iso.Split('\n', 2);
+            await Ops.CreateAsync(new CreateVmRequest(name.Trim(), vcpus, memoryMb, diskGb, parts[0], parts.Length > 1 ? parts[1] : "", bridge.Length == 0 ? null : bridge));
+            Dialog.Close(DialogResult.Ok(true));
+            return;
+        }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable."]; }
+        busy = false;
+    }
+}

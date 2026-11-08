@@ -13,6 +13,7 @@ The menu is organised in groups. The Docker group only appears when Docker is in
 | **Storage** | Disks, Pools, Datasets, Backups | Inspect disks, create ZFS pools and datasets, take snapshots, back up to a USB disk |
 | **Sharing** | Shares, Folders, Services | Share folders over SMB, NFS and FTP, set per-folder permissions (ACLs), start or stop services |
 | **Docker** | Containers, Images, Stacks, Volumes and networks | Run and monitor containers, manage images, Compose stacks, volumes and networks |
+| **Virtual machines** | Virtual machines | Create, run and control KVM machines, with a browser console |
 | **Accounts** | Users, Groups, Admins | NAS accounts, groups, web interface administrators |
 | **Monitoring** | Dashboard, Alerts, Audit log | Health overview, alerts (with email), log of actions |
 
@@ -61,6 +62,20 @@ sudo apt install docker.io docker-compose
 - **NAS folders as volumes**: a button inserts the real path of a share folder (picked in the file tree) into the container dialog or the compose file.
 
 Docker bypasses the share permissions (ACLs): a container that mounts a NAS folder reads and writes it with full rights. The interface says so where it matters. Names, images, ports, variables and volumes are validated before they reach the `docker` command, which is always run without a shell and never receives a value that could be read as an option.
+
+### Virtual machines
+
+UrsaNAS drives **libvirt/KVM** (it does not install it). The **Virtual machines** page checks that libvirt answers and explains what is missing:
+
+```
+sudo apt install qemu-system-x86 libvirt-daemon-system libvirt-clients virtinst ovmf swtpm
+```
+
+- **Create** a machine from an `.iso` found in a share or on a mounted disk: name, processors, memory, disk size (qcow2 file in `/var/lib/libvirt/images`) and network. UEFI is used when OVMF is installed.
+- **Start, shut down** (ACPI request), **power off** (immediate) and **delete** (the virtual disk goes, the `.iso` stays).
+- **Console** in the browser (noVNC). The screen of a machine only listens on `127.0.0.1`; the web interface relays it over an authenticated WebSocket. The viewer script is loaded from the jsDelivr CDN, so the browser needs internet access for the console.
+- **Network**: choose a host bridge (for example `br0`) to put a machine on the local network, or the private libvirt network (NAT). UrsaNAS never reconfigures the NAS network; create the bridge yourself (for example with NetworkManager or `/etc/network/interfaces`), because a mistake there cuts off remote access.
+- If `/dev/kvm` is missing, the page warns: machines would be emulated and extremely slow. Enable virtualization in the BIOS, or nested virtualization when the NAS is itself a virtual machine (`Set-VMProcessor -VMName <name> -ExposeVirtualizationExtensions $true` on Hyper-V).
 
 ## Architecture
 

@@ -132,6 +132,32 @@ public class AgentClient(HttpClient http)
     public async Task DestroySnapshotAsync(string fullName, CancellationToken ct = default) =>
         await EnsureOkAsync(await http.DeleteAsync($"zfs/snapshots?name={Uri.EscapeDataString(fullName)}", ct), ct);
 
+    // ---- Machines virtuelles
+    public async Task<VmStatus> GetVmStatusAsync(CancellationToken ct = default)
+    {
+        using var r = await http.GetAsync("vm/status", ct);
+        await EnsureOkAsync(r, ct);
+        return await r.Content.ReadFromJsonAsync<VmStatus>(ct) ?? new(VmHostState.NotInstalled, null, false, []);
+    }
+
+    public Task<IReadOnlyList<VmInfo>> GetVmsAsync(CancellationToken ct = default) => GetListAsync<VmInfo>("vm/machines", ct);
+
+    public Task<IReadOnlyList<IsoFile>> GetIsosAsync(IEnumerable<string> shares, CancellationToken ct = default) =>
+        GetListAsync<IsoFile>("vm/isos?shares=" + Uri.EscapeDataString(string.Join(',', shares)), ct);
+
+    public async Task CreateVmAsync(CreateVmRequest req, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PostAsJsonAsync("vm/machines", req, ct), ct);
+
+    public async Task VmActionAsync(string name, string action, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PostAsync($"vm/machines/{Uri.EscapeDataString(name)}/{action}", null, ct), ct);
+
+    public async Task<int> GetVmVncPortAsync(string name, CancellationToken ct = default)
+    {
+        using var r = await http.GetAsync($"vm/machines/{Uri.EscapeDataString(name)}/vnc", ct);
+        await EnsureOkAsync(r, ct);
+        return (await r.Content.ReadFromJsonAsync<VmPort>(ct))?.Port ?? throw new AgentException(Msg.F("The agent answered {0}.", 204));
+    }
+
     // ---- Docker
     public async Task<DockerStatus> GetDockerStatusAsync(CancellationToken ct = default)
     {

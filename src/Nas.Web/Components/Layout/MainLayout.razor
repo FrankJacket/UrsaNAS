@@ -46,6 +46,7 @@
                 <MudNavLink Href="/folders" Icon="@Icons.Material.Filled.Folder">@L["File Manager"]</MudNavLink>
                 <MudNavLink Href="/services" Icon="@Icons.Material.Filled.SettingsEthernet">@L["Services"]</MudNavLink>
             </MudNavGroup>
+            <MudNavLink Href="/vms" Icon="@Icons.Material.Filled.Computer">@L["Virtual machines"]</MudNavLink>
             @if (Docker.Ready)
             {
                 @* Le groupe n'existe que si Docker est installé et que son service répond ; sinon la page /docker explique quoi faire. *@

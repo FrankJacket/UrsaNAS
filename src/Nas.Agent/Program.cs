@@ -54,6 +54,7 @@ public partial class Program
         builder.Services.AddSingleton<DiskFilesService>();
         builder.Services.AddSingleton<TransferService>();
         builder.Services.AddSingleton<DockerService>();
+        builder.Services.AddSingleton<VmService>();
         builder.Services.AddSingleton<ShareService>();
         builder.Services.AddSingleton<GroupService>();
         builder.Services.AddSingleton<AclService>();
@@ -152,6 +153,17 @@ public partial class Program
             Read(async () => { await d.SaveStackAsync(name, r.Content, ct); return Results.NoContent(); }));
         app.MapPost("/docker/stacks/{name}/{action}", (string name, string action, DockerService d, CancellationToken ct) =>
             Read(async () => { await d.StackActionAsync(name, action, ct); return Results.NoContent(); }));
+        // Machines virtuelles (libvirt)
+        app.MapGet("/vm/status", async (VmService v, CancellationToken ct) => Results.Ok(await v.StatusAsync(ct)));
+        app.MapGet("/vm/machines", (VmService v, CancellationToken ct) => Read(async () => Results.Ok(await v.ListAsync(ct))));
+        app.MapPost("/vm/machines", (CreateVmRequest r, VmService v, CancellationToken ct) =>
+            Read(async () => { await v.CreateAsync(r, ct); return Results.NoContent(); }));
+        app.MapGet("/vm/isos", (string? shares, VmService v, CancellationToken ct) =>
+            Read(async () => Results.Ok(await v.IsosAsync((shares ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries), ct))));
+        app.MapGet("/vm/machines/{name}/vnc", (string name, VmService v, CancellationToken ct) =>
+            Read(async () => Results.Ok(new VmPort(await v.VncPortAsync(name, ct)))));
+        app.MapPost("/vm/machines/{name}/{action}", (string name, string action, VmService v, CancellationToken ct) =>
+            Read(async () => { await v.ActionAsync(name, action, ct); return Results.NoContent(); }));
         // Chemin réel d'un partage, pour proposer un dossier du NAS comme volume.
         app.MapGet("/shares/{name}/path", (string name, AclService a, CancellationToken ct) =>
             Read(async () => Results.Ok(new ShareRoot(name, await a.SharePathAsync(name, ct)))));

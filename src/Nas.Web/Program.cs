@@ -58,6 +58,7 @@ b.Services.AddHostedService(sp => sp.GetRequiredService<AlertMonitor>());
 b.Services.AddSingleton<DockerAvailability>();
 b.Services.AddHostedService<DockerMonitor>();
 b.Services.AddScoped<DockerOperations>();
+b.Services.AddScoped<VmOperations>();
 b.Services.AddScoped<NasFolderPicker>();
 
 b.Services.AddSingleton<BackupRepo>();
@@ -111,6 +112,7 @@ var localization = new RequestLocalizationOptions
 localization.RequestCultureProviders.Insert(0, new CookieRequestCultureProvider { CookieName = Loc.Cookie });
 app.UseRequestLocalization(localization);
 
+app.UseWebSockets();
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();
@@ -128,6 +130,7 @@ app.MapGet("/logout", async (HttpContext ctx) =>
     await ctx.SignOutAsync();
     return Results.Redirect("/login");
 }).AllowAnonymous();
+app.MapGet("/vm-console/{name}", (string name, HttpContext ctx, AgentClient agent) => VmConsoleProxy.HandleAsync(name, ctx, agent));
 app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
 app.Run();
 

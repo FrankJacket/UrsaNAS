@@ -1,0 +1,54 @@
+@page "/vms/console/{Name}"
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+
+<MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3">
+    <MudText Typo="Typo.h5">@L["Console"] · @Name</MudText>
+    <MudSpacer />
+    <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="CtrlAltDel">Ctrl+Alt+Del</MudButton>
+    <MudButton Variant="Variant.Outlined" Size="Size.Small" Href="/vms">@L["Back to the machines"]</MudButton>
+</MudStack>
+@if (state == "failed")
+{
+    <MudAlert Severity="Severity.Error" Class="mb-3">@L["The console could not connect: is the machine running? The console loads its viewer from the internet."]</MudAlert>
+}
+else if (state == "closed")
+{
+    <MudAlert Severity="Severity.Info" Class="mb-3">@L["The console is closed."]</MudAlert>
+}
+<div @ref="screen" style="width:100%; height:75vh; background:#000; border-radius:8px; overflow:hidden"></div>
+
+@code {
+    [Parameter] public string Name { get; set; } = "";
+    ElementReference screen;
+    IJSObjectReference? module;
+    string state = "connecting";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            module = await JS.InvokeAsync<IJSObjectReference>("import", "./vm-console.js");
+            var uri = new Uri(Nav.BaseUri);
+            var url = (uri.Scheme == "https" ? "wss://" : "ws://") + uri.Authority + "/vm-console/" + Uri.EscapeDataString(Name);
+            state = await module.InvokeAsync<string>("connect", screen, url);
+        }
+        catch (JSException) { state = "failed"; }
+        catch (JSDisconnectedException) { return; }
+        StateHasChanged();
+    }
+
+    async Task CtrlAltDel()
+    {
+        if (module is not null) await module.InvokeVoidAsync("sendCtrlAltDel");
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (module is null) return;
+        try { await module.InvokeVoidAsync("disconnect"); await module.DisposeAsync(); }
+        catch (Exception e) when (e is JSDisconnectedException or JSException or OperationCanceledException) { }
+    }
+}
