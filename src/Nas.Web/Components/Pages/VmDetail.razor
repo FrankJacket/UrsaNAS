@@ -1,0 +1,329 @@
+@page "/vms/{Name}"
+@inherits AutoRefreshBase
+@inject AgentClient Agent
+@inject VmOperations Ops
+@inject IDialogService Dialogs
+@inject ISnackbar Snack
+
+<MudStack Row="true" AlignItems="AlignItems.Center" Wrap="Wrap.Wrap" Class="mb-3">
+    <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" Href="/vms" />
+    <MudText Typo="Typo.h4">@Name</MudText>
+    @if (cfg is not null) { <MudChip T="string" Size="Size.Small" Color="@(Running ? Color.Success : Color.Default)">@cfg.State</MudChip> }
+    <MudSpacer />
+    @if (cfg is not null)
+    {
+        @if (Running)
+        {
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Monitor" Href="@("/vms/console/" + Uri.EscapeDataString(Name))">@L["Console"]</MudButton>
+            <MudButton Variant="Variant.Outlined" Disabled="busy" OnClick='() => Power("shutdown", L["Shutdown requested."])'>@L["Shut down"]</MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Warning" Disabled="busy" OnClick="PowerOff">@L["Power off"]</MudButton>
+        }
+        else
+        {
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="busy" OnClick='() => Power("start", L["Machine started."])'>@L["Start"]</MudButton>
+        }
+    }
+</MudStack>
+
+@if (error is not null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">@error</MudAlert>
+}
+@if (cfg is not null)
+{
+    @if (Running)
+    {
+        <MudAlert Severity="Severity.Info" Class="mb-4">@L["The hardware can only be changed while the machine is shut down."]</MudAlert>
+    }
+    <MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pt-4">
+        <MudTabPanel Text="@L["Summary"]">
+            <MudSimpleTable Dense="true" Hover="true">
+                <tbody>
+                    <tr><td>@L["Status"]</td><td>@cfg.State</td></tr>
+                    <tr><td>@L["Processors"]</td><td>@CpuText</td></tr>
+                    <tr><td>@L["Memory"]</td><td>@Fmt.Size(cfg.MemoryMb * 1024L * 1024, L.Lang)</td></tr>
+                    <tr><td>@L["BIOS"]</td><td>@BiosText(cfg.Bios)</td></tr>
+                    <tr><td>@L["Machine type"]</td><td>@MachineText(cfg.Machine)</td></tr>
+                    <tr><td>@L["Hard disks"]</td><td>@string.Join(", ", cfg.Disks.Where(d => !d.Cdrom).Select(d => $"{d.Target} ({d.SizeGb} {L["GB"]})"))</td></tr>
+                    <tr><td>@L["Network"]</td><td>@string.Join(", ", cfg.Nics.Select(n => $"{n.Model} → {NetText(n)}"))</td></tr>
+                    <tr><td>@L["Start at boot"]</td><td>@(cfg.Autostart ? L["Yes"] : L["No"])</td></tr>
+                    @if (cfg.Description.Length > 0) { <tr><td>@L["Description"]</td><td style="white-space:pre-wrap">@cfg.Description</td></tr> }
+                </tbody>
+            </MudSimpleTable>
+        </MudTabPanel>
+
+        <MudTabPanel Text="@L["Hardware"]">
+            <MudStack Row="true" Class="mb-2">
+                <MudText Typo="Typo.h6">@L["Processing"]</MudText>
+                <MudSpacer />
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Edit" Disabled="@(Running || busy)" OnClick="EditHardware">@L["Edit"]</MudButton>
+            </MudStack>
+            <MudSimpleTable Dense="true" Class="mb-6">
+                <tbody>
+                    <tr><td>@L["Memory"]</td><td>@Fmt.Size(cfg.MemoryMb * 1024L * 1024, L.Lang)</td></tr>
+                    <tr><td>@L["Processors"]</td><td>@CpuText</td></tr>
+                    <tr><td>@L["Processor type"]</td><td>@cfg.CpuType</td></tr>
+                    <tr><td>@L["BIOS"]</td><td>@BiosText(cfg.Bios)</td></tr>
+                    <tr><td>@L["Machine type"]</td><td>@MachineText(cfg.Machine)</td></tr>
+                    <tr><td>Secure Boot</td><td>@(cfg.SecureBoot ? L["Yes"] : L["No"])</td></tr>
+                    <tr><td>TPM</td><td>@(cfg.Tpm ? L["Yes"] : L["No"])</td></tr>
+                </tbody>
+            </MudSimpleTable>
+
+            <MudStack Row="true" Class="mb-2">
+                <MudText Typo="Typo.h6">@L["Disks and drives"]</MudText>
+                <MudSpacer />
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" Disabled="@(Running || busy)" OnClick="AddDisk">@L["Add a disk"]</MudButton>
+            </MudStack>
+            <MudSimpleTable Dense="true" Class="mb-6">
+                <thead><tr><th>@L["Device"]</th><th>@L["Bus"]</th><th>@L["Image or file"]</th><th>@L["Size"]</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var d in cfg.Disks)
+                    {
+                        var disk = d;
+                        <tr>
+                            <td><b>@disk.Target</b> <span class="mud-text-secondary">@(disk.Cdrom ? "CD/DVD" : L["Hard disk"])</span></td>
+                            <td>@disk.Bus</td>
+                            <td><code>@(disk.Source ?? L["(empty)"])</code></td>
+                            <td>@(disk.Cdrom ? "" : disk.SizeGb + " " + L["GB"])</td>
+                            <td style="text-align:right; white-space:nowrap">
+                                @if (disk.Cdrom)
+                                {
+                                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="@(Running || busy)" OnClick="() => ChangeCdrom(disk)">@L["Change image"]</MudButton>
+                                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="@(Running || busy || disk.Source is null)" OnClick="() => Eject(disk)">@L["Eject"]</MudButton>
+                                }
+                                else
+                                {
+                                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="@(Running || busy)" OnClick="() => Resize(disk)">@L["Resize"]</MudButton>
+                                }
+                                <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" Disabled="@(Running || busy)" OnClick="() => RemoveDisk(disk)">@L["Remove"]</MudButton>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+
+            <MudStack Row="true" Class="mb-2">
+                <MudText Typo="Typo.h6">@L["Network cards"]</MudText>
+                <MudSpacer />
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" Disabled="@(Running || busy)" OnClick="() => EditNic(null)">@L["Add a network card"]</MudButton>
+            </MudStack>
+            <MudSimpleTable Dense="true">
+                <thead><tr><th>MAC</th><th>@L["Model"]</th><th>@L["Network"]</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var n in cfg.Nics)
+                    {
+                        var nic = n;
+                        <tr>
+                            <td><code>@(nic.Mac.Length == 0 ? L["(assigned at save)"] : nic.Mac)</code></td>
+                            <td>@nic.Model</td>
+                            <td>@NetText(nic)</td>
+                            <td style="text-align:right; white-space:nowrap">
+                                <MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="@(Running || busy || nic.Mac.Length == 0)" OnClick="() => EditNic(nic)">@L["Edit"]</MudButton>
+                                <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" Disabled="@(Running || busy || nic.Mac.Length == 0)" OnClick="() => RemoveNic(nic)">@L["Remove"]</MudButton>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        </MudTabPanel>
+
+        <MudTabPanel Text="@L["Options"]">
+            <MudTextField @bind-Value="description" Label="@L["Description"]" Lines="3" MaxLength="500" Immediate="true" Disabled="@(Running || busy)" Class="mb-3" T="string" TextChanged="() => dirty = true" />
+            <MudCheckBox T="bool" Value="autostart" Label="@L["Start at boot"]" Disabled="@(Running || busy)" ValueChanged="(bool v) => { autostart = v; dirty = true; }" />
+            <MudText Typo="Typo.subtitle2" Class="mt-4 mb-1">@L["Boot order"]</MudText>
+            <MudText Typo="Typo.caption" Class="d-block mb-2">@L["Tick the devices to start from, and order them with the arrows."]</MudText>
+            <MudSimpleTable Dense="true" Class="mb-4">
+                <tbody>
+                    @foreach (var id in BootCandidates())
+                    {
+                        var dev = id;
+                        var pos = boot.IndexOf(dev);
+                        <tr>
+                            <td style="width:40px"><MudCheckBox T="bool" Value="@(pos >= 0)" Disabled="@(Running || busy)" ValueChanged="(bool v) => ToggleBoot(dev, v)" Size="Size.Small" /></td>
+                            <td>@(pos >= 0 ? pos + 1 + "." : "")</td>
+                            <td>@BootLabel(dev)</td>
+                            <td style="text-align:right">
+                                <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward" Size="Size.Small" Disabled="@(Running || busy || pos <= 0)" OnClick="() => MoveBoot(dev, -1)" />
+                                <MudIconButton Icon="@Icons.Material.Filled.ArrowDownward" Size="Size.Small" Disabled="@(Running || busy || pos < 0 || pos >= boot.Count - 1)" OnClick="() => MoveBoot(dev, 1)" />
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(Running || busy || !dirty)" OnClick="SaveOptions">@L["Save"]</MudButton>
+        </MudTabPanel>
+
+        <MudTabPanel Text="Snapshots">
+            @if (Running && cfg.Bios == "ovmf")
+            {
+                <MudAlert Severity="Severity.Info" Class="mb-3">@L["A machine started with UEFI can only be snapshotted while shut down."]</MudAlert>
+            }
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" Disabled="@(busy || (Running && cfg.Bios == "ovmf"))" OnClick="CreateSnapshot" Class="mb-3">@L["Take a snapshot"]</MudButton>
+            @if (snapshotError is not null)
+            {
+                <MudAlert Severity="Severity.Warning" Class="mb-3">@snapshotError</MudAlert>
+            }
+            <MudSimpleTable Dense="true" Hover="true">
+                <thead><tr><th>@L["Name"]</th><th>@L["Created"]</th><th>@L["Parent"]</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var s in snapshots)
+                    {
+                        var snap = s;
+                        <tr>
+                            <td><b>@snap.Name</b> @if (snap.Current) { <MudChip T="string" Size="Size.Small" Class="ml-1">@L["current"]</MudChip> }</td>
+                            <td>@snap.Created</td>
+                            <td>@(snap.Parent ?? "")</td>
+                            <td style="text-align:right; white-space:nowrap">
+                                <MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="busy" OnClick="() => Revert(snap)">@L["Restore"]</MudButton>
+                                <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" Disabled="busy" OnClick="() => DeleteSnapshot(snap)">@L["Delete"]</MudButton>
+                            </td>
+                        </tr>
+                    }
+                    @if (snapshots.Count == 0) { <tr><td colspan="4">@L["No snapshots."]</td></tr> }
+                </tbody>
+            </MudSimpleTable>
+        </MudTabPanel>
+    </MudTabs>
+}
+else if (error is null)
+{
+    <MudProgressCircular Indeterminate="true" />
+}
+
+@code {
+    [Parameter] public string Name { get; set; } = "";
+
+    VmConfig? cfg;
+    IReadOnlyList<VmSnapshot> snapshots = [];
+    string? error, snapshotError;
+    bool busy, dirty;
+    string description = "";
+    bool autostart;
+    List<string> boot = [];
+
+    bool Running => cfg is not null && cfg.State != "shut off";
+    string CpuText => cfg is null ? "" : $"{cfg.Sockets * cfg.Cores} ({cfg.Sockets} {L["socket(s)"]} × {cfg.Cores} {L["core(s)"]})";
+    string BiosText(string b) => b == "ovmf" ? "OVMF (UEFI)" : "SeaBIOS";
+    string MachineText(string m) => m == "q35" ? "q35" : "i440fx (pc)";
+    string NetText(VmNic n) => string.IsNullOrEmpty(n.Bridge) ? L["Private libvirt network (NAT)"] : L["Bridge {0} (local network)", n.Bridge];
+
+    protected override TimeSpan Interval => TimeSpan.FromSeconds(5);
+
+    protected override async Task LoadAsync()
+    {
+        try
+        {
+            cfg = await Agent.GetVmConfigAsync(Name);
+            error = null;
+            if (!dirty) { description = cfg.Description; autostart = cfg.Autostart; boot = cfg.BootOrder.ToList(); }
+            try { snapshots = await Agent.GetVmSnapshotsAsync(Name); snapshotError = null; }
+            catch (Exception e) when (e is AgentException or HttpRequestException) { snapshotError = e is AgentException a ? L.Translate(a.Message) : L["Agent unreachable."]; }
+        }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable: is the ursanas-agent service running?"]; }
+    }
+
+    async Task Run(Func<Task> action, string success)
+    {
+        busy = true;
+        try { await action(); Snack.Add(success, Severity.Success); dirty = false; }
+        catch (AgentException e) { Snack.Add(L.Translate(e.Message), Severity.Error); }
+        catch (HttpRequestException) { Snack.Add(L["Agent unreachable."], Severity.Error); }
+        busy = false;
+        await LoadAsync();
+    }
+
+    Task Power(string action, string success) => Run(() => Ops.ActionAsync(Name, action), success);
+
+    async Task PowerOff()
+    {
+        var ok = await Dialogs.ShowMessageBoxAsync(L["Power off {0}?", Name],
+            L["The machine is cut off immediately, like unplugging it: unsaved data in the machine is lost. Prefer “Shut down” when possible."],
+            yesText: L["Power off"], cancelText: L["Cancel"]);
+        if (ok == true) await Power("stop", L["Machine powered off."]);
+    }
+
+    async Task<bool> Show<T>(string title, DialogParameters<T> parameters) where T : Microsoft.AspNetCore.Components.IComponent
+    {
+        var dialog = await Dialogs.ShowAsync<T>(title, parameters, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true, BackdropClick = false });
+        var ok = await dialog.Result is { Canceled: false };
+        if (ok) { Snack.Add(L["Saved."], Severity.Success); dirty = false; await LoadAsync(); }
+        return ok;
+    }
+
+    Task EditHardware() => Show(L["Edit hardware"], new DialogParameters<VmHardwareDialog> { { x => x.Name, Name }, { x => x.Config, cfg! } });
+    Task AddDisk() => Show(L["Add a disk"], new DialogParameters<VmDiskDialog> { { x => x.Name, Name } });
+    Task Resize(VmDisk d) => Show(L["Resize {0}", d.Target], new DialogParameters<VmDiskDialog> { { x => x.Name, Name }, { x => x.Resize, d } });
+    Task ChangeCdrom(VmDisk d) => Show(L["Change image"], new DialogParameters<VmCdromDialog> { { x => x.Name, Name }, { x => x.Target, d.Target } });
+    Task EditNic(VmNic? n) => Show(n is null ? L["Add a network card"] : L["Edit"], new DialogParameters<VmNicDialog> { { x => x.Name, Name }, { x => x.Nic, n } });
+
+    Task Eject(VmDisk d) => Run(() => Ops.SetCdromAsync(Name, new SetVmCdromRequest(d.Target, null, null)), L["Image ejected."]);
+
+    async Task RemoveDisk(VmDisk d)
+    {
+        var ok = await Dialogs.ShowMessageBoxAsync(L["Remove {0}?", d.Target],
+            d.Cdrom ? L["The drive is removed from the machine. The image file is kept."] : L["The disk is removed from the machine and its file is deleted for good."],
+            yesText: L["Remove"], cancelText: L["Cancel"]);
+        if (ok == true) await Run(() => Ops.RemoveDiskAsync(Name, d.Target, deleteFile: !d.Cdrom), L["Removed."]);
+    }
+
+    async Task RemoveNic(VmNic n)
+    {
+        var ok = await Dialogs.ShowMessageBoxAsync(L["Remove the network card?"], n.Mac, yesText: L["Remove"], cancelText: L["Cancel"]);
+        if (ok == true) await Run(() => Ops.RemoveNicAsync(Name, n.Mac), L["Removed."]);
+    }
+
+    // ---- Options
+
+    IEnumerable<string> BootCandidates() =>
+        boot.Concat(cfg!.Disks.Select(d => d.Target).Concat(cfg.Nics.Where(n => n.Mac.Length > 0).Select(n => n.Mac)).Where(id => !boot.Contains(id)));
+
+    string BootLabel(string id) =>
+        cfg!.Disks.FirstOrDefault(d => d.Target == id) is { } d ? $"{d.Target} · {(d.Cdrom ? "CD/DVD" : L["Hard disk"])}"
+        : cfg.Nics.FirstOrDefault(n => n.Mac == id) is { } n ? $"{L["Network"]} · {n.Mac}" : id;
+
+    void ToggleBoot(string id, bool on)
+    {
+        if (on && !boot.Contains(id)) boot.Add(id);
+        if (!on) boot.Remove(id);
+        dirty = true;
+    }
+
+    void MoveBoot(string id, int by)
+    {
+        var i = boot.IndexOf(id);
+        var j = i + by;
+        if (i < 0 || j < 0 || j >= boot.Count) return;
+        (boot[i], boot[j]) = (boot[j], boot[i]);
+        dirty = true;
+    }
+
+    Task SaveOptions() => Run(() => Ops.SaveSettingsAsync(Name, new VmSettings(description, cfg!.Sockets, cfg.Cores, cfg.CpuType, cfg.MemoryMb, cfg.Bios, cfg.Machine, cfg.SecureBoot, cfg.Tpm, autostart, boot)), L["Saved."]);
+
+    // ---- Snapshots
+
+    async Task CreateSnapshot()
+    {
+        var parameters = new DialogParameters<DockerNameDialog>
+        {
+            { x => x.Label, L["Snapshot name"] }, { x => x.ButtonText, L["Take a snapshot"] },
+            { x => x.Action, (Func<string, Task>)(n => Ops.CreateSnapshotAsync(Name, n, null)) },
+        };
+        var dialog = await Dialogs.ShowAsync<DockerNameDialog>(L["Take a snapshot"], parameters, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true });
+        if (await dialog.Result is { Canceled: false }) { Snack.Add(L["Snapshot created."], Severity.Success); await LoadAsync(); }
+    }
+
+    async Task Revert(VmSnapshot s)
+    {
+        var ok = await Dialogs.ShowMessageBoxAsync(L["Restore {0}?", s.Name],
+            L["The machine goes back to this snapshot: everything done since is lost."], yesText: L["Restore"], cancelText: L["Cancel"]);
+        if (ok == true) await Run(() => Ops.SnapshotActionAsync(Name, s.Name, "revert"), L["Snapshot restored."]);
+    }
+
+    async Task DeleteSnapshot(VmSnapshot s)
+    {
+        var ok = await Dialogs.ShowMessageBoxAsync(L["Delete {0}?", s.Name], L["The snapshot is deleted; the machine itself is not changed."], yesText: L["Delete"], cancelText: L["Cancel"]);
+        if (ok == true) await Run(() => Ops.SnapshotActionAsync(Name, s.Name, "delete"), L["Snapshot deleted."]);
+    }
+}

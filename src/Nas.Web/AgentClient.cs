@@ -151,6 +151,47 @@ public class AgentClient(HttpClient http)
     public async Task VmActionAsync(string name, string action, CancellationToken ct = default) =>
         await EnsureOkAsync(await http.PostAsync($"vm/machines/{Uri.EscapeDataString(name)}/{action}", null, ct), ct);
 
+    public async Task<VmConfig> GetVmConfigAsync(string name, CancellationToken ct = default)
+    {
+        using var r = await http.GetAsync($"vm/machines/{Uri.EscapeDataString(name)}/config", ct);
+        await EnsureOkAsync(r, ct);
+        return await r.Content.ReadFromJsonAsync<VmConfig>(ct) ?? throw new AgentException(Msg.F("The agent answered {0}.", 204));
+    }
+
+    string VmUrl(string name, string tail) => $"vm/machines/{Uri.EscapeDataString(name)}/{tail}";
+
+    public async Task SaveVmSettingsAsync(string name, VmSettings s, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PutAsJsonAsync(VmUrl(name, "config"), s, ct), ct);
+
+    public async Task AddVmDiskAsync(string name, AddVmDiskRequest r, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PostAsJsonAsync(VmUrl(name, "disks"), r, ct), ct);
+
+    public async Task RemoveVmDiskAsync(string name, string target, bool deleteFile, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.DeleteAsync(VmUrl(name, $"disks?target={Uri.EscapeDataString(target)}&deleteFile={deleteFile.ToString().ToLowerInvariant()}"), ct), ct);
+
+    public async Task ResizeVmDiskAsync(string name, ResizeVmDiskRequest r, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PostAsJsonAsync(VmUrl(name, "disks/resize"), r, ct), ct);
+
+    public async Task SetVmCdromAsync(string name, SetVmCdromRequest r, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PutAsJsonAsync(VmUrl(name, "cdrom"), r, ct), ct);
+
+    public async Task AddVmNicAsync(string name, AddVmNicRequest r, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PostAsJsonAsync(VmUrl(name, "nics"), r, ct), ct);
+
+    public async Task UpdateVmNicAsync(string name, UpdateVmNicRequest r, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PutAsJsonAsync(VmUrl(name, "nics"), r, ct), ct);
+
+    public async Task RemoveVmNicAsync(string name, string mac, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.DeleteAsync(VmUrl(name, $"nics?mac={Uri.EscapeDataString(mac)}"), ct), ct);
+
+    public Task<IReadOnlyList<VmSnapshot>> GetVmSnapshotsAsync(string name, CancellationToken ct = default) => GetListAsync<VmSnapshot>(VmUrl(name, "snapshots"), ct);
+
+    public async Task CreateVmSnapshotAsync(string name, CreateVmSnapshotRequest r, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PostAsJsonAsync(VmUrl(name, "snapshots"), r, ct), ct);
+
+    public async Task VmSnapshotActionAsync(string name, string snapshot, string action, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PostAsync(VmUrl(name, $"snapshots/{Uri.EscapeDataString(snapshot)}/{action}"), null, ct), ct);
+
     public async Task<int> GetVmVncPortAsync(string name, CancellationToken ct = default)
     {
         using var r = await http.GetAsync($"vm/machines/{Uri.EscapeDataString(name)}/vnc", ct);

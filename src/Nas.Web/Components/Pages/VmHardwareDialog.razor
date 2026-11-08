@@ -1,0 +1,68 @@
+@inject VmOperations Ops
+
+<MudDialog>
+    <DialogContent>
+        @if (error is not null)
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-3">@error</MudAlert>
+        }
+        <MudNumericField T="int" @bind-Value="memoryMb" Label="@L["Memory (MB)"]" Min="64" HideSpinButtons="true" Disabled="busy" />
+        <MudStack Row="true" Class="mt-2">
+            <MudNumericField T="int" @bind-Value="sockets" Label="@L["Sockets"]" Min="1" Max="8" HideSpinButtons="true" Disabled="busy" />
+            <MudNumericField T="int" @bind-Value="cores" Label="@L["Cores"]" Min="1" Max="@Rules.MaxVmCpus" HideSpinButtons="true" Disabled="busy" />
+        </MudStack>
+        <MudText Typo="Typo.caption">@L["Total: {0} processors", sockets * cores]</MudText>
+        <MudSelect T="string" @bind-Value="cpuType" Label="@L["Processor type"]" Class="mt-2" Disabled="busy" HelperText="@L["host-passthrough gives the machine the exact processor of the NAS (best performance)."]">
+            @foreach (var c in Rules.VmCpuTypes) { <MudSelectItem T="string" Value="@c">@c</MudSelectItem> }
+        </MudSelect>
+        <MudSelect T="string" @bind-Value="bios" Label="@L["BIOS"]" Class="mt-2" Disabled="busy">
+            <MudSelectItem T="string" Value="@("seabios")">SeaBIOS</MudSelectItem>
+            <MudSelectItem T="string" Value="@("ovmf")">OVMF (UEFI)</MudSelectItem>
+        </MudSelect>
+        <MudCheckBox T="bool" @bind-Value="secureBoot" Label="@L["Secure Boot"]" Disabled="@(busy || bios != "ovmf" || machine != "q35")"
+                     />
+        <MudText Typo="Typo.caption" Class="d-block mb-2">@L["Secure Boot only starts signed systems (Debian, Ubuntu, Windows…). Turn it off for systems that do not support it, such as Alpine or some rescue tools."]</MudText>
+        <MudSelect T="string" @bind-Value="machine" Label="@L["Machine type"]" Class="mt-2" Disabled="busy"
+                   HelperText="@(machine != Config.Machine ? L["Changing the machine type can make an installed system lose its devices: it is meant for new machines."] : null)">
+            <MudSelectItem T="string" Value="@("q35")">q35</MudSelectItem>
+            <MudSelectItem T="string" Value="@("pc")">i440fx (pc)</MudSelectItem>
+        </MudSelect>
+        <MudCheckBox T="bool" @bind-Value="tpm" Label="@L["TPM 2.0 (needed by Windows 11)"]" Disabled="busy" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => Dialog.Cancel()" Disabled="busy">@L["Cancel"]</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save" Disabled="busy">@(busy ? L["In progress…"] : L["Save"])</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance Dialog { get; set; } = default!;
+    [Parameter, EditorRequired] public string Name { get; set; } = "";
+    [Parameter, EditorRequired] public VmConfig Config { get; set; } = default!;
+
+    int memoryMb, sockets, cores;
+    string cpuType = "", bios = "", machine = "";
+    bool tpm, secureBoot, busy;
+    string? error;
+
+    protected override void OnInitialized()
+    {
+        (memoryMb, sockets, cores, cpuType, bios, machine, tpm, secureBoot) = (Config.MemoryMb, Config.Sockets, Config.Cores, Config.CpuType, Config.Bios, Config.Machine, Config.Tpm, Config.SecureBoot);
+        if (!Rules.VmCpuTypes.Contains(cpuType)) cpuType = "qemu64";
+    }
+
+    async Task Save()
+    {
+        error = null;
+        busy = true;
+        try
+        {
+            await Ops.SaveSettingsAsync(Name, new VmSettings(Config.Description, sockets, cores, cpuType, memoryMb, bios, machine, secureBoot && bios == "ovmf" && machine == "q35", tpm, Config.Autostart, Config.BootOrder));
+            Dialog.Close(DialogResult.Ok(true));
+            return;
+        }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable."]; }
+        busy = false;
+    }
+}

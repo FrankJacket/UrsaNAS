@@ -25,6 +25,18 @@ public static class VmParser
         return long.TryParse(n, NumberStyles.None, CultureInfo.InvariantCulture, out var v) ? v : 0;
     }
 
+    /// <summary>Date de création d'un snapshot (heure locale du NAS) lue dans <c>snapshot-dumpxml</c> ; vide si absente.</summary>
+    public static string SnapshotCreated(string xml)
+    {
+        try
+        {
+            var t = System.Xml.Linq.XDocument.Parse(xml).Root?.Element("creationTime")?.Value;
+            return long.TryParse(t, NumberStyles.None, CultureInfo.InvariantCulture, out var s)
+                ? DateTimeOffset.FromUnixTimeSeconds(s).ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture) : "";
+        }
+        catch (System.Xml.XmlException) { return ""; }
+    }
+
     /// <summary>« :0 » (sortie de <c>virsh vncdisplay</c>) → port 5900.</summary>
     public static int? VncPort(string text)
     {
@@ -45,7 +57,7 @@ public static class VmParser
 /// Machines virtuelles par libvirt (commande <c>virsh</c> et <c>virt-install</c>, sans shell). Les disques sont des fichiers qcow2 dans
 /// <c>Vm:DiskDir</c>. Rien de ce que l'utilisateur fournit n'atteint une commande sans validation, et aucun nom ne commence par « - ».
 /// </summary>
-public sealed class VmService(ICommandRunner run, AclService acl, BackupService backup, IConfiguration cfg)
+public sealed partial class VmService(ICommandRunner run, AclService acl, BackupService backup, IConfiguration cfg)
 {
     readonly SemaphoreSlim _gate = new(1, 1);
 
@@ -149,7 +161,7 @@ public sealed class VmService(ICommandRunner run, AclService acl, BackupService 
                 case "remove":
                     var state = VmParser.Fields(await Ok(["dominfo", name], "Reading the machine", ct)).GetValueOrDefault("State");
                     if (state == "running") throw new OperationException(Msg.F("Stop the machine before deleting it."));
-                    await Ok(["undefine", "--nvram", name], "Deleting the machine", ct);
+                    await Ok(["undefine", "--nvram", "--snapshots-metadata", name], "Deleting the machine", ct);
                     try { File.Delete(DiskFile(name)); File.Delete(IsoCopy(name)); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { } // le disque que nous avons créé
                     break;
                 default: throw new OperationException(Msg.F("Unknown action."));
@@ -235,7 +247,16 @@ public sealed class VmService(ICommandRunner run, AclService acl, BackupService 
                 "--osinfo", "detect=on,require=off",
                 "--noautoconsole",
             };
-            if (Directory.Exists(cfg["Vm:OvmfDir"] ?? "/usr/share/OVMF")) args.AddRange(["--boot", "uefi"]);
+            var ovmf = Directory.Exists(cfg["Vm:OvmfDir"] ?? "/usr/share/OVMF");
+            var uefi = r.Bios == "ovmf" || (r.Bios.Length == 0 && ovmf);
+            if (uefi && !ovmf) throw new OperationException(Msg.F("UEFI firmware (OVMF) is not installed on the NAS."));
+            if (uefi)
+            {
+                // Secure Boot refuse les systèmes non signés (Alpine, outils de dépannage…) : il est donc désactivé sauf demande contraire.
+                var on = r.SecureBoot ? "yes" : "no";
+                args.AddRange(["--machine", "q35", "--boot", $"uefi,firmware.feature0.name=enrolled-keys,firmware.feature0.enabled={on},firmware.feature1.name=secure-boot,firmware.feature1.enabled={on}"]);
+                if (r.SecureBoot) args.AddRange(["--features", "smm.state=on"]);
+            }
             if (string.IsNullOrEmpty(r.Bridge)) await EnsureDefaultNetworkAsync(ct);
             try { await Ok(args, "Creating the machine", ct, Install); }
             catch { try { File.Delete(isoCopy); File.Delete(disk); } catch (IOException) { } throw; }

@@ -160,6 +160,28 @@ public partial class Program
             Read(async () => { await v.CreateAsync(r, ct); return Results.NoContent(); }));
         app.MapGet("/vm/isos", (string? shares, VmService v, CancellationToken ct) =>
             Read(async () => Results.Ok(await v.IsosAsync((shares ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries), ct))));
+        app.MapGet("/vm/machines/{name}/config", (string name, VmService v, CancellationToken ct) => Read(async () => Results.Ok(await v.ConfigAsync(name, ct))));
+        app.MapPut("/vm/machines/{name}/config", (string name, VmSettings s, VmService v, CancellationToken ct) =>
+            Read(async () => { await v.SaveSettingsAsync(name, s, ct); return Results.NoContent(); }));
+        app.MapPost("/vm/machines/{name}/disks", (string name, AddVmDiskRequest r, VmService v, CancellationToken ct) =>
+            Read(async () => { await v.AddDiskAsync(name, r, ct); return Results.NoContent(); }));
+        app.MapDelete("/vm/machines/{name}/disks", (string name, string target, bool? deleteFile, VmService v, CancellationToken ct) =>
+            Read(async () => { await v.RemoveDiskAsync(name, target, deleteFile == true, ct); return Results.NoContent(); }));
+        app.MapPost("/vm/machines/{name}/disks/resize", (string name, ResizeVmDiskRequest r, VmService v, CancellationToken ct) =>
+            Read(async () => { await v.ResizeDiskAsync(name, r, ct); return Results.NoContent(); }));
+        app.MapPut("/vm/machines/{name}/cdrom", (string name, SetVmCdromRequest r, VmService v, CancellationToken ct) =>
+            Read(async () => { await v.SetCdromAsync(name, r, ct); return Results.NoContent(); }));
+        app.MapPost("/vm/machines/{name}/nics", (string name, AddVmNicRequest r, VmService v, CancellationToken ct) =>
+            Read(async () => { await v.AddNicAsync(name, r, ct); return Results.NoContent(); }));
+        app.MapPut("/vm/machines/{name}/nics", (string name, UpdateVmNicRequest r, VmService v, CancellationToken ct) =>
+            Read(async () => { await v.UpdateNicAsync(name, r, ct); return Results.NoContent(); }));
+        app.MapDelete("/vm/machines/{name}/nics", (string name, string mac, VmService v, CancellationToken ct) =>
+            Read(async () => { await v.RemoveNicAsync(name, mac, ct); return Results.NoContent(); }));
+        app.MapGet("/vm/machines/{name}/snapshots", (string name, VmService v, CancellationToken ct) => Read(async () => Results.Ok(await v.SnapshotsAsync(name, ct))));
+        app.MapPost("/vm/machines/{name}/snapshots", (string name, CreateVmSnapshotRequest r, VmService v, CancellationToken ct) =>
+            Read(async () => { await v.CreateSnapshotAsync(name, r, ct); return Results.NoContent(); }));
+        app.MapPost("/vm/machines/{name}/snapshots/{snapshot}/{action}", (string name, string snapshot, string action, VmService v, CancellationToken ct) =>
+            Read(async () => { await v.SnapshotActionAsync(name, snapshot, action, ct); return Results.NoContent(); }));
         app.MapGet("/vm/machines/{name}/vnc", (string name, VmService v, CancellationToken ct) =>
             Read(async () => Results.Ok(new VmPort(await v.VncPortAsync(name, ct)))));
         app.MapPost("/vm/machines/{name}/{action}", (string name, string action, VmService v, CancellationToken ct) =>

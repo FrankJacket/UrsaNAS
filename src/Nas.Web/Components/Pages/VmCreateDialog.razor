@@ -21,6 +21,12 @@
                 <MudSelectItem T="string" Value="@Key(i)">@(Place(i.Location) + "/" + i.Path) (@Fmt.Size(i.SizeBytes, L.Lang))</MudSelectItem>
             }
         </MudSelect>
+        <MudSelect T="string" @bind-Value="bios" Label="@L["BIOS"]" Class="mt-2" Disabled="busy">
+            <MudSelectItem T="string" Value="@("ovmf")">OVMF (UEFI)</MudSelectItem>
+            <MudSelectItem T="string" Value="@("seabios")">SeaBIOS</MudSelectItem>
+        </MudSelect>
+        <MudCheckBox T="bool" @bind-Value="secureBoot" Label="@L["Secure Boot"]" Disabled="@(busy || bios != "ovmf")" />
+        <MudText Typo="Typo.caption" Class="d-block">@L["Secure Boot only starts signed systems (Debian, Ubuntu, Windows…). Turn it off for systems that do not support it, such as Alpine or some rescue tools."]</MudText>
         <MudSelect T="string" @bind-Value="bridge" Label="@L["Network"]" Class="mt-2" Disabled="busy">
             <MudSelectItem T="string" Value="@("")">@L["Private libvirt network (NAT)"]</MudSelectItem>
             @foreach (var b in Bridges)
@@ -39,7 +45,8 @@
     [CascadingParameter] IMudDialogInstance Dialog { get; set; } = default!;
     [Parameter] public IReadOnlyList<string> Bridges { get; set; } = [];
 
-    string name = "", iso = "", bridge = "";
+    string name = "", iso = "", bridge = "", bios = "ovmf";
+    bool secureBoot;
     int vcpus = 2, memoryMb = 2048, diskGb = 32;
     IReadOnlyList<IsoFile> isos = [];
     string? error;
@@ -63,7 +70,7 @@
         try
         {
             var parts = iso.Split('\n', 2);
-            await Ops.CreateAsync(new CreateVmRequest(name.Trim(), vcpus, memoryMb, diskGb, parts[0], parts.Length > 1 ? parts[1] : "", bridge.Length == 0 ? null : bridge));
+            await Ops.CreateAsync(new CreateVmRequest(name.Trim(), vcpus, memoryMb, diskGb, parts[0], parts.Length > 1 ? parts[1] : "", bridge.Length == 0 ? null : bridge, bios, secureBoot && bios == "ovmf"));
             Dialog.Close(DialogResult.Ok(true));
             return;
         }

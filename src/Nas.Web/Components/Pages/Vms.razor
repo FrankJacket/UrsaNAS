@@ -43,7 +43,7 @@ else if (status is not null)
             <MudTh>@L["Name"]</MudTh><MudTh>@L["Status"]</MudTh><MudTh>@L["Processors"]</MudTh><MudTh>@L["Memory"]</MudTh><MudTh>@L["Disk"]</MudTh><MudTh></MudTh>
         </HeaderContent>
         <RowTemplate>
-            <MudTd><b>@context.Name</b></MudTd>
+            <MudTd><MudLink Href="@("/vms/" + Uri.EscapeDataString(context.Name))"><b>@context.Name</b></MudLink></MudTd>
             <MudTd><MudChip T="string" Size="Size.Small" Color="@StateColor(context.State)">@context.State</MudChip></MudTd>
             <MudTd>@context.Vcpus</MudTd>
             <MudTd>@Fmt.Size(context.MemoryMb * 1024 * 1024, L.Lang)</MudTd>
