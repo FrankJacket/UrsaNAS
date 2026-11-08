@@ -18,7 +18,7 @@ public sealed record IsoFile(string Location, string Path, long SizeBytes);
 /// <c>IsoLocation</c>/<c>IsoPath</c> : partage (ou disque monté) et chemin du fichier .iso à brancher. <c>Bridge</c> : pont réseau de la
 /// machine ; vide = réseau « default » de libvirt (NAT).
 /// </summary>
-public sealed record CreateVmRequest(string Name, int Vcpus, int MemoryMb, int DiskGb, string IsoLocation, string IsoPath, string? Bridge, string Bios = "", bool SecureBoot = false);
+public sealed record CreateVmRequest(string Name, int Vcpus, int MemoryMb, int DiskGb, string IsoLocation, string IsoPath, string? Bridge, string Bios = "", bool SecureBoot = false, string? StorageDir = null);
 
 public sealed record VmPort(int Port);
 
@@ -51,6 +51,7 @@ public static partial class Rules
         if (!r.IsoPath.EndsWith(".iso", StringComparison.OrdinalIgnoreCase)) return Msg.F("The installation image must be an .iso file.");
         if (AclRules.ValidateFolderPath(r.IsoPath) is { } e2) return e2;
         if (r.Bios is not ("" or "seabios" or "ovmf") || (r.SecureBoot && r.Bios == "seabios")) return Msg.F("Unknown setting.");
+        if (r.StorageDir is not null && ValidateShareDisk(r.StorageDir) is { } e3) return e3;
         return ValidateBridge(r.Bridge);
     }
 }

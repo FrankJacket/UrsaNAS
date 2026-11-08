@@ -1,0 +1,53 @@
+@page "/vms/window/{Name}"
+@layout ConsoleLayout
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+
+<PageTitle>@L["Console"] · @Name</PageTitle>
+<div @ref="screen" style="position:fixed; inset:0; background:#000; overflow:hidden"></div>
+<div style="position:fixed; top:8px; right:8px; z-index:10; display:flex; gap:6px; opacity:.55">
+    <MudButton Variant="Variant.Filled" Size="Size.Small" OnClick="CtrlAltDel">Ctrl+Alt+Del</MudButton>
+</div>
+@if (state == "failed")
+{
+    <MudAlert Severity="Severity.Error" Style="position:fixed; top:48px; left:8px; right:8px; z-index:10">@L["The console could not connect: is the machine running? The console loads its viewer from the internet."]</MudAlert>
+}
+else if (state == "closed")
+{
+    <MudAlert Severity="Severity.Info" Style="position:fixed; top:48px; left:8px; right:8px; z-index:10">@L["The console is closed."]</MudAlert>
+}
+
+@code {
+    [Parameter] public string Name { get; set; } = "";
+    ElementReference screen;
+    IJSObjectReference? module;
+    string state = "connecting";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            module = await JS.InvokeAsync<IJSObjectReference>("import", "./vm-console.js");
+            var uri = new Uri(Nav.BaseUri);
+            var url = (uri.Scheme == "https" ? "wss://" : "ws://") + uri.Authority + "/vm-console/" + Uri.EscapeDataString(Name);
+            state = await module.InvokeAsync<string>("connect", screen, url);
+        }
+        catch (JSException) { state = "failed"; }
+        catch (JSDisconnectedException) { return; }
+        StateHasChanged();
+    }
+
+    async Task CtrlAltDel()
+    {
+        if (module is not null) await module.InvokeVoidAsync("sendCtrlAltDel");
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (module is null) return;
+        try { await module.InvokeVoidAsync("disconnect"); await module.DisposeAsync(); }
+        catch (Exception e) when (e is JSDisconnectedException or JSException or OperationCanceledException) { }
+    }
+}

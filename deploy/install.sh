@@ -8,7 +8,8 @@ getent passwd ursanas >/dev/null || \
   useradd --system --gid ursanas --home-dir /var/lib/ursanas --shell /usr/sbin/nologin ursanas
 
 # NFS et FTP : paquets installés une fois, services laissés arrêtés jusqu'à leur activation dans l'interface (page Services).
-for entry in nfs-kernel-server:nfs-server vsftpd:vsftpd openssl:; do
+# btrfs-progs et exfatprogs : formatage des disques depuis la page Disques (Btrfs, exFAT).
+for entry in nfs-kernel-server:nfs-server vsftpd:vsftpd openssl: btrfs-progs: exfatprogs:; do
   pkg="${entry%%:*}"; unit="${entry#*:}"
   if ! dpkg -s "$pkg" >/dev/null 2>&1; then
     if DEBIAN_FRONTEND=noninteractive apt-get install -y "$pkg" >/dev/null 2>&1; then

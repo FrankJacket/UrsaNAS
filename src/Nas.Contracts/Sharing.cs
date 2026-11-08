@@ -13,7 +13,7 @@ public sealed record SetPasswordRequest(string Password);
 /// Un partage SMB. Le chemin n'est jamais fourni par l'appelant : sans <c>Dataset</c>, le dossier est
 /// <c>/srv/nas/&lt;Name&gt;</c> ; avec <c>Dataset</c> (ex. <c>tank/photos</c>), c'est le point de montage de ce jeu de données ZFS.
 /// </summary>
-public sealed record ShareDef(string Name, string Comment, bool ReadOnly, IReadOnlyList<string> ValidUsers, string? Dataset = null, bool Acl = false, NfsExport? Nfs = null, FtpAccess? Ftp = null);
+public sealed record ShareDef(string Name, string Comment, bool ReadOnly, IReadOnlyList<string> ValidUsers, string? Dataset = null, bool Acl = false, NfsExport? Nfs = null, FtpAccess? Ftp = null, string? Disk = null);
 
 /// <summary>Export NFS d'un partage : clients autorisés (IP, réseau CIDR ou nom d'hôte). Les permissions avancées (ACL) ne s'appliquent pas par NFS.</summary>
 public sealed record NfsExport(IReadOnlyList<string> Clients, bool ReadOnly = false);
@@ -139,11 +139,20 @@ public static partial class Rules
         return null;
     }
 
+    static readonly string[] DiskRoots = ["/mnt/", "/media/", "/run/media/"];
+
+    /// <summary>Dossier de montage d'un disque utilisé comme partage : sous /mnt, /media… comme pour les sauvegardes.</summary>
+    public static string? ValidateShareDisk(string? dir) =>
+        dir is not null && DiskRoots.Any(r => dir.StartsWith(r, StringComparison.Ordinal)) && dir.Length < 256
+            && !dir.Split('/').Any(p => p is ".." or ".") && !dir.Any(char.IsControl) && !dir.EndsWith('/') && !dir.Contains("//")
+            ? null : Msg.F("Invalid disk folder: it must be a disk mounted under /mnt or /media.");
+
     /// <summary>Valide un jeu de partages complet : noms, doublons, utilisateurs connus.</summary>
     public static string? ValidateShares(IReadOnlyList<ShareDef> shares, IReadOnlySet<string> knownUsers)
     {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var datasets = new HashSet<string>(StringComparer.Ordinal);
+        var disks = new HashSet<string>(StringComparer.Ordinal);
         foreach (var s in shares)
         {
             if (ValidateShareName(s.Name) is { } e1) return e1;
@@ -153,6 +162,12 @@ public static partial class Rules
             {
                 if (ValidateDatasetName(s.Dataset) is { } e3) return e3;
                 if (!datasets.Add(s.Dataset)) return Msg.F("The dataset “{0}” is already used by another share.", s.Dataset);
+            }
+            if (s.Disk is not null)
+            {
+                if (s.Dataset is not null) return Msg.F("A share cannot use both a dataset and a disk.");
+                if (ValidateShareDisk(s.Disk) is { } e6) return e6;
+                if (!disks.Add(s.Disk)) return Msg.F("The disk “{0}” is already used by another share.", s.Disk);
             }
             if (ValidateNfs(s.Nfs, s.Name) is { } e4) return e4;
             if (ValidateFtp(s.Ftp, s.Name, knownUsers) is { } e5) return e5;

@@ -10,7 +10,7 @@ The menu is organised in groups. The Docker group only appears when Docker is in
 
 | Group | Pages | Purpose |
 |---|---|---|
-| **Storage** | Disks, Pools, Datasets, Backups | Inspect disks, create ZFS pools and datasets, take snapshots, back up to a USB disk |
+| **Storage** | Disks, Pools, Datasets, Backups | Partition, format, mount and erase disks, extend the system disk, create ZFS pools and datasets, take snapshots, back up to a USB disk |
 | **Sharing** | Shares, Folders, Services | Share folders over SMB, NFS and FTP, set per-folder permissions (ACLs), start or stop services |
 | **Docker** | Containers, Images, Stacks, Volumes and networks | Run and monitor containers, manage images, Compose stacks, volumes and networks |
 | **Virtual machines** | Virtual machines | Create, run and control KVM machines, with a browser console |
@@ -63,6 +63,14 @@ sudo apt install docker.io docker-compose
 
 Docker bypasses the share permissions (ACLs): a container that mounts a NAS folder reads and writes it with full rights. The interface says so where it matters. Names, images, ports, variables and volumes are validated before they reach the `docker` command, which is always run without a shell and never receives a value that could be read as an option.
 
+### Disks
+
+The **Disks** page lists each disk with its partitions. A disk is *free* when it holds no system, no mounted partition, no swap in use and no active ZFS pool; destructive actions are only offered (and enforced by the agent) on free disks.
+
+- **Partition and format**: wipes the disk, creates one GPT partition using all the space and formats it (ext4, Btrfs, exFAT, or ZFS, which creates a single-device pool named after the label; each only when `mkfs.btrfs`, `mkfs.exfat` or `zpool` is installed). **Erase** removes every signature. Both ask you to type the disk name.
+- **Format** a single partition, **Mount** it under `/mnt/<name>` (optionally at every start, through a UUID-based `/etc/fstab` line tagged `# ursanas` with `nofail`) and **Unmount** it. The first change to `/etc/fstab` keeps a copy in `/etc/fstab.ursanas-bak`.
+- **Extend the system partition** after enlarging the system disk (for example a virtual disk): the root partition (ext4 or XFS) grows to the free space and its file system is resized online. If a swap partition follows it, that partition is removed and replaced by a `/swapfile` of the same size.
+
 ### Virtual machines
 
 UrsaNAS drives **libvirt/KVM** (it does not install it). The **Virtual machines** page checks that libvirt answers and explains what is missing:
@@ -100,7 +108,7 @@ Principle: **the agent is the only part with root rights**, and it validates eve
 
 ### Target requirements
 
-Debian 13 with ZFS (for pools and datasets) and SSH access with `sudo`. The install script installs NFS, vsftpd and openssl itself, leaving the services stopped until they are enabled from the *Services* page. For exFAT backup disks, install `exfatprogs`.
+Debian 13 with ZFS (for pools and datasets) and SSH access with `sudo`. The install script installs NFS, vsftpd, openssl, btrfs-progs and exfatprogs itself, leaving the services stopped until they are enabled from the *Services* page. exFAT backup disks work through `exfatprogs`.
 
 ### Deploy from Windows
 

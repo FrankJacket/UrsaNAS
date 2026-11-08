@@ -12,6 +12,34 @@ public class AgentClient(HttpClient http)
     public async Task<IReadOnlyList<DiskInfo>> GetDisksAsync(CancellationToken ct = default) =>
         await http.GetFromJsonAsync<List<DiskInfo>>("disks", ct) ?? [];
 
+    public async Task<IReadOnlyList<string>> GetFilesystemsAsync(CancellationToken ct = default)
+    {
+        using var r = await http.GetAsync("disks/filesystems", ct);
+        await EnsureOkAsync(r, ct);
+        return (await r.Content.ReadFromJsonAsync<FsOptions>(ct))?.Available ?? [];
+    }
+
+    public async Task PrepareDiskAsync(PrepareDiskRequest req, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PostAsJsonAsync("disks/prepare", req, ct), ct);
+
+    public async Task CreatePartitionAsync(CreatePartitionRequest req, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PostAsJsonAsync("disks/partitions", req, ct), ct);
+
+    public async Task WipeDiskAsync(WipeDiskRequest req, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PostAsJsonAsync("disks/wipe", req, ct), ct);
+
+    public async Task GrowSystemDiskAsync(CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PostAsync("disks/grow-system", null, ct), ct);
+
+    public async Task FormatPartitionAsync(FormatPartitionRequest req, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PostAsJsonAsync("partitions/format", req, ct), ct);
+
+    public async Task MountPartitionAsync(MountPartitionRequest req, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PostAsJsonAsync("partitions/mount", req, ct), ct);
+
+    public async Task UnmountPartitionAsync(UnmountRequest req, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PostAsJsonAsync("partitions/unmount", req, ct), ct);
+
     public async Task<IReadOnlyList<NasUser>> GetUsersAsync(CancellationToken ct = default) =>
         await http.GetFromJsonAsync<List<NasUser>>("users", ct) ?? [];
 

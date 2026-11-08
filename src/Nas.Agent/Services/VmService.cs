@@ -67,8 +67,9 @@ public sealed partial class VmService(ICommandRunner run, AclService acl, Backup
     string DiskDir => (cfg["Vm:DiskDir"] ?? "/var/lib/libvirt/images").TrimEnd('/', '\\');
     string NetDir => cfg["Vm:NetDir"] ?? "/sys/class/net";
     string KvmDevice => cfg["Vm:KvmDevice"] ?? "/dev/kvm";
-    string DiskFile(string name) => Path.Combine(DiskDir, name + ".qcow2");
-    string IsoCopy(string name) => Path.Combine(DiskDir, name + "-install.iso"); // qemu ne peut pas lire dans les partages (dossiers réservés au groupe du NAS)
+    const string VmFolder = "ursanas-vm";
+    string DiskFile(string name, string? dir = null) => Path.Combine(dir ?? DiskDir, name + ".qcow2");
+    string IsoCopy(string name, string? dir = null) => Path.Combine(dir ?? DiskDir, name + "-install.iso"); // qemu ne peut pas lire dans les partages (dossiers réservés au groupe du NAS)
 
     // ---- État
 
@@ -134,9 +135,18 @@ public sealed partial class VmService(ICommandRunner run, AclService acl, Backup
         return list;
     }
 
+    /// <summary>Dossiers où nos disques peuvent se trouver : le dossier par défaut et le dossier « ursanas-vm » de chaque disque monté.</summary>
+    List<string> StorageDirs()
+    {
+        var dirs = new List<string> { DiskDir };
+        try { dirs.AddRange(backup.ListTargets().Select(t => t.Dir.TrimEnd('/') + "/" + VmFolder)); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or OperationException) { }
+        return dirs;
+    }
+
     long DiskBytes(string name)
     {
-        try { var f = new FileInfo(DiskFile(name)); return f.Exists ? f.Length : 0; }
+        try { return StorageDirs().Select(d => new FileInfo(DiskFile(name, d))).FirstOrDefault(f => f.Exists)?.Length ?? 0; }
         catch (IOException) { return 0; }
     }
 
@@ -162,7 +172,7 @@ public sealed partial class VmService(ICommandRunner run, AclService acl, Backup
                     var state = VmParser.Fields(await Ok(["dominfo", name], "Reading the machine", ct)).GetValueOrDefault("State");
                     if (state == "running") throw new OperationException(Msg.F("Stop the machine before deleting it."));
                     await Ok(["undefine", "--nvram", "--snapshots-metadata", name], "Deleting the machine", ct);
-                    try { File.Delete(DiskFile(name)); File.Delete(IsoCopy(name)); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { } // le disque que nous avons créé
+                    try { foreach (var d in StorageDirs()) { File.Delete(DiskFile(name, d)); File.Delete(IsoCopy(name, d)); } } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { } // le disque que nous avons créé
                     break;
                 default: throw new OperationException(Msg.F("Unknown action."));
             }
@@ -227,12 +237,19 @@ public sealed partial class VmService(ICommandRunner run, AclService acl, Backup
         return Mutate(async () =>
         {
             var iso = await IsoFullPathAsync(r.IsoLocation, r.IsoPath, ct);
-            var disk = DiskFile(r.Name);
+            var dir = r.StorageDir is null ? DiskDir : backup.ValidateTarget(r.StorageDir).TrimEnd('/') + "/" + VmFolder;
+            var disk = DiskFile(r.Name, dir);
             if (File.Exists(disk)) throw new OperationException(Msg.F("A machine named “{0}” already exists.", r.Name));
             var names = (await Ok(["list", "--all", "--name"], "Listing machines", ct)).Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             if (names.Contains(r.Name)) throw new OperationException(Msg.F("A machine named “{0}” already exists.", r.Name));
-            var isoCopy = IsoCopy(r.Name);
-            Directory.CreateDirectory(DiskDir);
+            var isoCopy = IsoCopy(r.Name, dir);
+            Directory.CreateDirectory(dir);
+            if (r.StorageDir is not null)
+            {
+                // qemu (compte libvirt) doit pouvoir traverser le disque : la racine reste fermée au public, seul le passage est ouvert.
+                await Ok(["o+x", r.StorageDir], "Preparing the disk folder", ct, "chmod");
+                await Ok(["0755", dir], "Preparing the disk folder", ct, "chmod");
+            }
             try { File.Copy(iso, isoCopy, overwrite: true); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             { throw new OperationException(Msg.F("{0} failed: {1}", "Copying the installation image", ex.Message)); }

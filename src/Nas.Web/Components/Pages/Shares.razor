@@ -21,6 +21,10 @@
             {
                 <MudChip T="string" Size="Size.Small" Color="Color.Info" Class="ml-2">ZFS</MudChip>
             }
+            else if (context.Disk is not null)
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Info" Class="ml-2">@L["Disk"]</MudChip>
+            }
         </MudTd>
         <MudTd>
             @if (context.Acl) { <MudChip T="string" Size="Size.Small" Color="Color.Primary" Href="@($"/permissions?share={context.Name}")">@L["Advanced permissions"]</MudChip> }
@@ -68,7 +72,7 @@
     }
 
     string PathOf(ShareDef s) =>
-        s.Dataset is null ? $"/srv/nas/{s.Name}" : mountpoints.GetValueOrDefault(s.Dataset, s.Dataset);
+        s.Disk ?? (s.Dataset is null ? $"/srv/nas/{s.Name}" : mountpoints.GetValueOrDefault(s.Dataset, s.Dataset));
 
     static readonly DialogOptions Options = new() { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true, BackdropClick = false };
 
@@ -87,11 +91,19 @@
         // Seuls les jeux de données (pas la racine d'un pool) que aucun autre partage n'utilise.
         var taken = shares.Where(s => s.Dataset is not null && s.Name != existing?.Name).Select(s => s.Dataset!).ToHashSet();
         var free = (await LoadDatasetsAsync()).Select(d => d.Name).Where(n => n.Contains('/') && !taken.Contains(n)).ToList();
+        var takenDisks = shares.Where(s => s.Disk is not null && s.Name != existing?.Name).Select(s => s.Disk!).ToHashSet();
+        var freeDisks = new List<string>();
+        try
+        {
+            freeDisks = (await Agent.GetDisksAsync()).SelectMany(d => d.MountPoints.Concat(d.Partitions?.SelectMany(p => p.MountPoints) ?? []))
+                .Where(m => Rules.ValidateShareDisk(m) is null && !takenDisks.Contains(m)).Distinct().Order().ToList();
+        }
+        catch (HttpRequestException) { }
         IReadOnlyList<string> pools = [];
         try { pools = (await Agent.GetPoolsAsync()).Select(p => p.Name).ToList(); }
         catch (AgentException) { }
         catch (HttpRequestException) { }
-        var parameters = new DialogParameters<ShareDialog> { { x => x.Existing, existing }, { x => x.Users, users }, { x => x.Datasets, free }, { x => x.Pools, pools } };
+        var parameters = new DialogParameters<ShareDialog> { { x => x.Existing, existing }, { x => x.Users, users }, { x => x.Datasets, free }, { x => x.Pools, pools }, { x => x.Disks, freeDisks } };
         var dialog = await Dialogs.ShowAsync<ShareDialog>(title, parameters, Options);
         if (await dialog.Result is { Canceled: false } result)
         {

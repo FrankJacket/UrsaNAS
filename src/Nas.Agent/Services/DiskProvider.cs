@@ -11,10 +11,14 @@ public interface IDiskProvider
 public static class LsblkParser
 {
     public static readonly string[] Args =
-        ["--json", "--bytes", "--output", "NAME,PATH,SIZE,TYPE,MODEL,SERIAL,ROTA,MOUNTPOINTS"];
+        ["--json", "--bytes", "--output", "NAME,PATH,SIZE,TYPE,MODEL,SERIAL,ROTA,MOUNTPOINTS,FSTYPE,LABEL,UUID"];
+
+    /// <summary>Partitions utilisées par les pools ZFS actifs, lues dans <c>zpool status -LP</c> (chemins /dev/sdb1…).</summary>
+    public static IReadOnlySet<string> PoolDevices(string zpoolStatus) =>
+        zpoolStatus.Split((char)10).Select(l => l.Trim().Split((char)32, (char)9)[0]).Where(t => t.StartsWith("/dev/", StringComparison.Ordinal)).ToHashSet();
 
     /// <summary>Extrait les disques (type "disk") de la sortie JSON de lsblk, y compris les points de montage des partitions.</summary>
-    public static IReadOnlyList<DiskInfo> Parse(string json)
+    public static IReadOnlyList<DiskInfo> Parse(string json, IReadOnlySet<string>? poolDevices = null)
     {
         using var doc = JsonDocument.Parse(json);
         var result = new List<DiskInfo>();
@@ -25,16 +29,40 @@ public static class LsblkParser
             if (Str(d, "type") != "disk") continue;
             var mounts = new List<string>();
             CollectMounts(d, mounts);
+            var size = Long(d, "size");
+            var parts = new List<PartitionInfo>();
+            if (d.TryGetProperty("children", out var kids) && kids.ValueKind == JsonValueKind.Array)
+                foreach (var c in kids.EnumerateArray().Where(c => Str(c, "type") == "part"))
+                {
+                    var pm = new List<string>();
+                    CollectMounts(c, pm);
+                    parts.Add(new PartitionInfo(Str(c, "name") ?? "", Str(c, "path") ?? "", Long(c, "size"), Str(c, "fstype"), Str(c, "label"), Str(c, "uuid"), pm, poolDevices is not null && poolDevices.Contains(Str(c, "path") ?? "") ? Msg.F("This partition belongs to a ZFS pool.") : null));
+                }
+            var busy = BusyReason(Str(d, "path") ?? "", mounts, parts, poolDevices);
+            var unallocated = Math.Max(0, size - parts.Sum(p => p.SizeBytes) - (2L << 20)); // 2 Mio : tables GPT et alignement
             result.Add(new DiskInfo(
                 Name: Str(d, "name") ?? "",
                 Path: Str(d, "path") ?? "",
-                SizeBytes: Long(d, "size"),
+                SizeBytes: size,
                 Model: Str(d, "model")?.Trim(),
                 Serial: Str(d, "serial")?.Trim(),
                 Rotational: Bool(d, "rota"),
-                MountPoints: mounts));
+                MountPoints: mounts,
+                Partitions: parts,
+                Busy: busy,
+                UnallocatedBytes: unallocated));
         }
         return result;
+    }
+
+    /// <summary>Pourquoi un disque n'est pas libre (système, monté, swap, pool ZFS actif) ; null s'il l'est.</summary>
+    public static string? BusyReason(string path, IReadOnlyList<string> mounts, IReadOnlyList<PartitionInfo> parts, IReadOnlySet<string>? poolDevices)
+    {
+        if (mounts.Contains("/")) return Msg.F("The system is on this disk.");
+        if (mounts.Any(m => m == "[SWAP]")) return Msg.F("This disk holds the swap space in use.");
+        if (mounts.Count > 0) return Msg.F("A partition is mounted: {0}.", string.Join(", ", mounts));
+        if (poolDevices is not null && (poolDevices.Contains(path) || parts.Any(p => poolDevices.Contains(p.Path)))) return Msg.F("This disk belongs to a ZFS pool.");
+        return null;
     }
 
     private static void CollectMounts(JsonElement dev, List<string> into)
@@ -81,7 +109,14 @@ public sealed class LsblkDiskProvider(ICommandRunner runner) : IDiskProvider
     {
         var r = await runner.RunAsync("lsblk", LsblkParser.Args, ct: ct);
         if (r.ExitCode != 0) throw new InvalidOperationException(Msg.F("lsblk failed ({0}): {1}", r.ExitCode, r.StdErr));
-        return LsblkParser.Parse(r.StdOut);
+        IReadOnlySet<string> pools = new HashSet<string>();
+        try
+        {
+            var z = await runner.RunAsync("zpool", ["status", "-LP"], ct: ct);
+            if (z.ExitCode == 0) pools = LsblkParser.PoolDevices(z.StdOut);
+        }
+        catch (System.ComponentModel.Win32Exception) { } // pas de ZFS sur cette machine
+        return LsblkParser.Parse(r.StdOut, pools);
     }
 }
 

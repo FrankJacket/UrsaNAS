@@ -1,31 +1,95 @@
 @page "/disks"
 @inherits AutoRefreshBase
 @inject AgentClient Agent
+@inject DiskOperations Ops
+@inject IDialogService Dialogs
+@inject ISnackbar Snack
 
 <MudText Typo="Typo.h4" Class="mb-4">@L["Disks"]</MudText>
 @if (error is not null)
 {
     <MudAlert Severity="Severity.Error" Class="mb-4">@error</MudAlert>
 }
-<MudTable Items="disks" Hover="true" Dense="true" Loading="@(!loaded)">
-    <HeaderContent>
-        <MudTh>@L["Disk"]</MudTh><MudTh>@L["Size"]</MudTh><MudTh>@L["Model"]</MudTh><MudTh>@L["Serial"]</MudTh><MudTh>@L["Type"]</MudTh><MudTh>@L["Mounted on"]</MudTh>
-    </HeaderContent>
-    <RowTemplate>
-        <MudTd>@context.Path</MudTd>
-        <MudTd>@Fmt.Size(context.SizeBytes, L.Lang)</MudTd>
-        <MudTd>@context.Model</MudTd>
-        <MudTd>@context.Serial</MudTd>
-        <MudTd>@(context.Rotational switch { true => "HDD", false => "SSD", null => "?" })</MudTd>
-        <MudTd>@(context.MountPoints.Count > 0 ? string.Join(", ", context.MountPoints) : "—")</MudTd>
-    </RowTemplate>
-    <NoRecordsContent><MudText Class="pa-4">@L["No disk detected."]</MudText></NoRecordsContent>
-</MudTable>
+@if (loaded && disks.Count == 0)
+{
+    <MudText Class="pa-4">@L["No disk detected."]</MudText>
+}
+@foreach (var d in disks)
+{
+    <MudPaper Class="pa-3 mb-4" Outlined="true">
+        <MudStack Row="true" AlignItems="AlignItems.Center" Wrap="Wrap.Wrap" Spacing="2">
+            <MudText Typo="Typo.h6">@d.Path</MudText>
+            <MudText>@Fmt.Size(d.SizeBytes, L.Lang)</MudText>
+            <MudText Color="Color.Secondary">@d.Model @d.Serial</MudText>
+            <MudChip T="string" Size="Size.Small">@(d.Rotational switch { true => "HDD", false => "SSD", null => "?" })</MudChip>
+            <MudSpacer />
+            @if (d.Busy is null)
+            {
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="() => Prepare(d)">@L["Partition and format"]</MudButton>
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" OnClick="() => Wipe(d)">@L["Erase"]</MudButton>
+            }
+            else
+            {
+                <MudTooltip Text="@L.Translate(d.Busy)"><MudChip T="string" Size="Size.Small" Color="Color.Warning">@L["In use"]</MudChip></MudTooltip>
+            }
+        </MudStack>
+        @if (d.Partitions is { Count: > 0 } && d.UnallocatedBytes >= (1L << 30))
+        {
+            <MudAlert Severity="Severity.Info" Class="mt-2" Dense="true">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Wrap="Wrap.Wrap">
+                    <span>@L["{0} are not allocated on this disk.", Fmt.Size(d.UnallocatedBytes, L.Lang)]</span>
+                    <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" OnClick="() => CreatePartition(d)">@L["Create a partition"]</MudButton>
+                    @if (d.MountPoints.Contains("/"))
+                    {
+                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" OnClick="GrowSystem">@L["Extend the system partition"]</MudButton>
+                    }
+                </MudStack>
+            </MudAlert>
+        }
+        @if (d.Partitions is { Count: > 0 })
+        {
+            <MudTable Items="d.Partitions" Dense="true" Hover="true" Elevation="0" Class="mt-2">
+                <HeaderContent>
+                    <MudTh>@L["Partition"]</MudTh><MudTh>@L["Size"]</MudTh><MudTh>@L["File system"]</MudTh><MudTh>@L["Label"]</MudTh><MudTh>@L["Mounted on"]</MudTh><MudTh></MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd>@context.Path</MudTd>
+                    <MudTd>@Fmt.Size(context.SizeBytes, L.Lang)</MudTd>
+                    <MudTd>@(context.FsType ?? "—")</MudTd>
+                    <MudTd>@(context.Label ?? "—")</MudTd>
+                    <MudTd>@(context.MountPoints.Count > 0 ? string.Join(", ", context.MountPoints) : "—")</MudTd>
+                    <MudTd Style="text-align:right">
+                        @if (context.Busy is not null)
+                        {
+                            <MudTooltip Text="@L.Translate(context.Busy)"><MudChip T="string" Size="Size.Small" Color="Color.Warning">@L["In use"]</MudChip></MudTooltip>
+                        }
+                        else if (context.MountPoints.Count == 0)
+                        {
+                            @if (CanMount(context))
+                            {
+                                <MudButton Size="Size.Small" OnClick="() => Mount(context)">@L["Mount"]</MudButton>
+                            }
+                            <MudButton Size="Size.Small" Color="Color.Error" OnClick="() => Format(context)">@L["Format"]</MudButton>
+                        }
+                        else if (context.MountPoints.FirstOrDefault(m => m.StartsWith("/mnt/", StringComparison.Ordinal)) is { } m)
+                        {
+                            <MudButton Size="Size.Small" OnClick="() => Unmount(m)">@L["Unmount"]</MudButton>
+                        }
+                    </MudTd>
+                </RowTemplate>
+            </MudTable>
+        }
+    </MudPaper>
+}
 
 @code {
+    static readonly DialogOptions Small = new() { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true, BackdropClick = false };
+
     IReadOnlyList<DiskInfo> disks = [];
     string? error;
     bool loaded;
+
+    static bool CanMount(PartitionInfo p) => p.FsType is not (null or "swap" or "zfs_member" or "LVM2_member" or "linux_raid_member");
 
     protected override async Task LoadAsync()
     {
@@ -39,5 +103,81 @@
             error = L["Agent unreachable: is the ursanas-agent service running?"];
         }
         loaded = true;
+    }
+
+    async Task Done(IDialogReference dialog, string success)
+    {
+        if (await dialog.Result is { Canceled: false })
+        {
+            Snack.Add(success, Severity.Success);
+            await LoadAsync();
+        }
+    }
+
+    async Task Prepare(DiskInfo d)
+    {
+        var p = new DialogParameters<DiskFormatDialog> { { x => x.Path, d.Path }, { x => x.IsDisk, true } };
+        await Done(await Dialogs.ShowAsync<DiskFormatDialog>(L["Partition and format"], p, Small), L["Disk formatted."]);
+    }
+
+    async Task CreatePartition(DiskInfo d)
+    {
+        var p = new DialogParameters<DiskPartitionDialog> { { x => x.Disk, d } };
+        await Done(await Dialogs.ShowAsync<DiskPartitionDialog>(L["Create a partition"], p, Small), L["Partition created."]);
+    }
+
+    async Task Format(PartitionInfo part)
+    {
+        var p = new DialogParameters<DiskFormatDialog> { { x => x.Path, part.Path } };
+        await Done(await Dialogs.ShowAsync<DiskFormatDialog>(L["Format"], p, Small), L["Partition formatted."]);
+    }
+
+    async Task Mount(PartitionInfo part)
+    {
+        var p = new DialogParameters<DiskMountDialog> { { x => x.Partition, part.Path }, { x => x.Suggestion, part.Label?.ToLowerInvariant() } };
+        await Done(await Dialogs.ShowAsync<DiskMountDialog>(L["Mount"], p, Small), L["Partition mounted."]);
+    }
+
+    async Task Wipe(DiskInfo d)
+    {
+        Func<string, Task> action = async typed =>
+        {
+            if (typed != d.Path) throw new AgentException(Msg.F("The name does not match."));
+            await Ops.WipeAsync(d.Path);
+        };
+        var p = new DialogParameters<DockerNameDialog>
+        {
+            { x => x.Label, L["Type {0} to confirm", d.Path] }, { x => x.ButtonText, L["Erase"] }, { x => x.Action, action },
+            { x => x.Helper, L["All partitions and data on this disk will be erased."] },
+        };
+        await Done(await Dialogs.ShowAsync<DockerNameDialog>(L["Erase"], p, Small), L["Disk erased."]);
+    }
+
+    async Task Unmount(string mountPoint)
+    {
+        if (await Dialogs.ShowMessageBoxAsync(L["Unmount"], L["Unmount {0}?", mountPoint], yesText: L["Unmount"], cancelText: L["Cancel"]) != true) return;
+        try
+        {
+            await Ops.UnmountAsync(mountPoint);
+            Snack.Add(L["Partition unmounted."], Severity.Success);
+            await LoadAsync();
+        }
+        catch (AgentException e) { Snack.Add(L.Translate(e.Message), Severity.Error); }
+        catch (HttpRequestException) { Snack.Add(L["Agent unreachable."], Severity.Error); }
+    }
+
+    async Task GrowSystem()
+    {
+        if (await Dialogs.ShowMessageBoxAsync(L["Extend the system partition"],
+                L["The system partition will use all the free space of the disk. A swap partition that follows it is replaced by a swap file. Continue?"],
+                yesText: L["Extend"], cancelText: L["Cancel"]) != true) return;
+        try
+        {
+            await Ops.GrowSystemAsync();
+            Snack.Add(L["System partition extended."], Severity.Success);
+            await LoadAsync();
+        }
+        catch (AgentException e) { Snack.Add(L.Translate(e.Message), Severity.Error); }
+        catch (HttpRequestException) { Snack.Add(L["Agent unreachable."], Severity.Error); }
     }
 }

@@ -42,10 +42,11 @@ class ShareRow
     public bool Acl { get; set; }
     public string? Nfs { get; set; }
     public string? Ftp { get; set; }
+    public string? Disk { get; set; }
 
     public ShareDef ToDef() => new(Name, Comment, ReadOnly, ValidUsers.Split(' ', StringSplitOptions.RemoveEmptyEntries), Dataset, Acl,
         Nfs is null ? null : System.Text.Json.JsonSerializer.Deserialize<NfsExport>(Nfs),
-        Ftp is null ? null : System.Text.Json.JsonSerializer.Deserialize<FtpAccess>(Ftp));
+        Ftp is null ? null : System.Text.Json.JsonSerializer.Deserialize<FtpAccess>(Ftp), Disk);
 }
 
 public class Repo(Db db)
@@ -70,7 +71,7 @@ public class Repo(Db db)
     public async Task<List<ShareDef>> GetSharesAsync()
     {
         using var c = db.Open();
-        return (await c.QueryAsync<ShareRow>("SELECT Name,Comment,ReadOnly,ValidUsers,Dataset,Acl,Nfs,Ftp FROM Shares ORDER BY Name"))
+        return (await c.QueryAsync<ShareRow>("SELECT Name,Comment,ReadOnly,ValidUsers,Dataset,Acl,Nfs,Ftp,Disk FROM Shares ORDER BY Name"))
             .Select(r => r.ToDef()).ToList();
     }
 
@@ -78,9 +79,9 @@ public class Repo(Db db)
     {
         using var c = db.Open();
         await c.ExecuteAsync("""
-            INSERT INTO Shares(Name,Comment,ReadOnly,ValidUsers,Dataset,Acl,Nfs,Ftp) VALUES(@Name,@Comment,@ReadOnly,@Users,@Dataset,@Acl,@Nfs,@Ftp)
-            ON CONFLICT(Name) DO UPDATE SET Comment=@Comment, ReadOnly=@ReadOnly, ValidUsers=@Users, Dataset=@Dataset, Acl=@Acl, Nfs=@Nfs, Ftp=@Ftp
-            """, new { s.Name, s.Comment, s.ReadOnly, Users = string.Join(' ', s.ValidUsers), s.Dataset, s.Acl,
+            INSERT INTO Shares(Name,Comment,ReadOnly,ValidUsers,Dataset,Acl,Nfs,Ftp,Disk) VALUES(@Name,@Comment,@ReadOnly,@Users,@Dataset,@Acl,@Nfs,@Ftp,@Disk)
+            ON CONFLICT(Name) DO UPDATE SET Comment=@Comment, ReadOnly=@ReadOnly, ValidUsers=@Users, Dataset=@Dataset, Acl=@Acl, Nfs=@Nfs, Ftp=@Ftp, Disk=@Disk
+            """, new { s.Name, s.Comment, s.ReadOnly, Users = string.Join(' ', s.ValidUsers), s.Dataset, s.Acl, s.Disk,
                 Nfs = s.Nfs is null ? null : System.Text.Json.JsonSerializer.Serialize(s.Nfs), Ftp = s.Ftp is null ? null : System.Text.Json.JsonSerializer.Serialize(s.Ftp) });
     }
 

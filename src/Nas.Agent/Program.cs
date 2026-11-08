@@ -55,6 +55,7 @@ public partial class Program
         builder.Services.AddSingleton<TransferService>();
         builder.Services.AddSingleton<DockerService>();
         builder.Services.AddSingleton<VmService>();
+        builder.Services.AddSingleton<DiskService>();
         builder.Services.AddSingleton<ShareService>();
         builder.Services.AddSingleton<GroupService>();
         builder.Services.AddSingleton<AclService>();
@@ -66,6 +67,21 @@ public partial class Program
         app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
         app.MapGet("/disks", async (IDiskProvider disks, CancellationToken ct) => Results.Ok(await disks.ListAsync(ct)));
 
+        app.MapGet("/disks/filesystems", (DiskService d) => Results.Ok(d.Filesystems()));
+        app.MapPost("/disks/prepare", (PrepareDiskRequest r, DiskService d, CancellationToken ct) =>
+            Read(async () => { await d.PrepareDiskAsync(r, ct); return Results.NoContent(); }));
+        app.MapPost("/disks/partitions", (CreatePartitionRequest r, DiskService d, CancellationToken ct) =>
+            Read(async () => { await d.CreatePartitionAsync(r, ct); return Results.NoContent(); }));
+        app.MapPost("/disks/wipe", (WipeDiskRequest r, DiskService d, CancellationToken ct) =>
+            Read(async () => { await d.WipeDiskAsync(r.Disk, ct); return Results.NoContent(); }));
+        app.MapPost("/disks/grow-system", (DiskService d, CancellationToken ct) =>
+            Read(async () => { await d.GrowSystemAsync(ct); return Results.NoContent(); }));
+        app.MapPost("/partitions/format", (FormatPartitionRequest r, DiskService d, CancellationToken ct) =>
+            Read(async () => { await d.FormatPartitionAsync(r, ct); return Results.NoContent(); }));
+        app.MapPost("/partitions/mount", (MountPartitionRequest r, DiskService d, CancellationToken ct) =>
+            Read(async () => { await d.MountAsync(r, ct); return Results.NoContent(); }));
+        app.MapPost("/partitions/unmount", (UnmountRequest r, DiskService d, CancellationToken ct) =>
+            Read(async () => { await d.UnmountAsync(r.MountPoint, ct); return Results.NoContent(); }));
         app.MapGet("/stats", (IStatsProvider s) => Results.Ok(s.Read()));
 
         app.MapGet("/users", async (UserService u, CancellationToken ct) => Results.Ok(await u.ListAsync(ct)));

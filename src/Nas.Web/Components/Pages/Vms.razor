@@ -4,6 +4,7 @@
 @inject VmOperations Ops
 @inject IDialogService Dialogs
 @inject ISnackbar Snack
+@inject IJSRuntime JS
 
 <MudText Typo="Typo.h4" Class="mb-4">@L["Virtual machines"]</MudText>
 
@@ -52,6 +53,7 @@ else if (status is not null)
                 @if (context.State == "running")
                 {
                     <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Monitor" Href="@("/vms/console/" + Uri.EscapeDataString(context.Name))">@L["Console"]</MudButton>
+                    <MudTooltip Text="@L["Open the console in a new window"]"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.OpenInNew" OnClick="() => OpenWindow(context.Name)" /></MudTooltip>
                     <MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="busy" OnClick='() => Act(context, "shutdown", L["Shutdown requested."])'>@L["Shut down"]</MudButton>
                     <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning" Disabled="busy" OnClick="() => PowerOff(context)">@L["Power off"]</MudButton>
                 }
@@ -71,6 +73,9 @@ else
 }
 
 @code {
+    async Task OpenWindow(string name) =>
+        await JS.InvokeVoidAsync("open", "/vms/window/" + Uri.EscapeDataString(name), "vmconsole-" + name, "popup,width=1100,height=780");
+
     VmStatus? status;
     IReadOnlyList<VmInfo> machines = [];
     string? error;

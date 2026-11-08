@@ -15,6 +15,10 @@
             {
                 <MudSelectItem T="string" Value="@d">@L["ZFS dataset: {0}", d]</MudSelectItem>
             }
+            @foreach (var m in Disks)
+            {
+                <MudSelectItem T="string" Value="@(DiskPrefix + m)">@L["Disk: {0}", m]</MudSelectItem>
+            }
             @if (Existing is null)
             {
                 @foreach (var p in Pools)
@@ -88,15 +92,21 @@
     /// <summary>Pools ZFS sur lesquels un nouveau jeu de données (du nom du partage) peut être créé en même temps que le partage.</summary>
     [Parameter] public IReadOnlyList<string> Pools { get; set; } = [];
 
+    /// <summary>Dossiers de montage des disques que ce partage peut utiliser (ceux qu'aucun autre partage n'utilise).</summary>
+    [Parameter] public IReadOnlyList<string> Disks { get; set; } = [];
+
     const string Plain = "__plain";
     const string NewPrefix = "__new:";
+    const string DiskPrefix = "__disk:";
     string? created; // jeu de données déjà créé par une tentative précédente de ce dialogue
     string name = "", comment = "", storage = Plain;
     bool readOnly, acl = true; // un nouveau partage est toujours en permissions avancées
 
-    string? StorageHelp => Existing is not null && (Existing.Dataset ?? Plain) != storage
+    static string Current(ShareDef s) => s.Disk is not null ? DiskPrefix + s.Disk : s.Dataset ?? Plain;
+
+    string? StorageHelp => Existing is not null && Current(Existing) != storage
         ? L["Existing files are not moved: copy them to the new location."]
-        : Datasets.Count == 0 ? L["Create a dataset in the “Datasets” page to choose it here."] : null;
+        : Datasets.Count == 0 && Disks.Count == 0 ? L["Create a dataset in the “Datasets” page, or mount a disk in the “Disks” page, to choose it here."] : null;
     IReadOnlyCollection<string> selected = [];
     bool nfsOn, nfsRo, ftpOn, ftpRo;
     string nfsClients = "";
@@ -111,7 +121,7 @@
         comment = Existing.Comment;
         readOnly = Existing.ReadOnly;
         acl = Existing.Acl;
-        storage = Existing.Dataset ?? Plain;
+        storage = Current(Existing);
         selected = Existing.ValidUsers.ToList();
         if (Existing.Nfs is { } nfs) (nfsOn, nfsRo, nfsClients) = (true, nfs.ReadOnly, string.Join('\n', nfs.Clients));
         if (Existing.Ftp is { } ftp) (ftpOn, ftpRo, ftpUsers) = (true, ftp.ReadOnly, ftp.Users.ToList());
@@ -130,9 +140,10 @@
                 await Ops.CreateDatasetAsync(dataset);
                 created = storage = dataset; // si l'enregistrement du partage échoue, on ne recrée pas le jeu de données
             }
-            await Ops.SaveShareAsync(new ShareDef(name.Trim(), comment.Trim(), readOnly, selected.OrderBy(u => u, StringComparer.Ordinal).ToList(), storage == Plain ? null : storage, acl,
+            await Ops.SaveShareAsync(new ShareDef(name.Trim(), comment.Trim(), readOnly, selected.OrderBy(u => u, StringComparer.Ordinal).ToList(), storage == Plain || storage.StartsWith(DiskPrefix, StringComparison.Ordinal) ? null : storage, acl,
                 nfsOn ? new NfsExport(nfsClients.Split([' ', ',', ';', '\n', '\r', '\t'], StringSplitOptions.RemoveEmptyEntries).ToList(), nfsRo) : null,
-                ftpOn ? new FtpAccess(ftpUsers.OrderBy(u => u, StringComparer.Ordinal).ToList(), ftpRo) : null), isNew: Existing is null);
+                ftpOn ? new FtpAccess(ftpUsers.OrderBy(u => u, StringComparer.Ordinal).ToList(), ftpRo) : null,
+                storage.StartsWith(DiskPrefix, StringComparison.Ordinal) ? storage[DiskPrefix.Length..] : null), isNew: Existing is null);
             Dialog.Close(DialogResult.Ok(name.Trim()));
             return;
         }

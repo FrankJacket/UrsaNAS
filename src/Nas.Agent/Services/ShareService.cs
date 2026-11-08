@@ -15,7 +15,7 @@ public static class ShareConf
         {
             sb.Append('\n').Append('[').Append(s.Name).Append("]\n");
             if (!string.IsNullOrWhiteSpace(s.Comment)) sb.Append("   comment = ").Append(s.Comment.Trim().Replace("%", "%%")).Append('\n');
-            sb.Append("   path = ").Append(s.Dataset is not null && datasetPaths is not null && datasetPaths.TryGetValue(s.Dataset, out var p) ? p : PathFor(shareRoot, s.Name)).Append('\n');
+            sb.Append("   path = ").Append(s.Disk ?? (s.Dataset is not null && datasetPaths is not null && datasetPaths.TryGetValue(s.Dataset, out var p) ? p : PathFor(shareRoot, s.Name))).Append('\n'); // un disque monté (s.Disk) prime
             sb.Append("   read only = ").Append(s.ReadOnly && !s.Acl ? "yes" : "no").Append('\n'); // en mode permissions, les règles décident
             sb.Append("   guest ok = no\n");
             sb.Append("   browseable = yes\n");
@@ -64,7 +64,7 @@ public static class ShareConf
 /// <c>testparm</c> (retour arrière si Samba le refuse) puis recharge Samba. Les dossiers des partages supprimés
 /// ne sont jamais effacés : les données restent sur le disque.
 /// </summary>
-public sealed class ShareService(ICommandRunner run, UserService users, IConfiguration cfg, AclService? acl = null, ProtocolService? protocols = null)
+public sealed class ShareService(ICommandRunner run, UserService users, IConfiguration cfg, AclService? acl = null, ProtocolService? protocols = null, IDiskProvider? disks = null)
 {
     string ConfigDir => cfg["Samba:ConfigDir"] ?? "/etc/samba";
     string ShareRoot => cfg["Samba:ShareRoot"] ?? "/srv/nas";
@@ -77,6 +77,7 @@ public sealed class ShareService(ICommandRunner run, UserService users, IConfigu
         if (Rules.ValidateShares(shares, known) is { } error) throw new OperationException(error);
 
         var datasetPaths = await ResolveDatasetsAsync(shares, ct); // avant toute écriture : un jeu absent ne laisse aucune trace
+        await CheckDisksAsync(shares, ct);
         if (Rules.ValidateFtpSettings(ftp) is { } ftpError) throw new OperationException(ftpError);
         protocols?.EnsureAvailable(shares); // idem pour NFS/FTP non installés
 
@@ -91,6 +92,7 @@ public sealed class ShareService(ICommandRunner run, UserService users, IConfigu
         foreach (var s in shares)
         {
             string dir;
+            if (s.Disk is not null) continue; // le disque garde ses droits (réglés au montage) ; on ne change rien à sa racine
             if (s.Dataset is not null) dir = datasetPaths[s.Dataset]; // déjà monté par ZFS
             else
             {
@@ -115,9 +117,18 @@ public sealed class ShareService(ICommandRunner run, UserService users, IConfigu
 
         if (protocols is not null)
         {
-            var paths = shares.ToDictionary(s => s.Name, s => s.Dataset is not null ? datasetPaths[s.Dataset] : ShareConf.PathFor(ShareRoot, s.Name), StringComparer.OrdinalIgnoreCase);
+            var paths = shares.ToDictionary(s => s.Name, s => s.Disk ?? (s.Dataset is not null ? datasetPaths[s.Dataset] : ShareConf.PathFor(ShareRoot, s.Name)), StringComparer.OrdinalIgnoreCase);
             await protocols.ApplyAsync(shares, paths, ftp, ct);
         }
+    }
+
+    /// <summary>Un disque partagé doit être réellement monté à l'endroit indiqué (sinon on partagerait le dossier vide du disque système).</summary>
+    async Task CheckDisksAsync(IReadOnlyList<ShareDef> shares, CancellationToken ct)
+    {
+        if (disks is null || !shares.Any(s => s.Disk is not null)) return;
+        var mounted = (await disks.ListAsync(ct)).SelectMany(d => d.MountPoints).ToHashSet();
+        foreach (var s in shares.Where(s => s.Disk is not null))
+            if (!mounted.Contains(s.Disk!)) throw new OperationException(Msg.F("The disk “{0}” is not mounted.", s.Disk));
     }
 
     /// <summary>Trouve le point de montage de chaque jeu de données choisi ; refuse un jeu inconnu ou non monté.</summary>

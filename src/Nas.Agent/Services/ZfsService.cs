@@ -92,15 +92,21 @@ public sealed class ZfsService(ICommandRunner run, IDiskProvider disks, IConfigu
     {
         if (Rules.ValidatePoolName(r.Name) is { } e1) throw new OperationException(e1);
         var paths = r.Disks ?? [];
-        if (Rules.ValidatePoolLayout(r.Layout, paths.Count) is { } e2) throw new OperationException(e2);
+        var single = r.Layout == "" && paths.Count == 1; // un seul périphérique, sans redondance (partition)
+        if (!single && Rules.ValidatePoolLayout(r.Layout, paths.Count) is { } e2) throw new OperationException(e2);
         if (paths.Distinct().Count() != paths.Count) throw new OperationException(Msg.F("A disk is selected twice."));
 
         // Seuls les disques que l'agent connaît et qui ne sont montés nulle part (système compris) sont acceptés.
-        var known = (await disks.ListAsync(ct)).ToDictionary(d => d.Path);
+        var known = new Dictionary<string, IReadOnlyList<string>>();
+        foreach (var d in await disks.ListAsync(ct))
+        {
+            known[d.Path] = d.MountPoints;
+            foreach (var part in d.Partitions ?? []) known[part.Path] = part.MountPoints;
+        }
         foreach (var p in paths)
         {
-            if (!known.TryGetValue(p, out var d)) throw new OperationException($"Disque inconnu : {p}.");
-            if (d.MountPoints.Count > 0) throw new OperationException(Msg.F("{0} is in use by the system ({1}).", p, string.Join(", ", d.MountPoints)));
+            if (!known.TryGetValue(p, out var mounts)) throw new OperationException($"Disque inconnu : {p}.");
+            if (mounts.Count > 0) throw new OperationException(Msg.F("{0} is in use by the system ({1}).", p, string.Join(", ", mounts)));
         }
 
         var existing = ZfsParser.ParsePoolList(Check(await run.RunAsync("zpool", ZfsParser.PoolListArgs, ct: ct), "Listing pools"));
@@ -115,8 +121,9 @@ public sealed class ZfsService(ICommandRunner run, IDiskProvider disks, IConfigu
             "create", "-o", "ashift=12",
             "-O", "compression=lz4", "-O", "atime=off", "-O", "xattr=sa",
             "-m", $"{MountRoot}/{r.Name}",
-            r.Name, r.Layout,
+            r.Name,
         ];
+        if (r.Layout != "") args.Add(r.Layout);
         args.AddRange(paths);
         Check(await run.RunAsync("zpool", args, ct: ct), "Creating the pool");
     }
