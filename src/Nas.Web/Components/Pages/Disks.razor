@@ -14,80 +14,154 @@
 {
     <MudText Class="pa-4">@L["No disk detected."]</MudText>
 }
-@foreach (var d in disks)
+<MudGrid>
+@for (var i = 0; i < disks.Count; i++)
 {
-    <MudPaper Class="pa-3 mb-4" Outlined="true">
-        <MudStack Row="true" AlignItems="AlignItems.Center" Wrap="Wrap.Wrap" Spacing="2">
-            <MudText Typo="Typo.h6">@d.Path</MudText>
-            <MudText>@Fmt.Size(d.SizeBytes, L.Lang)</MudText>
-            <MudText Color="Color.Secondary">@d.Model @d.Serial</MudText>
-            <MudChip T="string" Size="Size.Small">@(d.Rotational switch { true => "HDD", false => "SSD", null => "?" })</MudChip>
+    var d = disks[i];
+    var s = SmartOf(d);
+    var number = i + 1; // copie locale : « i » est partagé par toute la boucle et vaudrait sa dernière valeur au moment du rendu
+    <MudItem xs="12" lg="4" md="6">
+    <MudPaper Class="pa-4" Outlined="true" Style="height:100%">
+        @* En-tête : taille, état d'utilisation, actions *@
+        <div style="display:flex; align-items:center; gap:.75rem">
+            <MudText Typo="Typo.caption" Style="color:var(--mud-palette-text-secondary)">@number</MudText>
+            <MudText Typo="Typo.h5" Style="font-weight:600">@Fmt.Size(d.SizeBytes, L.Lang)</MudText>
+            <MudText Style="color:var(--mud-palette-text-secondary)">@d.Path</MudText>
             <MudSpacer />
-            @if (d.Busy is null)
+            <MudMenu Icon="@Icons.Material.Filled.MoreHoriz" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight" Dense="true">
+                <MudMenuItem Disabled="@(d.Busy is not null)" OnClick="() => Prepare(d)">@L["Partition and format"]</MudMenuItem>
+                <MudMenuItem Disabled="@(d.Partitions is not { Count: > 0 } || d.UnallocatedBytes < (64L << 20))" OnClick="() => CreatePartition(d)">@L["Create a partition"]</MudMenuItem>
+                @if (d.MountPoints.Contains("/"))
+                {
+                    <MudMenuItem Disabled="@(d.UnallocatedBytes < (1L << 30))" OnClick="GrowSystem">@L["Extend the system partition"]</MudMenuItem>
+                }
+                <MudMenuItem Disabled="@(d.Busy is not null)" OnClick="() => Wipe(d)"><span style="color:var(--mud-palette-error)">@L["Erase"]</span></MudMenuItem>
+            </MudMenu>
+        </div>
+        <div style="margin-top:.5rem">
+            @if (d.MountPoints.Contains("/"))
             {
-                <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="() => Prepare(d)">@L["Partition and format"]</MudButton>
-                <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" OnClick="() => Wipe(d)">@L["Erase"]</MudButton>
+                <MudChip T="string" Size="Size.Small" Color="Color.Info">@L["System installation"]</MudChip>
             }
-            else
+            else if (d.Busy is not null)
             {
                 <MudTooltip Text="@L.Translate(d.Busy)"><MudChip T="string" Size="Size.Small" Color="Color.Warning">@L["In use"]</MudChip></MudTooltip>
             }
-        </MudStack>
-        @if (d.Partitions is { Count: > 0 } && d.UnallocatedBytes >= (1L << 30))
+            else
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Success">@L["Free"]</MudChip>
+            }
+        </div>
+
+        @* Caractéristiques *@
+        <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:.75rem 1.5rem; margin-top:.75rem">
+            <DiskField Label="@L["Drive type"]" Value="@(DriveType(d))" />
+            <DiskField Label="@L["Model"]" Value="@(d.Model ?? "—")" />
+            <DiskField Label="@L["Power-on hours"]" Value="@(Hours(s))" />
+            <div>
+                <MudText Typo="Typo.caption" Style="color:var(--mud-palette-text-secondary)">@L["Status"]</MudText>
+                <MudText Typo="Typo.body1" Color="@StatusColor(s)" Style="font-weight:600">@StatusText(s)</MudText>
+            </div>
+            <DiskField Label="@L["Interface"]" Value="@(InterfaceOf(d))" />
+            <DiskField Label="@L["Serial number"]" Value="@(d.Serial ?? "—")" />
+            <DiskField Label="@L["Temperature"]" Value="@(Temp(s))" />
+        </div>
+
+        @* Partitions *@
+        @if (d.Partitions is { Count: > 0 } || d.UnallocatedBytes >= (64L << 20))
         {
-            <MudAlert Severity="Severity.Info" Class="mt-2" Dense="true">
-                <MudStack Row="true" AlignItems="AlignItems.Center" Wrap="Wrap.Wrap">
-                    <span>@L["{0} are not allocated on this disk.", Fmt.Size(d.UnallocatedBytes, L.Lang)]</span>
-                    <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" OnClick="() => CreatePartition(d)">@L["Create a partition"]</MudButton>
-                    @if (d.MountPoints.Contains("/"))
-                    {
-                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" OnClick="GrowSystem">@L["Extend the system partition"]</MudButton>
-                    }
-                </MudStack>
-            </MudAlert>
-        }
-        @if (d.Partitions is { Count: > 0 })
-        {
-            <MudTable Items="d.Partitions" Dense="true" Hover="true" Elevation="0" Class="mt-2">
-                <HeaderContent>
-                    <MudTh>@L["Partition"]</MudTh><MudTh>@L["Size"]</MudTh><MudTh>@L["File system"]</MudTh><MudTh>@L["Label"]</MudTh><MudTh>@L["Mounted on"]</MudTh><MudTh></MudTh>
-                </HeaderContent>
-                <RowTemplate>
-                    <MudTd>@context.Path</MudTd>
-                    <MudTd>@Fmt.Size(context.SizeBytes, L.Lang)</MudTd>
-                    <MudTd>@(context.FsType ?? "—")</MudTd>
-                    <MudTd>@(context.Label ?? "—")</MudTd>
-                    <MudTd>@(context.MountPoints.Count > 0 ? string.Join(", ", context.MountPoints) : "—")</MudTd>
-                    <MudTd Style="text-align:right">
-                        @if (context.Busy is not null)
+            <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:.75rem 1.5rem; margin-top:1rem; padding:.75rem; border:1px dashed var(--mud-palette-lines-inputs); border-radius:6px">
+                @foreach (var p in d.Partitions ?? [])
+                {
+                    <div style="display:flex; gap:.5rem; align-items:flex-start">
+                        <div style="flex:1; min-width:0">
+                            <MudText Typo="Typo.body2" Style="font-weight:600">@L["Partition: {0}", p.Name]</MudText>
+                            <MudText Typo="Typo.body2">@Fmt.Size(p.SizeBytes, L.Lang) · @FsName(p)</MudText>
+                            <MudText Typo="Typo.caption" Style="@(p.Busy is not null ? "color:var(--mud-palette-warning-text)" : "color:var(--mud-palette-text-secondary)")">@PartitionState(p)</MudText>
+                        </div>
+                        @if (p.Busy is null && (p.MountPoints.Count == 0 || p.MountPoints.Any(m => m.StartsWith("/mnt/", StringComparison.Ordinal))))
                         {
-                            <MudTooltip Text="@L.Translate(context.Busy)"><MudChip T="string" Size="Size.Small" Color="Color.Warning">@L["In use"]</MudChip></MudTooltip>
+                            <MudMenu Icon="@Icons.Material.Filled.MoreVert" Size="Size.Small" Dense="true" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
+                                @if (p.MountPoints.Count == 0)
+                                {
+                                    <MudMenuItem Disabled="@(!CanMount(p))" OnClick="() => Mount(p)">@L["Mount"]</MudMenuItem>
+                                    <MudMenuItem OnClick="() => Format(p)"><span style="color:var(--mud-palette-error)">@L["Format"]</span></MudMenuItem>
+                                }
+                                else
+                                {
+                                    <MudMenuItem OnClick="() => UnmountPartition(p)">@L["Unmount"]</MudMenuItem>
+                                }
+                            </MudMenu>
                         }
-                        else if (context.MountPoints.Count == 0)
-                        {
-                            @if (CanMount(context))
-                            {
-                                <MudButton Size="Size.Small" OnClick="() => Mount(context)">@L["Mount"]</MudButton>
-                            }
-                            <MudButton Size="Size.Small" Color="Color.Error" OnClick="() => Format(context)">@L["Format"]</MudButton>
-                        }
-                        else if (context.MountPoints.FirstOrDefault(m => m.StartsWith("/mnt/", StringComparison.Ordinal)) is { } m)
-                        {
-                            <MudButton Size="Size.Small" OnClick="() => Unmount(m)">@L["Unmount"]</MudButton>
-                        }
-                    </MudTd>
-                </RowTemplate>
-            </MudTable>
+                    </div>
+                }
+                @if (d.Partitions is { Count: > 0 } && d.UnallocatedBytes >= (64L << 20))
+                {
+                    <div style="display:flex; gap:.5rem; align-items:flex-start">
+                        <div style="flex:1; min-width:0">
+                            <MudText Typo="Typo.body2" Style="font-weight:600">@L["Unallocated space"]</MudText>
+                            <MudText Typo="Typo.body2">@Fmt.Size(d.UnallocatedBytes, L.Lang)</MudText>
+                            <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Primary" Class="pa-0" OnClick="() => CreatePartition(d)">@L["Create a partition"]</MudButton>
+                        </div>
+                    </div>
+                }
+            </div>
         }
     </MudPaper>
+    </MudItem>
 }
+</MudGrid>
 
 @code {
     static readonly DialogOptions Small = new() { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true, BackdropClick = false };
 
     IReadOnlyList<DiskInfo> disks = [];
+    IReadOnlyList<SmartInfo> smart = [];
+    DateTime smartAt = DateTime.MinValue;
     string? error;
     bool loaded;
+
+    static string DriveType(DiskInfo d) => d.Rotational == true ? "HDD" : d.Rotational == false ? "SSD" : "?";
+    static string Hours(SmartInfo? s) => s?.PowerOnHours is null ? "—" : s.PowerOnHours + " H";
+    static string Temp(SmartInfo? s) => s?.TemperatureC is null ? "—" : s.TemperatureC + "°C";
+
+    SmartInfo? SmartOf(DiskInfo d) => smart.FirstOrDefault(x => x.Disk == d.Path || x.Disk == d.Name);
+
+    string StatusText(SmartInfo? s) => s?.Status switch
+    {
+        "ok" => L["Normal"],
+        "warning" => L["Warning"],
+        "failing" => L["Failing"],
+        _ => "—",
+    };
+
+    static Color StatusColor(SmartInfo? s) => s?.Status switch
+    {
+        "ok" => Color.Success,
+        "warning" => Color.Warning,
+        "failing" => Color.Error,
+        _ => Color.Default,
+    };
+
+    static string InterfaceOf(DiskInfo d) =>
+        d.Name.StartsWith("nvme", StringComparison.Ordinal) ? "NVMe" : d.Name.StartsWith("vd", StringComparison.Ordinal) ? "VirtIO" : d.Name.StartsWith("mmcblk", StringComparison.Ordinal) ? "MMC" : "SATA/SCSI";
+
+    string FsName(PartitionInfo p) => p.FsType switch
+    {
+        null => L["File system unknown"],
+        "zfs_member" => "ZFS",
+        "swap" => "swap",
+        var f => f,
+    };
+
+    string PartitionState(PartitionInfo p)
+    {
+        if (p.Busy is not null) return L.Translate(p.Busy);
+        if (p.MountPoints.Count > 0) return L["Mounted on {0}", string.Join(", ", p.MountPoints)];
+        return p.Label is { Length: > 0 } ? L["Not mounted · {0}", p.Label] : L["Not mounted"];
+    }
+
+    Task UnmountPartition(PartitionInfo p) => Unmount(p.MountPoints.First(m => m.StartsWith("/mnt/", StringComparison.Ordinal)));
 
     static bool CanMount(PartitionInfo p) => p.FsType is not (null or "swap" or "zfs_member" or "LVM2_member" or "linux_raid_member");
 
@@ -101,6 +175,12 @@
         catch (HttpRequestException)
         {
             error = L["Agent unreachable: is the ursanas-agent service running?"];
+        }
+        // SMART interroge chaque disque : on ne le relit qu'une fois par minute.
+        if (DateTime.UtcNow - smartAt > TimeSpan.FromMinutes(1))
+        {
+            try { smart = await Agent.GetSmartAsync(); } catch (Exception e) when (e is AgentException or HttpRequestException) { }
+            smartAt = DateTime.UtcNow;
         }
         loaded = true;
     }

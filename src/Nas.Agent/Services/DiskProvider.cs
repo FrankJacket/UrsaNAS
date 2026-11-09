@@ -126,8 +126,19 @@ public sealed class FakeDiskProvider : IDiskProvider
     public Task<IReadOnlyList<DiskInfo>> ListAsync(CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<DiskInfo>>(
         [
-            new("sda", "/dev/sda", 20L << 30, "Virtual Disk", "SYS001", false, ["/", "/boot/efi"]),
-            new("sdb", "/dev/sdb", 10L << 30, "Virtual Disk", "DAT001", false, []),
+            new("sda", "/dev/sda", 40L << 30, "Virtual Disk", "SYS001", false, ["/", "/boot/efi", "[SWAP]"],
+                [
+                    new("sda1", "/dev/sda1", 512L << 20, "vfat", null, "AAAA-0001", ["/boot/efi"]),
+                    new("sda2", "/dev/sda2", 20L << 30, "ext4", null, "uuid-sda2", ["/"]),
+                    new("sda3", "/dev/sda3", 2L << 30, "swap", null, "uuid-sda3", ["[SWAP]"], Msg.F("A partition is mounted: {0}.", "[SWAP]")),
+                ], Msg.F("The system is on this disk."), 17L << 30),
+            new("sdb", "/dev/sdb", 10L << 30, "Virtual Disk", "DAT001", false, [],
+                [new("sdb1", "/dev/sdb1", (10L << 30) - (2L << 20), "ext4", "data", "uuid-sdb1", [])], null, 0),
             new("sdc", "/dev/sdc", 10L << 30, "Virtual Disk", "DAT002", false, []),
+            new("nvme0n1", "/dev/nvme0n1", 500L << 30, "Fake NVMe", "NVME001", false, [],
+                [
+                    new("nvme0n1p1", "/dev/nvme0n1p1", 200L << 30, "zfs_member", null, null, [], Msg.F("This partition belongs to a ZFS pool.")),
+                    new("nvme0n1p2", "/dev/nvme0n1p2", 100L << 30, null, null, null, []),
+                ], Msg.F("This disk belongs to a ZFS pool."), 200L << 30),
         ]);
 }

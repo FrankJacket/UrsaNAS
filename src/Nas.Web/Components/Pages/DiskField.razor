@@ -1,0 +1,9 @@
+<div>
+    <MudText Typo="Typo.caption" Style="color:var(--mud-palette-text-secondary)">@Label</MudText>
+    <MudText Typo="Typo.body1" Style="overflow-wrap:anywhere">@Value</MudText>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Label { get; set; } = "";
+    [Parameter] public string Value { get; set; } = "";
+}
