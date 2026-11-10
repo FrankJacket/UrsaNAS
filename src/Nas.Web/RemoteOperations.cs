@@ -13,6 +13,10 @@ public class RemoteOperations(AgentClient agent, Repo repo, AuthenticationStateP
         ? $"{r.Name} ({r.Type}{(r.Path.Length > 0 ? " /" + r.Path : "")})" // jamais le jeton
         : $"{r.Name} ({r.Type.ToUpperInvariant()} {r.Host}{(r.Type == "nfs" ? ":" : "/")}{r.Path})";
 
+    public Task<DeviceCodeStart> StartSignInAsync() => agent.StartOneDriveSignInAsync();
+
+    public Task<DeviceCodePoll> PollSignInAsync(string deviceCode) => agent.PollOneDriveSignInAsync(deviceCode);
+
     public async Task TestAsync(AddRemoteRequest r)
     {
         if (Rules.ValidateRemote(r) is { } e) throw new AgentException(e);

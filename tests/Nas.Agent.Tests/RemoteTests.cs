@@ -153,6 +153,7 @@ public class RemoteServiceTests : IDisposable
             ["Disks:Fstab"] = Fwd(_fstab), ["Remote:MountRoot"] = Fwd(_root), ["Remote:CredDir"] = Fwd(_creds),
             ["Remote:BinDirs"] = Fwd(_bin), ["Remote:MountInfo"] = Fwd(_mountInfo),
             ["Remote:UnitDir"] = Fwd(_units), ["Remote:CacheDir"] = Fwd(_cache),
+            ["Remote:OneDriveClientId"] = "11111111-2222-3333-4444-555555555555",
         }).Build();
         _svc = new RemoteService(_run, cfg, _drive);
     }
@@ -340,6 +341,17 @@ public class RemoteServiceTests : IDisposable
         Assert.Contains(_run.Calls, c => c.File == "systemctl" && c.Args.SequenceEqual(["enable", "--now", "ursanas-rclone-cloud.service"]));
         Assert.DoesNotContain("SECRET", string.Join(' ', _run.Calls.SelectMany(c => c.Args)));
         Assert.DoesNotContain("ursanas-remote", File.ReadAllText(_fstab)); // pas de ligne fstab : c'est systemd qui remonte
+    }
+
+    [Fact]
+    public async Task Un_jeton_de_la_connexion_integree_ecrit_l_application_pour_que_rclone_le_renouvelle()
+    {
+        await _svc.AddAsync(Cloud() with { OwnApp = true });
+        Assert.Contains("client_id = 11111111-2222-3333-4444-555555555555", File.ReadAllText(Path.Combine(_creds, "cloud.rclone.conf")));
+
+        await _svc.AddAsync(Cloud(name: "autre"));
+        Assert.DoesNotContain("client_id", File.ReadAllText(Path.Combine(_creds, "autre.rclone.conf"))); // jeton collé : rclone garde son application
+        Assert.NotNull(Rules.ValidateRemote(Cloud("dropbox") with { OwnApp = true })); // seulement pour OneDrive
     }
 
     [Fact]

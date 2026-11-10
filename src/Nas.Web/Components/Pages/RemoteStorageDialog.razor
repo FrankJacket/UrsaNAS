@@ -1,3 +1,4 @@
+@implements IDisposable
 @inject RemoteOperations Ops
 
 <MudDialog>
@@ -20,10 +21,38 @@
         @if (cloud)
         {
             <MudTextField @bind-Value="path" Label="@L["Folder in the account (optional)"]" Disabled="busy" HelperText="@L["Empty: the whole account. For example Documents/Photos"]" />
-            <MudText Typo="Typo.body2" Class="mt-3">@L["Sign in from a computer where rclone is installed, then paste the result here:"]</MudText>
-            <MudText Typo="Typo.body2" Class="mb-2"><code>rclone authorize "@type"</code></MudText>
-            <MudTextField @bind-Value="token" Label="@L["Access token"]" Lines="4" Variant="Variant.Outlined" Disabled="busy" Immediate="true"
-                          HelperText="@L["The whole text the command prints (it contains access_token). Kept in a file only root can read."]" />
+            @if (integrated)
+            {
+                <div class="mt-3 mb-2">
+                    @if (ownApp)
+                    {
+                        <MudAlert Severity="Severity.Success" Dense="true">@L["Signed in to Microsoft. Finish the form, then add the connection."]</MudAlert>
+                    }
+                    else if (device is not null)
+                    {
+                        <MudText Typo="Typo.body2">@L["Open this page on any device, and enter the code:"]</MudText>
+                        <MudText Typo="Typo.body1"><MudLink Href="@device.VerificationUri" Target="_blank">@device.VerificationUri</MudLink></MudText>
+                        <MudText Typo="Typo.h4" Class="my-2" Style="letter-spacing:.15em;user-select:all">@device.UserCode</MudText>
+                        <MudText Typo="Typo.caption">@L["Waiting for the sign-in…"]</MudText>
+                        <MudProgressLinear Indeterminate="true" Class="mt-1" />
+                    }
+                    else
+                    {
+                        <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="StartSignIn" Disabled="busy">@L["Sign in to Microsoft"]</MudButton>
+                    }
+                </div>
+            }
+            @if (!integrated || showManual)
+            {
+                <MudText Typo="Typo.body2" Class="mt-3">@L["Sign in from a computer where rclone is installed, then paste the result here:"]</MudText>
+                <MudText Typo="Typo.body2" Class="mb-2"><code>rclone authorize "@type"</code></MudText>
+                <MudTextField Value="token" ValueChanged="OnTokenTyped" T="string" Label="@L["Access token"]" Lines="4" Variant="Variant.Outlined" Disabled="busy" Immediate="true"
+                              HelperText="@L["The whole text the command prints (it contains access_token). Kept in a file only root can read."]" />
+            }
+            else if (device is null && !ownApp)
+            {
+                <MudLink Typo="Typo.caption" OnClick="() => showManual = true">@L["Paste a token from rclone instead"]</MudLink>
+            }
             <MudSelect T="string" @bind-Value="cache" Label="@L["Cache on the NAS"]" Disabled="busy">
                 <MudSelectItem T="string" Value="@("full")">@L["Full (reads and writes, fastest)"]</MudSelectItem>
                 <MudSelectItem T="string" Value="@("writes")">@L["Writes only"]</MudSelectItem>
@@ -67,6 +96,40 @@
 @code {
     [CascadingParameter] IMudDialogInstance Dialog { get; set; } = default!;
     [Parameter, EditorRequired] public IReadOnlyList<string> Types { get; set; } = [];
+    [Parameter] public bool OneDriveSignIn { get; set; }
+
+    readonly CancellationTokenSource cts = new();
+    DeviceCodeStart? device;
+    bool ownApp, showManual;
+    bool integrated => type == "onedrive" && OneDriveSignIn;
+
+    public void Dispose() { cts.Cancel(); cts.Dispose(); }
+
+    void OnTokenTyped(string value) { token = value; ownApp = false; }
+
+    async Task StartSignIn()
+    {
+        error = ok = null;
+        try
+        {
+            device = await Ops.StartSignInAsync();
+            var deadline = DateTime.UtcNow.AddSeconds(device.ExpiresIn);
+            var delay = TimeSpan.FromSeconds(Math.Max(device.Interval, 3));
+            while (!cts.IsCancellationRequested && DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(delay, cts.Token);
+                var poll = await Ops.PollSignInAsync(device.DeviceCode);
+                if (poll.Status == "done") { token = poll.Token ?? ""; ownApp = true; device = null; return; }
+                if (poll.Status == "error") { error = L.Translate(poll.Message ?? ""); device = null; return; }
+                await InvokeAsync(StateHasChanged);
+            }
+            if (!cts.IsCancellationRequested) error = L["The code has expired. Start again."];
+            device = null;
+        }
+        catch (OperationCanceledException) { }
+        catch (AgentException e) { error = L.Translate(e.Message); device = null; }
+        catch (HttpRequestException) { error = L["Agent unreachable."]; device = null; }
+    }
 
     string type = "smb", name = "", host = "", path = "", user = "", password = "", domain = "", version = "", token = "", cache = "full";
     int cacheGb = 10, bwLimit;
@@ -84,7 +147,7 @@
     AddRemoteRequest Request()
     {
         if (cloud)
-            return new(name.Trim(), type, "", path.Trim().Trim('/'), null, null, null, null, readOnly, token.Trim(), cache, cacheGb, bwLimit);
+            return new(name.Trim(), type, "", path.Trim().Trim('/'), null, null, null, null, readOnly, token.Trim(), cache, cacheGb, bwLimit, ownApp && type == "onedrive");
         var smbUser = type == "smb" && user.Trim().Length > 0;
         return new(name.Trim(), type, host.Trim(), path.Trim(), smbUser ? user.Trim() : null, smbUser ? password : null,
             smbUser && domain.Trim().Length > 0 ? domain.Trim() : null, version.Length > 0 ? version : null, readOnly);

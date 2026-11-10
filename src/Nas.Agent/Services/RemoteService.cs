@@ -328,6 +328,13 @@ public sealed class RemoteService(ICommandRunner run, IConfiguration cfg, IDrive
         {
             using var doc = JsonDocument.Parse(token);
             var (id, type) = await _lookup.OneDriveAsync(doc.RootElement.GetProperty("access_token").GetString()!, ct);
+            // Jeton obtenu par la connexion intégrée : rclone doit le renouveler avec la même application.
+            if (r.OwnApp)
+            {
+                var clientId = cfg["Remote:OneDriveClientId"];
+                if (!Guid.TryParse(clientId, out _)) throw new OperationException(Msg.F("The OneDrive sign-in is not configured on this NAS."));
+                conf += $"client_id = {clientId}\n";
+            }
             conf += $"drive_id = {id}\ndrive_type = {type}\n";
         }
         return conf;

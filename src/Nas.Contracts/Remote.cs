@@ -17,10 +17,18 @@ public sealed record RemoteStorage(string Name, string Type, string Host, string
 /// <c>BwLimitMbps</c> 0 = pas de limite.
 /// </summary>
 public sealed record AddRemoteRequest(string Name, string Type, string Host, string Path, string? User, string? Password, string? Domain, string? Version, bool ReadOnly,
-    string? Token = null, string Cache = "full", int CacheGb = 10, int BwLimitMbps = 0);
+    string? Token = null, string Cache = "full", int CacheGb = 10, int BwLimitMbps = 0, bool OwnApp = false);
 
-/// <summary>Types de stockage distant que le NAS sait monter (selon les programmes installés).</summary>
-public sealed record RemoteTypes(IReadOnlyList<string> Available);
+/// <summary>Types de stockage distant que le NAS sait monter (selon les programmes installés). <c>OneDriveSignIn</c> : la connexion intégrée à OneDrive est configurée.</summary>
+public sealed record RemoteTypes(IReadOnlyList<string> Available, bool OneDriveSignIn = false);
+
+/// <summary>Début d'une connexion par code d'appareil : l'utilisateur saisit <c>UserCode</c> sur <c>VerificationUri</c>.</summary>
+public sealed record DeviceCodeStart(string DeviceCode, string UserCode, string VerificationUri, int ExpiresIn, int Interval);
+
+/// <summary>État d'une connexion par code d'appareil : <c>pending</c>, <c>done</c> (avec le jeton au format rclone) ou <c>error</c>.</summary>
+public sealed record DeviceCodePoll(string Status, string? Token = null, string? Message = null);
+
+public sealed record DeviceCodePollRequest(string DeviceCode);
 
 public static partial class Rules
 {
@@ -94,6 +102,7 @@ public static partial class Rules
         if (folder.Length > 300 || folder.Any(char.IsControl) || folder.IndexOfAny(['\\', ',', '"', '\'', '%', '$']) >= 0
             || folder.StartsWith('/') || folder.Split('/').Contains("..") || folder.Contains("//"))
             return Msg.F("Invalid folder: a path inside the account, without a leading /.");
+        if (r.OwnApp && r.Type != "onedrive") return Msg.F("Unknown type of remote storage.");
         if (!IsRcloneToken(r.Token, out _)) return Msg.F("Invalid access token: paste the whole result of “rclone authorize”.");
         if (!CacheModes.Contains(r.Cache)) return Msg.F("Unknown cache mode.");
         if (r.CacheGb is < 1 or > 1000) return Msg.F("The cache size is between 1 and 1000 GB.");

@@ -50,6 +50,7 @@ else if (loaded && types.Count == 0)
 @code {
     List<RemoteStorage> remotes = new();
     IReadOnlyList<string> types = [];
+    bool signIn;
     string? error;
     bool loaded;
 
@@ -69,7 +70,9 @@ else if (loaded && types.Count == 0)
         try
         {
             remotes = (await Agent.GetRemotesAsync()).ToList();
-            types = await Agent.GetRemoteTypesAsync();
+            var t = await Agent.GetRemoteTypesFullAsync();
+            types = t.Available;
+            signIn = t.OneDriveSignIn;
             error = null;
         }
         catch (AgentException e) { error = L.Translate(e.Message); }
@@ -79,7 +82,7 @@ else if (loaded && types.Count == 0)
 
     async Task Add()
     {
-        var parameters = new DialogParameters<RemoteStorageDialog> { { x => x.Types, types } };
+        var parameters = new DialogParameters<RemoteStorageDialog> { { x => x.Types, types }, { x => x.OneDriveSignIn, signIn } };
         var dialog = await Dialogs.ShowAsync<RemoteStorageDialog>(L["New connection"], parameters, Options);
         if (await dialog.Result is { Canceled: false })
         {

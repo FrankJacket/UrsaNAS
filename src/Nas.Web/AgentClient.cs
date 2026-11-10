@@ -43,6 +43,27 @@ public class AgentClient(HttpClient http)
     // ---- Stockages distants
     public Task<IReadOnlyList<RemoteStorage>> GetRemotesAsync(CancellationToken ct = default) => GetListAsync<RemoteStorage>("remote", ct);
 
+    public async Task<DeviceCodeStart> StartOneDriveSignInAsync(CancellationToken ct = default)
+    {
+        using var r = await http.PostAsync("remote/oauth/onedrive/start", null, ct);
+        await EnsureOkAsync(r, ct);
+        return (await r.Content.ReadFromJsonAsync<DeviceCodeStart>(ct))!;
+    }
+
+    public async Task<DeviceCodePoll> PollOneDriveSignInAsync(string deviceCode, CancellationToken ct = default)
+    {
+        using var r = await http.PostAsJsonAsync("remote/oauth/onedrive/poll", new DeviceCodePollRequest(deviceCode), ct);
+        await EnsureOkAsync(r, ct);
+        return (await r.Content.ReadFromJsonAsync<DeviceCodePoll>(ct))!;
+    }
+
+    public async Task<RemoteTypes> GetRemoteTypesFullAsync(CancellationToken ct = default)
+    {
+        using var r = await http.GetAsync("remote/types", ct);
+        await EnsureOkAsync(r, ct);
+        return (await r.Content.ReadFromJsonAsync<RemoteTypes>(ct)) ?? new RemoteTypes([]);
+    }
+
     public async Task<IReadOnlyList<string>> GetRemoteTypesAsync(CancellationToken ct = default)
     {
         using var r = await http.GetAsync("remote/types", ct);

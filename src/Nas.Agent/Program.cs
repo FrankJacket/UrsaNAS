@@ -27,6 +27,9 @@ public partial class Program
     public static void Main(string[] args)
     {
         var builder = WebApplication.CreateBuilder(args);
+        // Lancé par systemd, le dossier courant est « / » : le appsettings.json installé à côté du programme n'est pas lu tout seul.
+        if (Path.GetDirectoryName(Environment.ProcessPath) is { Length: > 0 } exeDir && !Path.GetFileNameWithoutExtension(Environment.ProcessPath)!.Equals("dotnet", StringComparison.OrdinalIgnoreCase))
+            builder.Configuration.AddJsonFile(Path.Combine(exeDir, "appsettings.json"), optional: true);
 
         var socketPath = builder.Configuration["Agent:SocketPath"];
         if (!string.IsNullOrWhiteSpace(socketPath))
@@ -57,9 +60,15 @@ public partial class Program
         builder.Services.AddSingleton<VmService>();
         builder.Services.AddSingleton<DiskService>();
         if (builder.Configuration["URSANAS_FAKE"] == "1")
+        {
             builder.Services.AddSingleton<IDriveLookup, FakeDriveLookup>();
+            builder.Services.AddSingleton<IOneDriveSignIn, FakeOneDriveSignIn>();
+        }
         else
+        {
             builder.Services.AddSingleton<IDriveLookup, GraphDriveLookup>();
+            builder.Services.AddSingleton<IOneDriveSignIn>(sp => new MicrosoftOneDriveSignIn(sp.GetRequiredService<IConfiguration>()));
+        }
         builder.Services.AddSingleton<RemoteService>();
         builder.Services.AddSingleton<ShareService>();
         builder.Services.AddSingleton<GroupService>();
@@ -90,7 +99,11 @@ public partial class Program
 
         // Stockages distants (SMB, NFS)
         app.MapGet("/remote", (RemoteService s) => Read(() => Task.FromResult(Results.Ok(s.List()))));
-        app.MapGet("/remote/types", (RemoteService s) => Results.Ok(s.Types()));
+        app.MapGet("/remote/types", (RemoteService s, IOneDriveSignIn o) => Results.Ok(s.Types() with { OneDriveSignIn = o.Configured }));
+        app.MapPost("/remote/oauth/onedrive/start", (IOneDriveSignIn o, CancellationToken ct) =>
+            Read(async () => Results.Ok(await o.StartAsync(ct))));
+        app.MapPost("/remote/oauth/onedrive/poll", (DeviceCodePollRequest r, IOneDriveSignIn o, CancellationToken ct) =>
+            Read(async () => Results.Ok(await o.PollAsync(r.DeviceCode, ct))));
         app.MapPost("/remote/test", (AddRemoteRequest r, RemoteService s, CancellationToken ct) =>
             Read(async () => { await s.TestAsync(r, ct); return Results.NoContent(); }));
         app.MapPost("/remote", (AddRemoteRequest r, RemoteService s, CancellationToken ct) =>
