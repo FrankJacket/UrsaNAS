@@ -59,12 +59,76 @@ public class RemoteRulesTests
     }
 }
 
+public class RemoteCloudRulesTests
+{
+    const string Token = "{\"access_token\":\"abc\",\"refresh_token\":\"def\",\"expiry\":\"2026-11-10T16:00:00Z\"}";
+
+    static AddRemoteRequest Cloud(string? token = Token, string path = "", string cache = "full", int gb = 10, int bw = 0, string type = "onedrive") =>
+        new("c1", type, "", path, null, null, null, null, false, token, cache, gb, bw);
+
+    [Fact]
+    public void Un_compte_en_ligne_correct_est_accepte()
+    {
+        Assert.Null(Rules.ValidateRemote(Cloud()));
+        Assert.Null(Rules.ValidateRemote(Cloud(type: "dropbox", path: "Documents/Mes photos", cache: "off", bw: 10)));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("pas du json")]
+    [InlineData("[1,2]")]
+    [InlineData("{\"refresh_token\":\"x\"}")]          // pas d'access_token
+    [InlineData("{\"access_token\":\"\"}")]
+    public void Un_jeton_invalide_est_refuse(string? token) => Assert.NotNull(Rules.ValidateRemote(Cloud(token)));
+
+    [Fact]
+    public void Le_jeton_est_remis_sur_une_seule_ligne()
+    {
+        Assert.True(Rules.IsRcloneToken("  {\n  \"access_token\": \"abc\",\n  \"expiry\": \"x\"\n}\n", out var compact));
+        Assert.DoesNotContain('\n', compact);
+        Assert.StartsWith("{", compact);
+    }
+
+    [Theory]
+    [InlineData("/Documents")]
+    [InlineData("a/../b")]
+    [InlineData("a%20b")]       // « % » et « $ » sont interprétés par systemd dans l'unité
+    [InlineData("a$b")]
+    [InlineData("a\"b")]
+    [InlineData("a\\b")]
+    [InlineData("a\nb")]
+    public void Un_sous_dossier_dangereux_est_refuse(string path) => Assert.NotNull(Rules.ValidateRemote(Cloud(path: path)));
+
+    [Fact]
+    public void Le_cache_et_le_debit_sont_bornes()
+    {
+        Assert.NotNull(Rules.ValidateRemote(Cloud(cache: "all")));
+        Assert.NotNull(Rules.ValidateRemote(Cloud(gb: 0)));
+        Assert.NotNull(Rules.ValidateRemote(Cloud(gb: 5000)));
+        Assert.NotNull(Rules.ValidateRemote(Cloud(bw: -1)));
+    }
+}
+
 public class RemoteServiceTests : IDisposable
 {
     readonly string _dir = Path.Combine(Path.GetTempPath(), "ursanas-remote-" + Guid.NewGuid().ToString("N"));
-    readonly string _fstab, _root, _creds, _bin, _mountInfo;
+    readonly string _fstab, _root, _creds, _bin, _mountInfo, _units, _cache;
     readonly FakeRunner _run = new();
+    readonly StubDrive _drive = new();
     readonly RemoteService _svc;
+
+    sealed class StubDrive : IDriveLookup
+    {
+        public int Calls;
+        public string? Token;
+        public Task<(string Id, string Type)> OneDriveAsync(string accessToken, CancellationToken ct)
+        {
+            Calls++;
+            Token = accessToken;
+            return Task.FromResult(("DRIVE123", "personal"));
+        }
+    }
 
     static string Fwd(string p) => p.Replace((char)92, '/');
 
@@ -79,14 +143,26 @@ public class RemoteServiceTests : IDisposable
         File.WriteAllText(_fstab, "UUID=abc / ext4 defaults 0 1\n");
         File.WriteAllText(Path.Combine(_bin, "mount.cifs"), "");
         File.WriteAllText(Path.Combine(_bin, "mount.nfs"), "");
+        File.WriteAllText(Path.Combine(_bin, "rclone"), "");
+        File.WriteAllText(Path.Combine(_bin, "fusermount3"), "");
         File.WriteAllText(_mountInfo, "");
+        _units = Path.Combine(_dir, "units");
+        _cache = Path.Combine(_dir, "cache");
         var cfg = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["Disks:Fstab"] = Fwd(_fstab), ["Remote:MountRoot"] = Fwd(_root), ["Remote:CredDir"] = Fwd(_creds),
             ["Remote:BinDirs"] = Fwd(_bin), ["Remote:MountInfo"] = Fwd(_mountInfo),
+            ["Remote:UnitDir"] = Fwd(_units), ["Remote:CacheDir"] = Fwd(_cache),
         }).Build();
-        _svc = new RemoteService(_run, cfg);
+        _svc = new RemoteService(_run, cfg, _drive);
     }
+
+    const string Token = "{\"access_token\":\"AT-SECRET\",\"token_type\":\"Bearer\",\"refresh_token\":\"RT-SECRET\",\"expiry\":\"2026-11-10T16:00:00Z\"}";
+
+    static AddRemoteRequest Cloud(string type = "onedrive", string name = "cloud") =>
+        new(name, type, "", "Documents/Photos", null, null, null, null, false, Token, "full", 10, 0);
+
+    string Unit(string name) => File.ReadAllText(Path.Combine(_units, $"ursanas-rclone-{name}.service"));
 
     public void Dispose() { try { Directory.Delete(_dir, true); } catch (IOException) { } }
 
@@ -180,7 +256,8 @@ public class RemoteServiceTests : IDisposable
 
         File.Delete(Path.Combine(_bin, "mount.nfs"));
         await Assert.ThrowsAsync<OperationException>(() => _svc.AddAsync(new AddRemoteRequest("x", "nfs", "h", "/p", null, null, null, null, false)));
-        Assert.Equal(["smb"], _svc.Types().Available);
+        Assert.DoesNotContain("nfs", _svc.Types().Available);
+        Assert.Contains("smb", _svc.Types().Available);
     }
 
     [Fact]
@@ -229,6 +306,146 @@ public class RemoteServiceTests : IDisposable
         Assert.Empty(_run.Calls);
         await _svc.UnmountAsync("photos");
         Assert.Equal("umount", Assert.Single(_run.Calls).File);
+    }
+
+    // ---- OneDrive et Dropbox
+
+    [Fact]
+    public async Task Ajoute_un_onedrive_avec_son_disque_son_unite_systemd_et_sans_fuite_du_jeton()
+    {
+        await _svc.AddAsync(Cloud() with { ReadOnly = true, CacheGb = 20, BwLimitMbps = 5 });
+
+        Assert.Equal("AT-SECRET", _drive.Token); // le disque du compte est retrouvé avec le jeton
+        var conf = File.ReadAllText(Path.Combine(_creds, "cloud.rclone.conf"));
+        Assert.Contains("[cloud]", conf);
+        Assert.Contains("type = onedrive", conf);
+        Assert.Contains("drive_id = DRIVE123", conf);
+        Assert.Contains("drive_type = personal", conf);
+        Assert.Contains("RT-SECRET", conf);
+
+        var lsd = Assert.Single(_run.Calls, c => c.File.EndsWith("rclone") && c.Args[0] == "lsd"); // un compte inaccessible est refusé d'abord
+        Assert.Equal("cloud:Documents/Photos", lsd.Args[1]);
+
+        var unit = Unit("cloud");
+        Assert.Contains("mount \"cloud:Documents/Photos\" \"" + Target("cloud") + "\"", unit);
+        Assert.Contains("--vfs-cache-mode full", unit);
+        Assert.Contains("--vfs-cache-max-size 20G", unit);
+        Assert.Contains("--read-only", unit);
+        Assert.Contains("--bwlimit 5M", unit);
+        Assert.Contains("Type=notify", unit);
+        Assert.Contains("fusermount3 -uz", unit);
+        Assert.DoesNotContain("SECRET", unit); // le jeton n'est que dans le fichier rclone
+
+        Assert.Contains(_run.Calls, c => c.File == "systemctl" && c.Args[0] == "daemon-reload");
+        Assert.Contains(_run.Calls, c => c.File == "systemctl" && c.Args.SequenceEqual(["enable", "--now", "ursanas-rclone-cloud.service"]));
+        Assert.DoesNotContain("SECRET", string.Join(' ', _run.Calls.SelectMany(c => c.Args)));
+        Assert.DoesNotContain("ursanas-remote", File.ReadAllText(_fstab)); // pas de ligne fstab : c'est systemd qui remonte
+    }
+
+    [Fact]
+    public async Task Dropbox_n_interroge_pas_de_disque_et_le_cache_complet_est_optionnel()
+    {
+        await _svc.AddAsync(Cloud("dropbox") with { Path = "", Cache = "writes" });
+
+        Assert.Equal(0, _drive.Calls);
+        var conf = File.ReadAllText(Path.Combine(_creds, "cloud.rclone.conf"));
+        Assert.Contains("type = dropbox", conf);
+        Assert.DoesNotContain("drive_id", conf);
+        Assert.Equal("cloud:", Assert.Single(_run.Calls, c => c.Args.Length > 0 && c.Args[0] == "lsd").Args[1]); // racine du compte
+        var unit = Unit("cloud");
+        Assert.Contains("--vfs-cache-mode writes", unit);
+        Assert.DoesNotContain("--vfs-cache-max-size", unit);
+        Assert.DoesNotContain("--bwlimit", unit);
+    }
+
+    [Fact]
+    public async Task La_liste_montre_les_connexions_en_ligne_et_leurs_reglages()
+    {
+        await _svc.AddAsync(Smb());
+        await _svc.AddAsync(Cloud() with { CacheGb = 30, BwLimitMbps = 2 });
+
+        var list = _svc.List();
+        Assert.Equal(["cloud", "photos"], list.Select(r => r.Name));
+        var c = list[0];
+        Assert.Equal(("onedrive", "", "Documents/Photos", "full", 30, 2), (c.Type, c.Host, c.Path, c.Cache, c.CacheGb, c.BwLimitMbps));
+        Assert.False(c.Mounted);
+
+        File.WriteAllText(_mountInfo, $"36 35 0:40 / {Target("cloud")} rw - fuse.rclone cloud: rw\n");
+        Assert.True(_svc.List()[0].Mounted);
+    }
+
+    [Fact]
+    public async Task Un_compte_inaccessible_ne_laisse_rien_et_l_erreur_ne_contient_pas_le_jeton()
+    {
+        _run.Handler = c => c.Args.Length > 0 && c.Args[0] == "lsd" ? new(1, "", "Failed to create file system: couldn't login: " + Token) : new(0, "", "");
+
+        var e = await Assert.ThrowsAsync<OperationException>(() => _svc.AddAsync(Cloud()));
+
+        Assert.DoesNotContain("SECRET", e.Message);
+        Assert.Empty(Directory.GetFiles(_creds));
+        Assert.False(Directory.Exists(_units) && Directory.GetFiles(_units).Length > 0);
+        Assert.DoesNotContain(_run.Calls, c => c.File == "systemctl");
+        Assert.Empty(_svc.List());
+    }
+
+    [Fact]
+    public async Task Une_unite_qui_ne_demarre_pas_est_defaite_et_le_journal_explique_pourquoi()
+    {
+        _run.Handler = c => c.File switch
+        {
+            "systemctl" when c.Args[0] == "enable" => new(1, "", "Job for ursanas-rclone-cloud.service failed."),
+            "journalctl" => new(0, "Failed to mount: fusermount3: fuse device not found\n", ""),
+            _ => new(0, "", ""),
+        };
+
+        var e = await Assert.ThrowsAsync<OperationException>(() => _svc.AddAsync(Cloud()));
+
+        Assert.Contains("fuse device not found", e.Message);
+        Assert.Contains(_run.Calls, c => c.File == "systemctl" && c.Args.SequenceEqual(["disable", "--now", "ursanas-rclone-cloud.service"]));
+        Assert.Empty(Directory.GetFiles(_creds));
+        Assert.Empty(Directory.GetFiles(_units));
+        Assert.Empty(_svc.List());
+    }
+
+    [Fact]
+    public async Task Monter_demonter_et_supprimer_une_connexion_en_ligne_passent_par_systemd()
+    {
+        await _svc.AddAsync(Cloud());
+        _run.Calls.Clear();
+
+        await _svc.MountAsync("cloud");
+        await _svc.UnmountAsync("cloud");
+        Assert.Equal([["start", "ursanas-rclone-cloud.service"], ["stop", "ursanas-rclone-cloud.service"]],
+            _run.Calls.Where(c => c.File == "systemctl").Select(c => c.Args).ToList());
+
+        await _svc.RemoveAsync("cloud");
+        Assert.Contains(_run.Calls, c => c.File == "systemctl" && c.Args.SequenceEqual(["disable", "--now", "ursanas-rclone-cloud.service"]));
+        Assert.Empty(Directory.GetFiles(_creds));
+        Assert.Empty(Directory.GetFiles(_units));
+        Assert.False(Directory.Exists(Path.Combine(_cache, "cloud")));
+        Assert.Empty(_svc.List());
+    }
+
+    [Fact]
+    public async Task Tester_un_compte_ne_garde_rien()
+    {
+        await _svc.TestAsync(Cloud());
+
+        Assert.Contains(_run.Calls, c => c.Args.Length > 0 && c.Args[0] == "lsd");
+        Assert.DoesNotContain(_run.Calls, c => c.File == "systemctl");
+        Assert.Empty(Directory.GetFiles(_creds));
+        Assert.False(Directory.Exists(_units));
+    }
+
+    [Fact]
+    public async Task Un_nom_est_unique_entre_smb_nfs_et_en_ligne_et_rclone_est_requis()
+    {
+        await _svc.AddAsync(Smb("shared"));
+        await Assert.ThrowsAsync<OperationException>(() => _svc.AddAsync(Cloud(name: "shared")));
+
+        File.Delete(Path.Combine(_bin, "fusermount3"));
+        await Assert.ThrowsAsync<OperationException>(() => _svc.AddAsync(Cloud(name: "other")));
+        Assert.DoesNotContain("onedrive", _svc.Types().Available);
     }
 
     [Theory]

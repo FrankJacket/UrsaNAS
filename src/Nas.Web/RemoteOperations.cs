@@ -9,7 +9,9 @@ public class RemoteOperations(AgentClient agent, Repo repo, AuthenticationStateP
 {
     async Task<string> ActorAsync() => (await auth.GetAuthenticationStateAsync()).User.Identity?.Name ?? "unknown";
 
-    static string Describe(AddRemoteRequest r) => $"{r.Name} ({r.Type.ToUpperInvariant()} {r.Host}{(r.Type == "nfs" ? ":" : "/")}{r.Path})";
+    static string Describe(AddRemoteRequest r) => Rules.IsCloud(r.Type)
+        ? $"{r.Name} ({r.Type}{(r.Path.Length > 0 ? " /" + r.Path : "")})" // jamais le jeton
+        : $"{r.Name} ({r.Type.ToUpperInvariant()} {r.Host}{(r.Type == "nfs" ? ":" : "/")}{r.Path})";
 
     public async Task TestAsync(AddRemoteRequest r)
     {

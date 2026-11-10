@@ -12,7 +12,7 @@
 }
 else if (loaded && types.Count == 0)
 {
-    <MudAlert Severity="Severity.Warning" Class="mb-4">@L["Neither cifs-utils (SMB) nor nfs-common (NFS) is installed on the NAS."]</MudAlert>
+    <MudAlert Severity="Severity.Warning" Class="mb-4">@L["None of cifs-utils (SMB), nfs-common (NFS) or rclone (OneDrive, Dropbox) is installed on the NAS."]</MudAlert>
 }
 <MudStack Row="true" Class="mb-4">
     <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="Add" Disabled="@(types.Count == 0)">@L["Add a connection"]</MudButton>
@@ -21,9 +21,9 @@ else if (loaded && types.Count == 0)
     <HeaderContent><MudTh>@L["Name"]</MudTh><MudTh>@L["Type"]</MudTh><MudTh>@L["Server"]</MudTh><MudTh>@L["Folder"]</MudTh><MudTh>@L["Status"]</MudTh><MudTh>@L["Space"]</MudTh><MudTh></MudTh></HeaderContent>
     <RowTemplate>
         <MudTd>@context.Name</MudTd>
-        <MudTd><MudChip T="string" Size="Size.Small" Color="Color.Info">@context.Type.ToUpperInvariant()</MudChip></MudTd>
+        <MudTd><MudChip T="string" Size="Size.Small" Color="Color.Info">@TypeLabel(context.Type)</MudChip></MudTd>
         <MudTd>
-            <code>@(context.Type == "nfs" ? $"{context.Host}:{context.Path}" : $"//{context.Host}/{context.Path}")</code>
+            <code>@Location(context)</code>
             @if (context.User is not null) { <MudText Typo="Typo.caption" Class="d-block">@(context.Domain is null ? context.User : $"{context.Domain}\\{context.User}")</MudText> }
         </MudTd>
         <MudTd><code>@context.MountPoint</code></MudTd>
@@ -52,6 +52,15 @@ else if (loaded && types.Count == 0)
     IReadOnlyList<string> types = [];
     string? error;
     bool loaded;
+
+    static string TypeLabel(string type) => type switch { "onedrive" => "OneDrive", "dropbox" => "Dropbox", _ => type.ToUpperInvariant() };
+
+    static string Location(RemoteStorage r) => r.Type switch
+    {
+        "nfs" => $"{r.Host}:{r.Path}",
+        "smb" => $"//{r.Host}/{r.Path}",
+        _ => "/" + r.Path, // en ligne : le sous-dossier du compte (la racine si vide)
+    };
 
     static readonly DialogOptions Options = new() { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true, BackdropClick = false };
 

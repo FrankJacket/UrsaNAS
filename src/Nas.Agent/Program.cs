@@ -56,6 +56,10 @@ public partial class Program
         builder.Services.AddSingleton<DockerService>();
         builder.Services.AddSingleton<VmService>();
         builder.Services.AddSingleton<DiskService>();
+        if (builder.Configuration["URSANAS_FAKE"] == "1")
+            builder.Services.AddSingleton<IDriveLookup, FakeDriveLookup>();
+        else
+            builder.Services.AddSingleton<IDriveLookup, GraphDriveLookup>();
         builder.Services.AddSingleton<RemoteService>();
         builder.Services.AddSingleton<ShareService>();
         builder.Services.AddSingleton<GroupService>();

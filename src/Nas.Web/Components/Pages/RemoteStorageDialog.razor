@@ -13,26 +13,47 @@
         <MudSelect T="string" @bind-Value="type" Label="@L["Type"]" Disabled="busy">
             @foreach (var t in Types)
             {
-                <MudSelectItem T="string" Value="@t">@(t == "smb" ? "SMB / CIFS (Windows, Samba, NAS)" : "NFS")</MudSelectItem>
+                <MudSelectItem T="string" Value="@t">@TypeLabel(t)</MudSelectItem>
             }
         </MudSelect>
         <MudTextField @bind-Value="name" Label="@L["Folder name"]" Immediate="true" Disabled="busy" HelperText="@L["The storage will appear under /srv/remote/{0}", name]" />
-        <MudTextField @bind-Value="host" Label="@L["Server"]" Disabled="busy" HelperText="@L["Name or IP address"]" />
-        <MudTextField @bind-Value="path" Label="@(type == "smb" ? L["Share name"] : L["Exported path"])" Disabled="busy"
-                      HelperText="@(type == "smb" ? L["For example photos, or photos/2024"] : L["For example /volume1/photos"])" />
-        @if (type == "smb")
+        @if (cloud)
         {
-            <MudTextField @bind-Value="user" Label="@L["User (empty: guest access)"]" Disabled="busy" />
-            <MudTextField @bind-Value="password" Label="@L["Password"]" InputType="InputType.Password" Disabled="@(busy || user.Trim().Length == 0)" />
-            <MudTextField @bind-Value="domain" Label="@L["Domain (optional)"]" Disabled="@(busy || user.Trim().Length == 0)" />
-        }
-        <MudSelect T="string" @bind-Value="version" Label="@L["Protocol version"]" Disabled="busy">
-            <MudSelectItem T="string" Value="@("")">@L["Automatic"]</MudSelectItem>
-            @foreach (var v in type == "smb" ? Rules.SmbVersions : Rules.NfsVersions)
+            <MudTextField @bind-Value="path" Label="@L["Folder in the account (optional)"]" Disabled="busy" HelperText="@L["Empty: the whole account. For example Documents/Photos"]" />
+            <MudText Typo="Typo.body2" Class="mt-3">@L["Sign in from a computer where rclone is installed, then paste the result here:"]</MudText>
+            <MudText Typo="Typo.body2" Class="mb-2"><code>rclone authorize "@type"</code></MudText>
+            <MudTextField @bind-Value="token" Label="@L["Access token"]" Lines="4" Variant="Variant.Outlined" Disabled="busy" Immediate="true"
+                          HelperText="@L["The whole text the command prints (it contains access_token). Kept in a file only root can read."]" />
+            <MudSelect T="string" @bind-Value="cache" Label="@L["Cache on the NAS"]" Disabled="busy">
+                <MudSelectItem T="string" Value="@("full")">@L["Full (reads and writes, fastest)"]</MudSelectItem>
+                <MudSelectItem T="string" Value="@("writes")">@L["Writes only"]</MudSelectItem>
+                <MudSelectItem T="string" Value="@("off")">@L["None (slow, direct access)"]</MudSelectItem>
+            </MudSelect>
+            @if (cache == "full")
             {
-                <MudSelectItem T="string" Value="@v">@v</MudSelectItem>
+                <MudNumericField T="int" @bind-Value="cacheGb" Min="1" Max="1000" Label="@L["Cache size (GB)"]" Disabled="busy" />
             }
-        </MudSelect>
+            <MudNumericField T="int" @bind-Value="bwLimit" Min="0" Max="100000" Label="@L["Speed limit (MB/s, 0 = none)"]" Disabled="busy" />
+        }
+        else
+        {
+            <MudTextField @bind-Value="host" Label="@L["Server"]" Disabled="busy" HelperText="@L["Name or IP address"]" />
+            <MudTextField @bind-Value="path" Label="@(type == "smb" ? L["Share name"] : L["Exported path"])" Disabled="busy"
+                          HelperText="@(type == "smb" ? L["For example photos, or photos/2024"] : L["For example /volume1/photos"])" />
+            @if (type == "smb")
+            {
+                <MudTextField @bind-Value="user" Label="@L["User (empty: guest access)"]" Disabled="busy" />
+                <MudTextField @bind-Value="password" Label="@L["Password"]" InputType="InputType.Password" Disabled="@(busy || user.Trim().Length == 0)" />
+                <MudTextField @bind-Value="domain" Label="@L["Domain (optional)"]" Disabled="@(busy || user.Trim().Length == 0)" />
+            }
+            <MudSelect T="string" @bind-Value="version" Label="@L["Protocol version"]" Disabled="busy">
+                <MudSelectItem T="string" Value="@("")">@L["Automatic"]</MudSelectItem>
+                @foreach (var v in type == "smb" ? Rules.SmbVersions : Rules.NfsVersions)
+                {
+                    <MudSelectItem T="string" Value="@v">@v</MudSelectItem>
+                }
+            </MudSelect>
+        }
         <MudCheckBox T="bool" @bind-Value="readOnly" Label="@L["Read-only"]" Disabled="busy" />
         <MudText Typo="Typo.caption">@L["The connection is mounted now and at every start."]</MudText>
     </DialogContent>
@@ -47,17 +68,27 @@
     [CascadingParameter] IMudDialogInstance Dialog { get; set; } = default!;
     [Parameter, EditorRequired] public IReadOnlyList<string> Types { get; set; } = [];
 
-    string type = "smb", name = "", host = "", path = "", user = "", password = "", domain = "", version = "";
+    string type = "smb", name = "", host = "", path = "", user = "", password = "", domain = "", version = "", token = "", cache = "full";
+    int cacheGb = 10, bwLimit;
     bool readOnly, busy, testing;
     string? error, ok;
 
-    bool Filled => name.Trim().Length > 0 && host.Trim().Length > 0 && path.Trim().Length > 0;
+    bool cloud => Rules.IsCloud(type);
+
+    static string TypeLabel(string t) => t switch { "smb" => "SMB / CIFS (Windows, Samba, NAS)", "nfs" => "NFS", "onedrive" => "Microsoft OneDrive", "dropbox" => "Dropbox", _ => t };
+
+    bool Filled => name.Trim().Length > 0 && (cloud ? token.Trim().Length > 0 : host.Trim().Length > 0 && path.Trim().Length > 0);
 
     protected override void OnInitialized() => type = Types.FirstOrDefault() ?? "smb";
 
-    AddRemoteRequest Request() => new(name.Trim(), type, host.Trim(), path.Trim(),
-        type == "smb" && user.Trim().Length > 0 ? user.Trim() : null, type == "smb" && user.Trim().Length > 0 ? password : null,
-        type == "smb" && user.Trim().Length > 0 && domain.Trim().Length > 0 ? domain.Trim() : null, version.Length > 0 ? version : null, readOnly);
+    AddRemoteRequest Request()
+    {
+        if (cloud)
+            return new(name.Trim(), type, "", path.Trim().Trim('/'), null, null, null, null, readOnly, token.Trim(), cache, cacheGb, bwLimit);
+        var smbUser = type == "smb" && user.Trim().Length > 0;
+        return new(name.Trim(), type, host.Trim(), path.Trim(), smbUser ? user.Trim() : null, smbUser ? password : null,
+            smbUser && domain.Trim().Length > 0 ? domain.Trim() : null, version.Length > 0 ? version : null, readOnly);
+    }
 
     async Task Test()
     {
