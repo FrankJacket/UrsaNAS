@@ -30,6 +30,7 @@ public class TransferTests : IDisposable
         {
             ["Backup:Roots:0"] = roots.Replace((char)92, '/'),
             ["Backup:RequireMountPoint"] = "false",
+            ["Acl:AuthFile"] = Path.Combine(_dir, "acl-auth").Replace((char)92, '/'), // sans cela, le test écrit dans /var/lib/ursanas
         }).Build();
         _run.Handler = c => c.File switch
         {
