@@ -1,10 +1,9 @@
-// Console d'une machine virtuelle : noVNC (chargé depuis un CDN) branché sur le WebSocket de l'interface web.
+// Console d'une machine virtuelle : noVNC (hébergé dans lib/novnc) branché sur le WebSocket de l'interface web.
 let rfb = null;
 
 export async function connect(element, url) {
     disconnect();
-    // Le paquet npm ne contient que la version CommonJS (lib/) : jsDelivr la convertit en module avec « +esm ».
-    const mod = await import('https://cdn.jsdelivr.net/npm/@novnc/novnc@1.5.0/+esm');
+    const mod = await import('./lib/novnc/novnc.esm.js');
     const RFB = mod.default?.default ?? mod.default;
     rfb = new RFB(element, url);
     rfb.scaleViewport = true;

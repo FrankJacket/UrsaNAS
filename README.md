@@ -81,7 +81,7 @@ sudo apt install qemu-system-x86 libvirt-daemon-system libvirt-clients virtinst 
 
 - **Create** a machine from an `.iso` found in a share or on a mounted disk: name, processors, memory, disk size (qcow2 file in `/var/lib/libvirt/images`) and network. UEFI is used when OVMF is installed.
 - **Start, shut down** (ACPI request), **power off** (immediate) and **delete** (the virtual disk goes, the `.iso` stays).
-- **Console** in the browser (noVNC). The screen of a machine only listens on `127.0.0.1`; the web interface relays it over an authenticated WebSocket. The viewer script is loaded from the jsDelivr CDN, so the browser needs internet access for the console.
+- **Console** in the browser (noVNC). The screen of a machine only listens on `127.0.0.1`; the web interface relays it over an authenticated WebSocket. The noVNC viewer is bundled with the web interface (`wwwroot/lib/novnc`), so the console works without internet access.
 - **Network**: choose a host bridge (for example `br0`) to put a machine on the local network, or the private libvirt network (NAT). UrsaNAS never reconfigures the NAS network; create the bridge yourself (for example with NetworkManager or `/etc/network/interfaces`), because a mistake there cuts off remote access.
 - If `/dev/kvm` is missing, the page warns: machines would be emulated and extremely slow. Enable virtualization in the BIOS, or nested virtualization when the NAS is itself a virtual machine (`Set-VMProcessor -VMName <name> -ExposeVirtualizationExtensions $true` on Hyper-V).
 
