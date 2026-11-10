@@ -39,13 +39,14 @@
                 <MudNavLink Href="/disks" Icon="@Icons.Material.Filled.Dns">@L["Disks"]</MudNavLink>
                 <MudNavLink Href="/pools" Icon="@Icons.Material.Filled.Layers">@L["ZFS pools"]</MudNavLink>
                 <MudNavLink Href="/datasets" Icon="@Icons.Material.Filled.FolderCopy">@L["Datasets"]</MudNavLink>
+                <MudNavLink Href="/remote-storage" Icon="@Icons.Material.Filled.CloudSync">@L["Remote storage"]</MudNavLink>
                 <MudNavLink Href="/backups" Icon="@Icons.Material.Filled.Backup">@L["Backups"]</MudNavLink>
             </MudNavGroup>
             <MudNavGroup Title="@L["Sharing"]" Icon="@Icons.Material.Filled.FolderShared" Expanded="false">
                 <MudNavLink Href="/shares" Icon="@Icons.Material.Filled.Share">@L["Shares"]</MudNavLink>
-                <MudNavLink Href="/folders" Icon="@Icons.Material.Filled.Folder">@L["File Manager"]</MudNavLink>
                 <MudNavLink Href="/services" Icon="@Icons.Material.Filled.SettingsEthernet">@L["Services"]</MudNavLink>
             </MudNavGroup>
+            <MudNavLink Href="/folders" Icon="@Icons.Material.Filled.Folder">@L["File Manager"]</MudNavLink>
             <MudNavLink Href="/vms" Icon="@Icons.Material.Filled.Computer">@L["Virtual machines"]</MudNavLink>
             @if (Docker.Ready)
             {

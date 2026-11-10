@@ -9,7 +9,8 @@ getent passwd ursanas >/dev/null || \
 
 # NFS et FTP : paquets installés une fois, services laissés arrêtés jusqu'à leur activation dans l'interface (page Services).
 # btrfs-progs et exfatprogs : formatage des disques depuis la page Disques (Btrfs, exFAT).
-for entry in nfs-kernel-server:nfs-server vsftpd:vsftpd openssl: btrfs-progs: exfatprogs:; do
+# cifs-utils et nfs-common : montage des stockages distants SMB et NFS (page Stockage distant).
+for entry in nfs-kernel-server:nfs-server vsftpd:vsftpd openssl: btrfs-progs: exfatprogs: cifs-utils: nfs-common:; do
   pkg="${entry%%:*}"; unit="${entry#*:}"
   if ! dpkg -s "$pkg" >/dev/null 2>&1; then
     if DEBIAN_FRONTEND=noninteractive apt-get install -y "$pkg" >/dev/null 2>&1; then

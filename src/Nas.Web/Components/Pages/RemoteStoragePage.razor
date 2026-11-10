@@ -1,0 +1,106 @@
+@page "/remote-storage"
+@inherits AutoRefreshBase
+@inject AgentClient Agent
+@inject RemoteOperations Ops
+@inject IDialogService Dialogs
+@inject ISnackbar Snack
+
+<MudText Typo="Typo.h4" Class="mb-4">@L["Remote storage"]</MudText>
+@if (error is not null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">@error</MudAlert>
+}
+else if (loaded && types.Count == 0)
+{
+    <MudAlert Severity="Severity.Warning" Class="mb-4">@L["Neither cifs-utils (SMB) nor nfs-common (NFS) is installed on the NAS."]</MudAlert>
+}
+<MudStack Row="true" Class="mb-4">
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="Add" Disabled="@(types.Count == 0)">@L["Add a connection"]</MudButton>
+</MudStack>
+<MudTable Items="remotes" Hover="true" Dense="true" Loading="@(!loaded)">
+    <HeaderContent><MudTh>@L["Name"]</MudTh><MudTh>@L["Type"]</MudTh><MudTh>@L["Server"]</MudTh><MudTh>@L["Folder"]</MudTh><MudTh>@L["Status"]</MudTh><MudTh>@L["Space"]</MudTh><MudTh></MudTh></HeaderContent>
+    <RowTemplate>
+        <MudTd>@context.Name</MudTd>
+        <MudTd><MudChip T="string" Size="Size.Small" Color="Color.Info">@context.Type.ToUpperInvariant()</MudChip></MudTd>
+        <MudTd>
+            <code>@(context.Type == "nfs" ? $"{context.Host}:{context.Path}" : $"//{context.Host}/{context.Path}")</code>
+            @if (context.User is not null) { <MudText Typo="Typo.caption" Class="d-block">@(context.Domain is null ? context.User : $"{context.Domain}\\{context.User}")</MudText> }
+        </MudTd>
+        <MudTd><code>@context.MountPoint</code></MudTd>
+        <MudTd>
+            <MudChip T="string" Size="Size.Small" Color="@(context.Mounted ? Color.Success : Color.Warning)">@(context.Mounted ? L["Connected"] : L["Not connected"])</MudChip>
+            @if (context.ReadOnly) { <MudChip T="string" Size="Size.Small">@L["Read-only"]</MudChip> }
+        </MudTd>
+        <MudTd>@(context.TotalBytes > 0 ? L["{0} free of {1}", Fmt.Size(context.FreeBytes, L.Lang), Fmt.Size(context.TotalBytes, L.Lang)] : "—")</MudTd>
+        <MudTd Style="text-align:right">
+            @if (context.Mounted)
+            {
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.LinkOff" OnClick="() => Unmount(context)">@L["Unmount"]</MudButton>
+            }
+            else
+            {
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Link" OnClick="() => Mount(context)">@L["Mount"]</MudButton>
+            }
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="() => Delete(context)">@L["Remove"]</MudButton>
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent><MudText Class="pa-4">@L["No remote storage."]</MudText></NoRecordsContent>
+</MudTable>
+
+@code {
+    List<RemoteStorage> remotes = new();
+    IReadOnlyList<string> types = [];
+    string? error;
+    bool loaded;
+
+    static readonly DialogOptions Options = new() { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true, BackdropClick = false };
+
+    protected override async Task LoadAsync()
+    {
+        try
+        {
+            remotes = (await Agent.GetRemotesAsync()).ToList();
+            types = await Agent.GetRemoteTypesAsync();
+            error = null;
+        }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable."]; }
+        loaded = true;
+    }
+
+    async Task Add()
+    {
+        var parameters = new DialogParameters<RemoteStorageDialog> { { x => x.Types, types } };
+        var dialog = await Dialogs.ShowAsync<RemoteStorageDialog>(L["New connection"], parameters, Options);
+        if (await dialog.Result is { Canceled: false })
+        {
+            Snack.Add(L["Connection added."], Severity.Success);
+            await LoadAsync();
+        }
+    }
+
+    Task Mount(RemoteStorage r) => Run(() => Ops.MountAsync(r.Name), L["{0} mounted.", r.Name]);
+
+    Task Unmount(RemoteStorage r) => Run(() => Ops.UnmountAsync(r.Name), L["{0} unmounted.", r.Name]);
+
+    async Task Delete(RemoteStorage r)
+    {
+        var ok = await Dialogs.ShowMessageBoxAsync(L["Remove {0}?", r.Name],
+            L["The connection is unmounted and forgotten. Files on the remote server are not touched."],
+            yesText: L["Remove"], cancelText: L["Cancel"]);
+        if (ok != true) return;
+        await Run(() => Ops.DeleteAsync(r.Name), L["{0} removed.", r.Name]);
+    }
+
+    async Task Run(Func<Task> action, string success)
+    {
+        try
+        {
+            await action();
+            Snack.Add(success, Severity.Success);
+            await LoadAsync();
+        }
+        catch (AgentException e) { Snack.Add(L.Translate(e.Message), Severity.Error); }
+        catch (HttpRequestException) { Snack.Add(L["Agent unreachable."], Severity.Error); }
+    }
+}

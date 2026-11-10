@@ -40,6 +40,31 @@ public class AgentClient(HttpClient http)
     public async Task UnmountPartitionAsync(UnmountRequest req, CancellationToken ct = default) =>
         await EnsureOkAsync(await http.PostAsJsonAsync("partitions/unmount", req, ct), ct);
 
+    // ---- Stockages distants
+    public Task<IReadOnlyList<RemoteStorage>> GetRemotesAsync(CancellationToken ct = default) => GetListAsync<RemoteStorage>("remote", ct);
+
+    public async Task<IReadOnlyList<string>> GetRemoteTypesAsync(CancellationToken ct = default)
+    {
+        using var r = await http.GetAsync("remote/types", ct);
+        await EnsureOkAsync(r, ct);
+        return (await r.Content.ReadFromJsonAsync<RemoteTypes>(ct))?.Available ?? [];
+    }
+
+    public async Task TestRemoteAsync(AddRemoteRequest req, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PostAsJsonAsync("remote/test", req, ct), ct);
+
+    public async Task AddRemoteAsync(AddRemoteRequest req, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PostAsJsonAsync("remote", req, ct), ct);
+
+    public async Task MountRemoteAsync(string name, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PostAsync($"remote/{Uri.EscapeDataString(name)}/mount", null, ct), ct);
+
+    public async Task UnmountRemoteAsync(string name, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PostAsync($"remote/{Uri.EscapeDataString(name)}/unmount", null, ct), ct);
+
+    public async Task DeleteRemoteAsync(string name, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.DeleteAsync($"remote/{Uri.EscapeDataString(name)}", ct), ct);
+
     public async Task<IReadOnlyList<NasUser>> GetUsersAsync(CancellationToken ct = default) =>
         await http.GetFromJsonAsync<List<NasUser>>("users", ct) ?? [];
 

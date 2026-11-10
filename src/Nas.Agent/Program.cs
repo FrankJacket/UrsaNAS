@@ -56,6 +56,7 @@ public partial class Program
         builder.Services.AddSingleton<DockerService>();
         builder.Services.AddSingleton<VmService>();
         builder.Services.AddSingleton<DiskService>();
+        builder.Services.AddSingleton<RemoteService>();
         builder.Services.AddSingleton<ShareService>();
         builder.Services.AddSingleton<GroupService>();
         builder.Services.AddSingleton<AclService>();
@@ -82,6 +83,20 @@ public partial class Program
             Read(async () => { await d.MountAsync(r, ct); return Results.NoContent(); }));
         app.MapPost("/partitions/unmount", (UnmountRequest r, DiskService d, CancellationToken ct) =>
             Read(async () => { await d.UnmountAsync(r.MountPoint, ct); return Results.NoContent(); }));
+
+        // Stockages distants (SMB, NFS)
+        app.MapGet("/remote", (RemoteService s) => Read(() => Task.FromResult(Results.Ok(s.List()))));
+        app.MapGet("/remote/types", (RemoteService s) => Results.Ok(s.Types()));
+        app.MapPost("/remote/test", (AddRemoteRequest r, RemoteService s, CancellationToken ct) =>
+            Read(async () => { await s.TestAsync(r, ct); return Results.NoContent(); }));
+        app.MapPost("/remote", (AddRemoteRequest r, RemoteService s, CancellationToken ct) =>
+            Read(async () => { await s.AddAsync(r, ct); return Results.NoContent(); }));
+        app.MapPost("/remote/{name}/mount", (string name, RemoteService s, CancellationToken ct) =>
+            Read(async () => { await s.MountAsync(name, ct); return Results.NoContent(); }));
+        app.MapPost("/remote/{name}/unmount", (string name, RemoteService s, CancellationToken ct) =>
+            Read(async () => { await s.UnmountAsync(name, ct); return Results.NoContent(); }));
+        app.MapDelete("/remote/{name}", (string name, RemoteService s, CancellationToken ct) =>
+            Read(async () => { await s.RemoveAsync(name, ct); return Results.NoContent(); }));
         app.MapGet("/stats", (IStatsProvider s) => Results.Ok(s.Read()));
 
         app.MapGet("/users", async (UserService u, CancellationToken ct) => Results.Ok(await u.ListAsync(ct)));

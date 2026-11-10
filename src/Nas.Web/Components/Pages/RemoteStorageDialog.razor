@@ -1,0 +1,89 @@
+@inject RemoteOperations Ops
+
+<MudDialog>
+    <DialogContent>
+        @if (error is not null)
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-3">@error</MudAlert>
+        }
+        @if (ok is not null)
+        {
+            <MudAlert Severity="Severity.Success" Class="mb-3">@ok</MudAlert>
+        }
+        <MudSelect T="string" @bind-Value="type" Label="@L["Type"]" Disabled="busy">
+            @foreach (var t in Types)
+            {
+                <MudSelectItem T="string" Value="@t">@(t == "smb" ? "SMB / CIFS (Windows, Samba, NAS)" : "NFS")</MudSelectItem>
+            }
+        </MudSelect>
+        <MudTextField @bind-Value="name" Label="@L["Folder name"]" Immediate="true" Disabled="busy" HelperText="@L["The storage will appear under /srv/remote/{0}", name]" />
+        <MudTextField @bind-Value="host" Label="@L["Server"]" Disabled="busy" HelperText="@L["Name or IP address"]" />
+        <MudTextField @bind-Value="path" Label="@(type == "smb" ? L["Share name"] : L["Exported path"])" Disabled="busy"
+                      HelperText="@(type == "smb" ? L["For example photos, or photos/2024"] : L["For example /volume1/photos"])" />
+        @if (type == "smb")
+        {
+            <MudTextField @bind-Value="user" Label="@L["User (empty: guest access)"]" Disabled="busy" />
+            <MudTextField @bind-Value="password" Label="@L["Password"]" InputType="InputType.Password" Disabled="@(busy || user.Trim().Length == 0)" />
+            <MudTextField @bind-Value="domain" Label="@L["Domain (optional)"]" Disabled="@(busy || user.Trim().Length == 0)" />
+        }
+        <MudSelect T="string" @bind-Value="version" Label="@L["Protocol version"]" Disabled="busy">
+            <MudSelectItem T="string" Value="@("")">@L["Automatic"]</MudSelectItem>
+            @foreach (var v in type == "smb" ? Rules.SmbVersions : Rules.NfsVersions)
+            {
+                <MudSelectItem T="string" Value="@v">@v</MudSelectItem>
+            }
+        </MudSelect>
+        <MudCheckBox T="bool" @bind-Value="readOnly" Label="@L["Read-only"]" Disabled="busy" />
+        <MudText Typo="Typo.caption">@L["The connection is mounted now and at every start."]</MudText>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => Dialog.Cancel()" Disabled="busy">@L["Cancel"]</MudButton>
+        <MudButton OnClick="Test" Disabled="@(busy || !Filled)">@(busy && testing ? L["In progress…"] : L["Test the connection"])</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save" Disabled="@(busy || !Filled)">@(busy && !testing ? L["In progress…"] : L["Add"])</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance Dialog { get; set; } = default!;
+    [Parameter, EditorRequired] public IReadOnlyList<string> Types { get; set; } = [];
+
+    string type = "smb", name = "", host = "", path = "", user = "", password = "", domain = "", version = "";
+    bool readOnly, busy, testing;
+    string? error, ok;
+
+    bool Filled => name.Trim().Length > 0 && host.Trim().Length > 0 && path.Trim().Length > 0;
+
+    protected override void OnInitialized() => type = Types.FirstOrDefault() ?? "smb";
+
+    AddRemoteRequest Request() => new(name.Trim(), type, host.Trim(), path.Trim(),
+        type == "smb" && user.Trim().Length > 0 ? user.Trim() : null, type == "smb" && user.Trim().Length > 0 ? password : null,
+        type == "smb" && user.Trim().Length > 0 && domain.Trim().Length > 0 ? domain.Trim() : null, version.Length > 0 ? version : null, readOnly);
+
+    async Task Test()
+    {
+        testing = true;
+        if (await Run(() => Ops.TestAsync(Request()))) ok = L["The connection works."];
+    }
+
+    async Task Save()
+    {
+        testing = false;
+        if (await Run(() => Ops.AddAsync(Request()))) Dialog.Close(DialogResult.Ok(name.Trim()));
+    }
+
+    async Task<bool> Run(Func<Task> action)
+    {
+        error = ok = null;
+        busy = true;
+        try
+        {
+            await action();
+            busy = false;
+            return true;
+        }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable."]; }
+        busy = false;
+        return false;
+    }
+}

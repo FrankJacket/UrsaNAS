@@ -232,15 +232,7 @@ public sealed class DiskService(ICommandRunner run, IDiskProvider disks, IConfig
         return line.Contains(Marker, StringComparison.Ordinal) && f.Length > 1 && f[1] == target;
     }
 
-    void EditFstab(Func<List<string>, IReadOnlyList<string>> edit)
-    {
-        var lines = File.Exists(Fstab) ? File.ReadAllLines(Fstab).ToList() : [];
-        var backup = Fstab + ".ursanas-bak";
-        if (File.Exists(Fstab) && !File.Exists(backup)) File.Copy(Fstab, backup);
-        var tmp = Fstab + ".ursanas-tmp";
-        File.WriteAllLines(tmp, edit(lines));
-        File.Move(tmp, Fstab, overwrite: true);
-    }
+    void EditFstab(Func<List<string>, IReadOnlyList<string>> edit) => FstabFile.Edit(Fstab, edit);
 
     // ---- Agrandir le disque système
 

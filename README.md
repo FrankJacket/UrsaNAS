@@ -71,6 +71,15 @@ The **Disks** page lists each disk with its partitions. A disk is *free* when it
 - **Format** a single partition, **Mount** it under `/mnt/<name>` (optionally at every start, through a UUID-based `/etc/fstab` line tagged `# ursanas` with `nofail`) and **Unmount** it. The first change to `/etc/fstab` keeps a copy in `/etc/fstab.ursanas-bak`.
 - **Extend the system partition** after enlarging the system disk (for example a virtual disk): the root partition (ext4 or XFS) grows to the free space and its file system is resized online. If a swap partition follows it, that partition is removed and replaced by a `/swapfile` of the same size.
 
+### Remote storage
+
+*Storage → Remote storage* connects the NAS to a file service on another machine, over **SMB** (Windows, Samba, other NAS; `cifs-utils`) or **NFS** (`nfs-common`). Each connection is mounted under `/srv/remote/<name>`, now and at every start.
+
+- **Test the connection** mounts the share in a temporary folder and unmounts it, without saving anything.
+- A connection is one `/etc/fstab` line tagged `# ursanas-remote` (with `_netev,nofail`, so an unreachable server never blocks the start). There is no other database: the line is the list. The SMB password is only in a root-only file, `/var/lib/ursanas/remote/<name>.cred`, referenced by `credentials=`; it is never in `fstab`, in a command line or in the audit log. An SMB user left empty means guest access.
+- **Mount**, **Unmount** and **Remove** act on a saved connection. Removing it forgets the connection; the files on the remote server are never touched. To change a connection, remove it and add it again.
+- Remote mounts live outside `/mnt`, so they are not offered as *Mounted drives*. Using them from the File Manager, shares and backups comes in a later step.
+
 ### Virtual machines
 
 UrsaNAS drives **libvirt/KVM** (it does not install it). The **Virtual machines** page checks that libvirt answers and explains what is missing:
@@ -108,7 +117,7 @@ Principle: **the agent is the only part with root rights**, and it validates eve
 
 ### Target requirements
 
-Debian 13 with ZFS (for pools and datasets) and SSH access with `sudo`. The install script installs NFS, vsftpd, openssl, btrfs-progs and exfatprogs itself, leaving the services stopped until they are enabled from the *Services* page. exFAT backup disks work through `exfatprogs`.
+Debian 13 with ZFS (for pools and datasets) and SSH access with `sudo`. The install script installs NFS, vsftpd, openssl, btrfs-progs, exfatprogs, cifs-utils and nfs-common itself, leaving the services stopped until they are enabled from the *Services* page. exFAT backup disks work through `exfatprogs`.
 
 ### Deploy from Windows
 
