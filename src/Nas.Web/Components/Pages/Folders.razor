@@ -15,20 +15,14 @@
 {
     <MudAlert Severity="Severity.Info">@L["Create a share first."]</MudAlert>
 }
-else if (share is not null)
+else if (loaded)
 {
     <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="mb-3" Wrap="Wrap.Wrap">
-        <MudSelect T="string" Value="share" ValueChanged="SelectShare" Label="@L["Share or disk"]" Dense="true" Style="width:260px">
-            @foreach (var s in allShares)
-            {
-                <MudSelectItem T="string" Value="@s">@s</MudSelectItem>
-            }
-            @foreach (var d in disks)
-            {
-                <MudSelectItem T="string" Value="@d.Dir">@DiskLabel(d)</MudSelectItem>
-            }
+        <MudSelect T="string" Value="source" ValueChanged="s => SelectSource(s)" Label="@L["Source"]" Dense="true" Style="width:260px">
+            <MudSelectItem T="string" Value="@("Shares")">@L["Shares"]</MudSelectItem>
+            <MudSelectItem T="string" Value="@("Mounted drives")">@L["Mounted drives"]</MudSelectItem>
+            <MudSelectItem T="string" Value="@("Remote")">@L["Remote"]</MudSelectItem>
         </MudSelect>
-        <MudTextField T="string" Value="@CurrentLocation" ReadOnly="true" Label="@L["Location"]" Dense="true" Style="flex:1;min-width:200px" />
     </MudStack>
 
     <MudStack Row="true" Spacing="2" Class="mb-3" Wrap="Wrap.Wrap" AlignItems="AlignItems.Center">
@@ -39,46 +33,11 @@ else if (share is not null)
         <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="() => Delete(selected)" Disabled="@(!CanModify)">@L["Delete"]</MudButton>
         <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Lock" OnClick="() => OpenPermissions(selected)" Disabled="@(!CanFolder || NoPermissions)">@L["Permissions"]</MudButton>
         <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="Refresh">@L["Refresh"]</MudButton>
-        <MudSpacer />
-        <MudToggleGroup T="bool" Value="columns" ValueChanged="SetColumns" Color="Color.Primary" Size="Size.Small">
-            <MudToggleItem Value="false" Text="@L["Tree"]" />
-            <MudToggleItem Value="true" Text="@L["Columns"]" />
-        </MudToggleGroup>
     </MudStack>
 
-    @if (columns)
+    @if (top.Children.Count == 0)
     {
-        <MudPaper Elevation="0" Class="explorer miller">
-            @foreach (var parent in Chain())
-            {
-                @if (!parent.IsFile && (parent.Children.Count > 0 || parent == selected))
-                {
-                    <div class="mil-col">
-                        @foreach (var c in parent.Children)
-                        {
-                            var node = c;
-                            <div class="mil-item @(InChain(node) ? "sel" : "")" @onclick="() => PickColumn(node)"
-                                 @oncontextmenu="e => Context(e, node)" @oncontextmenu:preventDefault="true">
-                                <MudIcon Icon="@(node.IsFile ? Icons.Material.Filled.InsertDriveFile : Icons.Material.Filled.Folder)" Color="@(node.IsFile ? Color.Default : Color.Info)" Class="mr-2" />
-                                <span class="mil-name">@node.Name</span>
-                                @if (!node.IsFile && states.GetValueOrDefault(node.Path) is { } st && (st.Rules.Count > 0 || !st.Inherit))
-                                {
-                                    <MudIcon Icon="@(st.Inherit ? Icons.Material.Filled.Lock : Icons.Material.Filled.LinkOff)" Size="Size.Small" Class="ml-1" />
-                                }
-                                <MudSpacer />
-                                @if (node.IsFile) { <MudText Typo="Typo.caption">@Fmt.Size(node.Size, L.Lang)</MudText> }
-                                else if (node.Loading) { <MudProgressCircular Size="Size.Small" Indeterminate="true" /> }
-                                else { <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Size="Size.Small" /> }
-                            </div>
-                        }
-                        @if (parent.Children.Count == 0)
-                        {
-                            <MudText Typo="Typo.caption" Class="pa-3">@L["No subfolders."]</MudText>
-                        }
-                    </div>
-                }
-            }
-        </MudPaper>
+        <MudAlert Severity="Severity.Info">@(source == "Remote" ? L["Coming soon…"] : source == "Shares" ? L["No share."] : L["No mounted drive."])</MudAlert>
     }
     else
     {
@@ -89,7 +48,7 @@ else if (share is not null)
         @foreach (var n in Visible())
         {
             var node = n;
-            var st = states.GetValueOrDefault(node.Path);
+            var st = St(node);
             <div class="ex-row @(node == selected ? "sel" : "")" @onclick="() => Select(node)" @ondblclick="() => Toggle(node)"
                  @oncontextmenu="e => Context(e, node)" @oncontextmenu:preventDefault="true">
                 <div class="ex-name" style="padding-left:@(node.Depth * 24)px">
@@ -97,7 +56,7 @@ else if (share is not null)
                         @if (!node.IsFile) { <MudIcon Icon="@(node.Expanded ? Icons.Material.Filled.ExpandMore : Icons.Material.Filled.ChevronRight)" Size="Size.Small" /> }
                     </span>
                     @if (node.IsFile) { <MudIcon Icon="@Icons.Material.Filled.InsertDriveFile" Color="Color.Default" Class="mr-2" /> }
-                    else { <MudIcon Icon="@(node.Path.Length == 0 ? Icons.Material.Filled.FolderShared : Icons.Material.Filled.Folder)" Color="Color.Info" Class="mr-2" /> }
+                    else { <MudIcon Icon="@NodeIcon(node)" Color="Color.Info" Class="mr-2" /> }
                     <span>@node.Name</span>
                     @if (node.Loading) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="ml-2" /> }
                 </div>
@@ -147,12 +106,6 @@ else if (share is not null)
     .ex-chev { display: inline-flex; width: 24px; cursor: pointer; }
     .ex-size { text-align: right; padding-right: 16px; }
     .ex-perm { display: flex; gap: 6px; flex-wrap: wrap; }
-    .miller { display: flex; flex-direction: row; overflow-x: auto; min-height: 320px; }
-    .mil-col { flex: 0 0 240px; border-right: 1px solid var(--mud-palette-lines-default); overflow-y: auto; max-height: calc(100vh - 280px); }
-    .mil-item { display: flex; align-items: center; padding: 6px 10px; cursor: default; user-select: none; }
-    .mil-item:hover { background: var(--mud-palette-action-default-hover); }
-    .mil-item.sel { background: var(--mud-palette-primary-hover); }
-    .mil-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     @@media (max-width: 800px) { .ex-row { grid-template-columns: 1fr; } .ex-mod, .ex-size, .ex-perm { display: none; } }
 </style>
 
@@ -161,7 +114,7 @@ else if (share is not null)
 
     sealed class Node
     {
-        public string Path = "", Name = "";
+        public string Place = "", Path = "", Name = "";
         public DateTime? Modified;
         public int Depth;
         public bool Expanded, Loaded, Loading, IsFile;
@@ -172,21 +125,28 @@ else if (share is not null)
     List<string> allShares = [];
     HashSet<string> aclShares = [];
     List<BackupTarget> disks = [];
+    /// <summary>L'emplacement (partage ou disque monté) du nœud sélectionné.</summary>
+    string? share => selected is { Place.Length: > 0 } ? selected.Place : null;
     bool IsDisk => share is not null && NasOperations.IsDisk(share);
     /// <summary>Un disque monté ou un partage ordinaire n'a pas de permissions avancées à gérer.</summary>
-    bool NoPermissions => share is not null && (IsDisk || !aclShares.Contains(share));
+    bool NoPermissions => share is not null && !HasAcl(share);
+    bool HasAcl(string place) => !NasOperations.IsDisk(place) && aclShares.Contains(place);
     static string Place(string location) => NasOperations.IsDisk(location) ? location : "/" + location;
     string DiskLabel(BackupTarget d) => L["Disk {0}", d.Dir] + (d.TotalBytes > 0 ? " (" + L["{0} free of {1}", Fmt.Size(d.FreeBytes, L.Lang), Fmt.Size(d.TotalBytes, L.Lang)] + ")" : "");
-    Dictionary<string, FolderState> states = new();
-    Node? root, selected, menuNode;
+    Dictionary<string, Dictionary<string, FolderState>> statesBy = new();
+    FolderState? St(Node n) => statesBy.GetValueOrDefault(n.Place)?.GetValueOrDefault(n.Path);
+    async Task LoadStates(string place) { if (HasAcl(place)) statesBy[place] = await Repo.GetFolderStatesAsync(place); }
+    static string NodeIcon(Node n) => n.Depth > 0 ? Icons.Material.Filled.Folder : NasOperations.IsDisk(n.Place) ? Icons.Material.Filled.Storage : Icons.Material.Filled.FolderShared;
+    /// <summary>Racine invisible de l'arbre : ses enfants (premier niveau) sont les partages ou les disques montés de la source choisie.</summary>
+    readonly Node top = new() { Depth = -1, Expanded = true, Loaded = true };
+    string source = "Shares";
+    Node? selected, menuNode;
     MudMenu? menu;
-    string? share, error;
+    string? error;
     bool loaded;
 
     bool CanFolder => selected is { IsFile: false };
     bool CanModify => selected is { Path.Length: > 0 };
-
-    string CurrentLocation => share is null ? "" : Place(share) + (selected is { Path.Length: > 0 } ? "/" + selected.Path : "");
 
     protected override async Task OnInitializedAsync()
     {
@@ -200,29 +160,42 @@ else if (share is not null)
         try { disks = (await Agent.GetBackupTargetsAsync()).ToList(); } // les disques montés (USB…) : facultatif, la page marche sans
         catch (Exception e) when (e is AgentException or HttpRequestException) { }
         loaded = true;
-        var wanted = Share is not null && allShares.Contains(Share) ? Share : allShares.FirstOrDefault() ?? disks.FirstOrDefault()?.Dir;
-        if (wanted is not null) await SelectShare(wanted);
+        var wanted = Share is not null && allShares.Contains(Share) ? Share : null;
+        await SelectSource(allShares.Count > 0 || disks.Count == 0 ? "Shares" : "Mounted drives", wanted);
     }
 
-    async Task SelectShare(string? name)
+    IEnumerable<(string Place, string Label)> Places() => source switch
     {
-        share = name;
-        if (name is null) return;
-        states = NoPermissions ? new() : await Repo.GetFolderStatesAsync(name); // pas de permissions sur un disque ni sur un partage ordinaire
-        root = new Node { Name = IsDisk ? name.TrimEnd('/')[(name.TrimEnd('/').LastIndexOf('/') + 1)..] : name, Path = "" };
-        selected = root;
-        await Load(root);
-        root.Expanded = true;
+        "Shares" => allShares.Select(s => (s, s)),
+        "Mounted drives" => disks.Select(d => (d.Dir, DiskLabel(d))),
+        _ => [],
+    };
+
+    /// <summary>Change de source : le premier niveau de l'arbre devient la liste de ses partages ou disques ; le premier (ou <paramref name="place"/>) est ouvert.</summary>
+    async Task SelectSource(string value, string? place = null)
+    {
+        source = value;
+        statesBy = new();
+        selected = null;
+        top.Children = Places().Select(p => new Node { Place = p.Place, Name = p.Label, Depth = 0 }).ToList();
+        foreach (var c in top.Children) await LoadStates(c.Place);
+        var first = top.Children.FirstOrDefault(c => c.Place == place) ?? top.Children.FirstOrDefault();
+        if (first is null) return;
+        selected = first;
+        await Load(first);
+        first.Expanded = true;
     }
 
-    Task Refresh() => share is null ? Task.CompletedTask : Show(selected?.Path ?? "");
+    Task Refresh() => selected is null ? Task.CompletedTask : Show(selected.Place, selected.Path);
 
-    /// <summary>Relit l'arborescence puis sélectionne ce chemin (ou le dossier existant le plus proche), en ouvrant ses parents.</summary>
-    async Task Show(string path)
+    /// <summary>Relit l'arborescence puis sélectionne ce chemin de cet emplacement (ou le dossier existant le plus proche), en ouvrant ses parents.</summary>
+    async Task Show(string place, string path)
     {
-        states = NoPermissions ? new() : await Repo.GetFolderStatesAsync(share!);
-        await Reload(root!);
-        var n = root!;
+        var n = top.Children.FirstOrDefault(c => c.Place == place);
+        if (n is null) return;
+        await LoadStates(place);
+        await Reload(n);
+        foreach (var t in top.Children.Where(t => t != n && t.Loaded)) await Reload(t); // une copie vers un autre emplacement visible y apparaît
         foreach (var seg in path.Split('/', StringSplitOptions.RemoveEmptyEntries))
         {
             var child = n.Children.FirstOrDefault(c => c.Name == seg);
@@ -234,45 +207,10 @@ else if (share is not null)
         selected = n;
     }
 
-    // ---- Vue en colonnes : une colonne par niveau du dossier sélectionné, comme dans le Finder
-    bool columns;
-
-    async Task SetColumns(bool value)
-    {
-        columns = value;
-        if (value && selected is { Loaded: false } s) await Load(s);
-        else if (!value) foreach (var n in Chain().Where(n => n != selected)) n.Expanded = true;
-    }
-
-    /// <summary>Racine, puis chaque dossier du chemin sélectionné, dont les sous-dossiers forment une colonne.</summary>
-    List<Node> Chain()
-    {
-        var list = new List<Node>();
-        if (root is null) return list;
-        var n = root;
-        list.Add(n);
-        foreach (var seg in (selected?.Path ?? "").Split('/', StringSplitOptions.RemoveEmptyEntries))
-        {
-            n = n.Children.FirstOrDefault(c => c.Name == seg);
-            if (n is null) break;
-            list.Add(n);
-        }
-        return list;
-    }
-
-    bool InChain(Node n) => selected is not null && (n.Path == selected.Path || selected.Path.StartsWith(n.Path + "/", StringComparison.Ordinal));
-
-    async Task PickColumn(Node n)
-    {
-        selected = n;
-        if (!n.Loaded) await Load(n);
-    }
-
     IEnumerable<Node> Visible()
     {
-        if (root is null) yield break;
         var stack = new Stack<Node>();
-        stack.Push(root);
+        foreach (var t in Enumerable.Reverse(top.Children)) stack.Push(t);
         while (stack.Count > 0)
         {
             var n = stack.Pop();
@@ -287,11 +225,11 @@ else if (share is not null)
         n.Loading = true;
         try
         {
-            var listing = await Agent.GetFoldersAsync(share!, n.Path, files: true);
+            var listing = await Agent.GetFoldersAsync(n.Place, n.Path, files: true);
             var old = n.Children.Where(c => !c.IsFile).ToDictionary(c => c.Name);
             n.Children = listing.Folders.Select(f => old.TryGetValue(f.Name, out var o) ? Touch(o, f)
-                : new Node { Name = f.Name, Path = n.Path.Length == 0 ? f.Name : n.Path + "/" + f.Name, Depth = n.Depth + 1, Modified = f.ModifiedUtc }).ToList();
-            n.Children.AddRange((listing.Files ?? []).Select(f => new Node { Name = f.Name, Path = n.Path.Length == 0 ? f.Name : n.Path + "/" + f.Name,
+                : new Node { Place = n.Place, Name = f.Name, Path = n.Path.Length == 0 ? f.Name : n.Path + "/" + f.Name, Depth = n.Depth + 1, Modified = f.ModifiedUtc }).ToList();
+            n.Children.AddRange((listing.Files ?? []).Select(f => new Node { Place = n.Place, Name = f.Name, Path = n.Path.Length == 0 ? f.Name : n.Path + "/" + f.Name,
                 Depth = n.Depth + 1, Modified = f.ModifiedUtc, IsFile = true, Size = f.Size, Loaded = true }));
             n.Loaded = true;
             error = null;
@@ -330,14 +268,14 @@ else if (share is not null)
 
     async Task NewFolder(Node? n)
     {
-        if (n is null || share is null) return;
+        if (n is null) return;
         var parameters = new DialogParameters<FolderNameDialog> { { x => x.Location, Loc(n) } };
         var dialog = await Dialogs.ShowAsync<FolderNameDialog>(L["New folder"], parameters, SmallOptions);
         if (await dialog.Result is { Canceled: false, Data: string name })
         {
             try
             {
-                await Ops.CreateFolderAsync(share, n.Path, name);
+                await Ops.CreateFolderAsync(n.Place, n.Path, name);
                 Snack.Add(L["Folder created."], Severity.Success);
                 await Load(n);
                 n.Expanded = true;
@@ -347,22 +285,18 @@ else if (share is not null)
         }
     }
 
-    /// <summary>Les emplacements où l'on peut copier ou déplacer : partages à permissions avancées, puis disques montés.</summary>
-    List<(string Value, string Label)> Locations() =>
-        allShares.Select(s => (s, s)).Concat(disks.Select(d => (d.Dir, DiskLabel(d)))).ToList();
-
-    string Loc(Node n) => Place(share!) + (n.Path.Length > 0 ? "/" + n.Path : "");
+    string Loc(Node n) => Place(n.Place) + (n.Path.Length > 0 ? "/" + n.Path : "");
 
     static string Join(string parent, string name) => parent.Length == 0 ? name : parent + "/" + name;
 
     /// <summary>Exécute une opération sur un dossier, puis réaffiche l'arborescence sur <paramref name="showPath"/>.</summary>
-    async Task Run(Func<Task> action, string success, string showPath)
+    async Task Run(Func<Task> action, string success, string place, string showPath)
     {
         try
         {
             await action();
             Snack.Add(success, Severity.Success);
-            await Show(showPath);
+            await Show(place, showPath);
         }
         catch (AgentException e) { Snack.Add(L.Translate(e.Message), Severity.Error); }
         catch (HttpRequestException) { Snack.Add(L["Agent unreachable."], Severity.Error); }
@@ -370,8 +304,8 @@ else if (share is not null)
 
     async Task Rename(Node? n)
     {
-        if (n is null || share is null || n.Path.Length == 0) return;
-        var sh = share;
+        if (n is null || n.Path.Length == 0) return;
+        var sh = n.Place;
         var parameters = new DialogParameters<FolderNameDialog>
         {
             { x => x.Message, L["Rename {0}", Loc(n)] }, { x => x.Initial, n.Name }, { x => x.ButtonText, "Rename" },
@@ -381,17 +315,18 @@ else if (share is not null)
         {
             var parent = NasOperations.ParentOf(n.Path);
             var file = n.IsFile;
-            await Run(() => Ops.MoveFolderAsync(sh, n.Path, parent, name, file), file ? L["File renamed."] : L["Folder renamed."], Join(parent, name));
+            await Run(() => Ops.MoveFolderAsync(sh, n.Path, parent, name, file), file ? L["File renamed."] : L["Folder renamed."], sh, Join(parent, name));
         }
     }
 
     async Task MoveTo(Node? n, bool copy)
     {
-        if (n is null || share is null || n.Path.Length == 0) return;
-        var sh = share;
+        if (n is null || n.Path.Length == 0) return;
+        var sh = n.Place;
         var parameters = new DialogParameters<FolderPickerDialog>
         {
-            { x => x.Share, sh }, { x => x.Exclude, n.Path }, { x => x.ExcludeLocation, sh }, { x => x.Locations, Locations() },
+            { x => x.Share, sh }, { x => x.Exclude, n.Path }, { x => x.ExcludeLocation, sh },
+            { x => x.Shares, allShares }, { x => x.Disks, disks.Select(d => (d.Dir, DiskLabel(d))).ToList() },
             { x => x.Message, copy ? L["Copy {0} to:", Loc(n)] : L["Move {0} to:", Loc(n)] },
             { x => x.ButtonText, copy ? "Copy" : "Move" },
         };
@@ -405,7 +340,7 @@ else if (share is not null)
             var nm = n.Name;
             await Run(() => Ops.TransferFolderAsync(sh, p, destLocation, dest, nm, f, copy),
                 copy ? L["Copied to {0}.", Place(destLocation) + (dest.Length > 0 ? "/" + dest : "")] : L["Moved to {0}.", Place(destLocation) + (dest.Length > 0 ? "/" + dest : "")],
-                copy ? p : parent);
+                sh, copy ? p : parent);
             return;
         }
         if (dest == parent && !copy) return; // déjà là
@@ -418,20 +353,20 @@ else if (share is not null)
         var path = n.Path;
         var file = n.IsFile;
         await Run(() => copy ? Ops.CopyFolderAsync(sh, path, dest, name, file) : Ops.MoveFolderAsync(sh, path, dest, name, file),
-            copy ? (file ? L["File copied."] : L["Folder copied."]) : (file ? L["File moved."] : L["Folder moved."]), Join(dest, name));
+            copy ? (file ? L["File copied."] : L["Folder copied."]) : (file ? L["File moved."] : L["Folder moved."]), sh, Join(dest, name));
     }
 
     async Task Delete(Node? n)
     {
-        if (n is null || share is null || n.Path.Length == 0) return;
-        var sh = share;
+        if (n is null || n.Path.Length == 0) return;
+        var sh = n.Place;
         var path = n.Path;
         if (n.IsFile)
         {
             var ok = await Dialogs.ShowMessageBoxAsync(L["Delete {0}", n.Name], L["File {0} will be deleted. This cannot be undone.", Loc(n)],
                 yesText: L["Delete"], cancelText: L["Cancel"]);
             if (ok != true) return;
-            await Run(() => Ops.DeleteFolderAsync(sh, path, true), L["File deleted."], NasOperations.ParentOf(path));
+            await Run(() => Ops.DeleteFolderAsync(sh, path, true), L["File deleted."], sh, NasOperations.ParentOf(path));
             return;
         }
         var parameters = new DialogParameters<ConfirmNameDialog>
@@ -445,16 +380,16 @@ else if (share is not null)
         if (await dialog.Result is { Canceled: false })
         {
             Snack.Add(L["Folder deleted."], Severity.Success);
-            await Show(NasOperations.ParentOf(path));
+            await Show(sh, NasOperations.ParentOf(path));
         }
     }
 
     async Task OpenPermissions(Node? n)
     {
-        if (n is null || share is null) return;
-        var parameters = new DialogParameters<FolderPermissionsDialog> { { x => x.Share, share }, { x => x.Path, n.Path } };
-        var title = L["Permissions of {0}", "/" + share + (n.Path.Length > 0 ? "/" + n.Path : "")];
+        if (n is null) return;
+        var parameters = new DialogParameters<FolderPermissionsDialog> { { x => x.Share, n.Place }, { x => x.Path, n.Path } };
+        var title = L["Permissions of {0}", "/" + n.Place + (n.Path.Length > 0 ? "/" + n.Path : "")];
         await (await Dialogs.ShowAsync<FolderPermissionsDialog>(title, parameters, BigOptions)).Result;
-        states = await Repo.GetFolderStatesAsync(share);
+        await LoadStates(n.Place);
     }
 }
