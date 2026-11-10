@@ -19,7 +19,7 @@ public sealed class RemoteService(ICommandRunner run, IConfiguration cfg)
     string MountInfoPath => cfg["Remote:MountInfo"] ?? "/proc/self/mountinfo";
     string[] BinDirs => cfg["Remote:BinDirs"]?.Split(':') ?? ["/usr/sbin", "/sbin", "/usr/bin", "/bin"];
     const string Marker = "# ursanas-remote";
-    const string CommonOptions = "_netev,nofail,x-systemd.mount-timeout=30";
+    const string CommonOptions = "_netdev,nofail,x-systemd.mount-timeout=30";
 
     sealed record Entry(string Name, string Type, string Host, string Path, string Options, string Target);
 

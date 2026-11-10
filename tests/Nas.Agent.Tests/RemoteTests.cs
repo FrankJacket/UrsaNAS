@@ -105,7 +105,7 @@ public class RemoteServiceTests : IDisposable
         Assert.Contains("credentials=", options);
         Assert.Contains("vers=3.0", options);
         Assert.Contains("nofail", options);
-        Assert.Contains("_netev", options);
+        Assert.Contains("_netdev", options);
         Assert.DoesNotContain("s3cret", string.Join(' ', mount.Args));
 
         var fstab = File.ReadAllText(_fstab);

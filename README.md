@@ -76,7 +76,7 @@ The **Disks** page lists each disk with its partitions. A disk is *free* when it
 *Storage → Remote storage* connects the NAS to a file service on another machine, over **SMB** (Windows, Samba, other NAS; `cifs-utils`) or **NFS** (`nfs-common`). Each connection is mounted under `/srv/remote/<name>`, now and at every start.
 
 - **Test the connection** mounts the share in a temporary folder and unmounts it, without saving anything.
-- A connection is one `/etc/fstab` line tagged `# ursanas-remote` (with `_netev,nofail`, so an unreachable server never blocks the start). There is no other database: the line is the list. The SMB password is only in a root-only file, `/var/lib/ursanas/remote/<name>.cred`, referenced by `credentials=`; it is never in `fstab`, in a command line or in the audit log. An SMB user left empty means guest access.
+- A connection is one `/etc/fstab` line tagged `# ursanas-remote` (with `_netdev,nofail`, so an unreachable server never blocks the start). There is no other database: the line is the list. The SMB password is only in a root-only file, `/var/lib/ursanas/remote/<name>.cred`, referenced by `credentials=`; it is never in `fstab`, in a command line or in the audit log. An SMB user left empty means guest access.
 - **Mount**, **Unmount** and **Remove** act on a saved connection. Removing it forgets the connection; the files on the remote server are never touched. To change a connection, remove it and add it again.
 - Remote mounts live outside `/mnt`, so they are not offered as *Mounted drives*. Using them from the File Manager, shares and backups comes in a later step.
 
