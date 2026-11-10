@@ -19,7 +19,7 @@
         <MudPaper Elevation="0" Class="pick">
             @if (top.Children.Count == 0)
             {
-                <MudText Typo="Typo.caption" Class="pa-3">@(source == "Remote" ? L["Coming soon…"] : source == "Shares" ? L["No share."] : L["No mounted drive."])</MudText>
+                <MudText Typo="Typo.caption" Class="pa-3">@(source == "Remote" ? L["No remote storage mounted."] : source == "Shares" ? L["No share."] : L["No mounted drive."])</MudText>
             }
             @foreach (var n in Visible())
             {
@@ -30,7 +30,7 @@
                     <span class="ex-chev" @onclick="() => Toggle(node)" @onclick:stopPropagation="true">
                         <MudIcon Icon="@(node.Expanded ? Icons.Material.Filled.ExpandMore : Icons.Material.Filled.ChevronRight)" Size="Size.Small" />
                     </span>
-                    <MudIcon Icon="@(node.Depth > 0 ? Icons.Material.Filled.Folder : NasOperations.IsDisk(node.Place) ? Icons.Material.Filled.Storage : Icons.Material.Filled.FolderShared)" Color="Color.Info" Class="mr-2" />
+                    <MudIcon Icon="@(node.Depth > 0 ? Icons.Material.Filled.Folder : Remotes.Any(r => r.Value == node.Place) ? Icons.Material.Filled.CloudQueue : NasOperations.IsDisk(node.Place) ? Icons.Material.Filled.Storage : Icons.Material.Filled.FolderShared)" Color="Color.Info" Class="mr-2" />
                     <span>@node.Name</span>
                     @if (node.Loading) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="ml-2" /> }
                 </div>
@@ -60,6 +60,8 @@
     /// <summary>Partages et disques montés (dossier, libellé) au choix : s'ils sont fournis, la fenêtre propose la liste « Source » ; sinon seul <c>Share</c> est proposé.</summary>
     [Parameter] public List<string> Shares { get; set; } = [];
     [Parameter] public List<(string Value, string Label)> Disks { get; set; } = [];
+    /// <summary>Stockages distants montés (point de montage, libellé).</summary>
+    [Parameter] public List<(string Value, string Label)> Remotes { get; set; } = [];
     [Parameter] public string Message { get; set; } = "";
     [Parameter] public string ButtonText { get; set; } = "Move";
     /// <summary>Dossier déplacé ou copié : ni lui ni ce qu'il contient ne peuvent servir de destination.</summary>
@@ -80,18 +82,18 @@
     string? error;
     string source = "Shares";
 
-    bool Choosable => Shares.Count > 0 || Disks.Count > 0;
+    bool Choosable => Shares.Count > 0 || Disks.Count > 0 || Remotes.Count > 0;
 
     bool IsBlocked(Node n) => Exclude.Length > 0 && n.Place == (ExcludeLocation.Length > 0 ? ExcludeLocation : Share) && (n.Path == Exclude || n.Path.StartsWith(Exclude + "/", StringComparison.Ordinal));
 
     protected override async Task OnInitializedAsync()
-        => await SelectSource(NasOperations.IsDisk(Share) ? "Mounted drives" : "Shares", Share);
+        => await SelectSource(Remotes.Any(r => r.Value == Share) ? "Remote" : NasOperations.IsDisk(Share) ? "Mounted drives" : "Shares", Share);
 
     IEnumerable<(string Place, string Label)> Places() => !Choosable ? [(Share, Share)] : source switch
     {
         "Shares" => Shares.Select(s => (s, s)),
         "Mounted drives" => Disks.Select(d => (d.Value, d.Label)),
-        _ => [],
+        _ => Remotes.Select(d => (d.Value, d.Label)),
     };
 
     async Task SelectSource(string value, string? place = null)
@@ -100,11 +102,12 @@
         error = null;
         selected = null;
         top.Children = Places().Select(p => new Node { Place = p.Place, Name = p.Label, Depth = 0 }).ToList();
-        var first = top.Children.FirstOrDefault(c => c.Place == place) ?? top.Children.FirstOrDefault();
-        if (first is null) return;
-        selected = first;
-        await Load(first);
-        first.Expanded = true;
+        // Seul l'emplacement d'origine est ouvert ; changer de source ne lit rien tant qu'on n'ouvre pas un dossier.
+        var wanted = place is null ? null : top.Children.FirstOrDefault(c => c.Place == place);
+        selected = wanted ?? top.Children.FirstOrDefault();
+        if (wanted is null) return;
+        await Load(wanted);
+        wanted.Expanded = true;
     }
 
     IEnumerable<Node> Visible()

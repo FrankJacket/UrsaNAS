@@ -350,7 +350,7 @@ public static class French
         ["Source"] = "Source",
         ["Mounted drives"] = "Disques montés",
         ["Remote"] = "Distant",
-        ["Coming soon…"] = "À venir…",
+        ["No remote storage mounted."] = "Aucun stockage distant monté.",
         ["No share."] = "Aucun partage.",
         ["No mounted drive."] = "Aucun disque monté.",
         ["Remote storage"] = "Stockage distant",

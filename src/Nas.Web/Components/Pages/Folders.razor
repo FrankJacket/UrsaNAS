@@ -11,7 +11,7 @@
 {
     <MudAlert Severity="Severity.Error" Class="mb-4">@error</MudAlert>
 }
-@if (loaded && allShares.Count == 0 && disks.Count == 0)
+@if (loaded && allShares.Count == 0 && disks.Count == 0 && remotes.Count == 0)
 {
     <MudAlert Severity="Severity.Info">@L["Create a share first."]</MudAlert>
 }
@@ -37,7 +37,7 @@ else if (loaded)
 
     @if (top.Children.Count == 0)
     {
-        <MudAlert Severity="Severity.Info">@(source == "Remote" ? L["Coming soon…"] : source == "Shares" ? L["No share."] : L["No mounted drive."])</MudAlert>
+        <MudAlert Severity="Severity.Info">@(source == "Remote" ? L["No remote storage mounted."] : source == "Shares" ? L["No share."] : L["No mounted drive."])</MudAlert>
     }
     else
     {
@@ -125,6 +125,11 @@ else if (loaded)
     List<string> allShares = [];
     HashSet<string> aclShares = [];
     List<BackupTarget> disks = [];
+    /// <summary>Les stockages distants montés (point de montage, libellé) : leurs fichiers se parcourent comme ceux d'un disque.</summary>
+    List<(string Dir, string Label)> remotes = [];
+    bool IsRemote(string place) => remotes.Any(r => r.Dir == place);
+    string RemoteLabel(RemoteStorage r) => r.Name + " (" + (r.Type is "onedrive" ? "OneDrive" : r.Type is "dropbox" ? "Dropbox" : r.Type.ToUpperInvariant()) + ")"
+        + (r.TotalBytes > 0 ? " — " + L["{0} free of {1}", Fmt.Size(r.FreeBytes, L.Lang), Fmt.Size(r.TotalBytes, L.Lang)] : "");
     /// <summary>L'emplacement (partage ou disque monté) du nœud sélectionné.</summary>
     string? share => selected is { Place.Length: > 0 } ? selected.Place : null;
     bool IsDisk => share is not null && NasOperations.IsDisk(share);
@@ -136,7 +141,7 @@ else if (loaded)
     Dictionary<string, Dictionary<string, FolderState>> statesBy = new();
     FolderState? St(Node n) => statesBy.GetValueOrDefault(n.Place)?.GetValueOrDefault(n.Path);
     async Task LoadStates(string place) { if (HasAcl(place)) statesBy[place] = await Repo.GetFolderStatesAsync(place); }
-    static string NodeIcon(Node n) => n.Depth > 0 ? Icons.Material.Filled.Folder : NasOperations.IsDisk(n.Place) ? Icons.Material.Filled.Storage : Icons.Material.Filled.FolderShared;
+    string NodeIcon(Node n) => n.Depth > 0 ? Icons.Material.Filled.Folder : IsRemote(n.Place) ? Icons.Material.Filled.CloudQueue : NasOperations.IsDisk(n.Place) ? Icons.Material.Filled.Storage : Icons.Material.Filled.FolderShared;
     /// <summary>Racine invisible de l'arbre : ses enfants (premier niveau) sont les partages ou les disques montés de la source choisie.</summary>
     readonly Node top = new() { Depth = -1, Expanded = true, Loaded = true };
     string source = "Shares";
@@ -159,16 +164,18 @@ else if (loaded)
         catch (Exception e) when (e is AgentException or HttpRequestException) { error = L["Agent unreachable."]; }
         try { disks = (await Agent.GetBackupTargetsAsync()).ToList(); } // les disques montés (USB…) : facultatif, la page marche sans
         catch (Exception e) when (e is AgentException or HttpRequestException) { }
+        try { remotes = (await Agent.GetRemotesAsync()).Where(r => r.Mounted).Select(r => (r.MountPoint, RemoteLabel(r))).ToList(); }
+        catch (Exception e) when (e is AgentException or HttpRequestException) { }
         loaded = true;
         var wanted = Share is not null && allShares.Contains(Share) ? Share : null;
-        await SelectSource(allShares.Count > 0 || disks.Count == 0 ? "Shares" : "Mounted drives", wanted);
+        await SelectSource(allShares.Count > 0 || (disks.Count == 0 && remotes.Count == 0) ? "Shares" : disks.Count > 0 ? "Mounted drives" : "Remote", wanted);
     }
 
     IEnumerable<(string Place, string Label)> Places() => source switch
     {
         "Shares" => allShares.Select(s => (s, s)),
         "Mounted drives" => disks.Select(d => (d.Dir, DiskLabel(d))),
-        _ => [],
+        _ => remotes.Select(r => (r.Dir, r.Label)),
     };
 
     /// <summary>Change de source : le premier niveau de l'arbre devient la liste de ses partages ou disques ; le premier (ou <paramref name="place"/>) est ouvert.</summary>
@@ -178,12 +185,13 @@ else if (loaded)
         statesBy = new();
         selected = null;
         top.Children = Places().Select(p => new Node { Place = p.Place, Name = p.Label, Depth = 0 }).ToList();
-        foreach (var c in top.Children) await LoadStates(c.Place);
-        var first = top.Children.FirstOrDefault(c => c.Place == place) ?? top.Children.FirstOrDefault();
-        if (first is null) return;
-        selected = first;
-        await Load(first);
-        first.Expanded = true;
+        // Rien n'est lu tant qu'on n'ouvre pas un dossier (sauf celui demandé explicitement) : lister un stockage distant peut être long.
+        var wanted = place is null ? null : top.Children.FirstOrDefault(c => c.Place == place);
+        selected = wanted ?? top.Children.FirstOrDefault();
+        if (wanted is null) return;
+        await LoadStates(wanted.Place);
+        await Load(wanted);
+        wanted.Expanded = true;
     }
 
     Task Refresh() => selected is null ? Task.CompletedTask : Show(selected.Place, selected.Path);
@@ -225,6 +233,7 @@ else if (loaded)
         n.Loading = true;
         try
         {
+            if (n.Depth == 0 && !statesBy.ContainsKey(n.Place)) await LoadStates(n.Place);
             var listing = await Agent.GetFoldersAsync(n.Place, n.Path, files: true);
             var old = n.Children.Where(c => !c.IsFile).ToDictionary(c => c.Name);
             n.Children = listing.Folders.Select(f => old.TryGetValue(f.Name, out var o) ? Touch(o, f)
@@ -326,7 +335,7 @@ else if (loaded)
         var parameters = new DialogParameters<FolderPickerDialog>
         {
             { x => x.Share, sh }, { x => x.Exclude, n.Path }, { x => x.ExcludeLocation, sh },
-            { x => x.Shares, allShares }, { x => x.Disks, disks.Select(d => (d.Dir, DiskLabel(d))).ToList() },
+            { x => x.Shares, allShares }, { x => x.Disks, disks.Select(d => (d.Dir, DiskLabel(d))).ToList() }, { x => x.Remotes, remotes },
             { x => x.Message, copy ? L["Copy {0} to:", Loc(n)] : L["Move {0} to:", Loc(n)] },
             { x => x.ButtonText, copy ? "Copy" : "Move" },
         };

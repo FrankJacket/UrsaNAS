@@ -11,7 +11,7 @@ public sealed class TransferService(AclService acl, BackupService backup)
 {
     async Task<string> RootAsync(string location, CancellationToken ct)
     {
-        if (DiskFilesService.IsDisk(location)) return backup.ValidateTarget(location);
+        if (DiskFilesService.IsDisk(location)) return backup.ValidatePlace(location);
         if (Rules.ValidateShareName(location) is { } e) throw new OperationException(e);
         return await acl.SharePathAsync(location, ct);
     }

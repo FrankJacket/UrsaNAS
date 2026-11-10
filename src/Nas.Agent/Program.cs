@@ -26,10 +26,15 @@ public partial class Program
 
     public static void Main(string[] args)
     {
-        var builder = WebApplication.CreateBuilder(args);
-        // Lancé par systemd, le dossier courant est « / » : le appsettings.json installé à côté du programme n'est pas lu tout seul.
-        if (Path.GetDirectoryName(Environment.ProcessPath) is { Length: > 0 } exeDir && !Path.GetFileNameWithoutExtension(Environment.ProcessPath)!.Equals("dotnet", StringComparison.OrdinalIgnoreCase))
-            builder.Configuration.AddJsonFile(Path.Combine(exeDir, "appsettings.json"), optional: true);
+        // Lancé par systemd, le dossier courant est « / » : sans ceci le appsettings.json installé à côté du programme n'est pas lu, et l'hôte
+        // parcourt « / » (donc les stockages distants montés sous /srv/remote, ce qui peut bloquer le démarrage). Le dossier du programme est la racine du contenu.
+        var exeDir = Path.GetDirectoryName(Environment.ProcessPath);
+        var isHost = Path.GetFileNameWithoutExtension(Environment.ProcessPath)?.Equals("dotnet", StringComparison.OrdinalIgnoreCase) ?? true;
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+        {
+            Args = args,
+            ContentRootPath = !isHost && !string.IsNullOrEmpty(exeDir) ? exeDir : null,
+        });
 
         var socketPath = builder.Configuration["Agent:SocketPath"];
         if (!string.IsNullOrWhiteSpace(socketPath))

@@ -162,6 +162,27 @@ public class BackupServiceTests : IDisposable
     }
 
     [Fact]
+    public void Les_stockages_distants_montes_ne_servent_qu_au_gestionnaire_de_fichiers()
+    {
+        var cfg = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Backup:Roots:0"] = _roots.Replace('\\', '/'),
+            ["Backup:MountInfo"] = _mountInfo,
+            ["Remote:MountRoot"] = _roots.Replace((char)92, (char)47) + "-remote",
+        }).Build();
+        var users = new UserService(_run);
+        var strict = new BackupService(_run, new AclService(_run, users, new GroupService(_run, users), cfg), cfg, NullLogger<BackupService>.Instance, new StubLifetime());
+        var remote = _roots.Replace((char)92, (char)47) + "-remote";
+        File.WriteAllText(_mountInfo, $"36 25 0:40 / {remote}/cloud rw - fuse.rclone remote:/ rw\n");
+
+        Assert.Equal(remote + "/cloud", strict.ValidatePlace(remote + "/cloud"));
+        Assert.Throws<OperationException>(() => strict.ValidateTarget(remote + "/cloud")); // ni sauvegarde ni machine virtuelle
+        Assert.Throws<OperationException>(() => strict.ValidatePlace(remote + "/absent")); // pas monté
+        Assert.Throws<OperationException>(() => strict.ValidatePlace(remote + "/cloud/../../etc"));
+        Assert.Empty(strict.ListTargets());
+    }
+
+    [Fact]
     public void Etat_du_disque_absent_non_initialise_connecte_ou_autre()
     {
         Assert.Equal(BackupDiskState.Missing, _svc.CheckDisk(Usb + "/absent", "x").State);

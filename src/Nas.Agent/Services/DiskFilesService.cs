@@ -11,7 +11,7 @@ public sealed class DiskFilesService(BackupService backup)
 {
     public static bool IsDisk(string location) => location.Contains('/'); // un nom de partage n'a jamais de barre
 
-    string Root(string dir) => backup.ValidateTarget(dir);
+    string Root(string dir) => backup.ValidatePlace(dir);
 
     static string CheckPath(string? path)
     {

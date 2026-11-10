@@ -72,14 +72,25 @@ public sealed class BackupService
     // ---- Disques
 
     /// <summary>Normalise et vérifie un dossier cible : sous une racine autorisée et, sauf en développement, point de montage.</summary>
-    public string ValidateTarget(string? dir)
+    public string ValidateTarget(string? dir) => ValidateTarget(dir, allowRemote: false);
+
+    string RemoteRoot => (_cfg["Remote:MountRoot"] ?? "/srv/remote").TrimEnd('/');
+
+    /// <summary>
+    /// Comme <see cref="ValidateTarget(string?)"/>, mais accepte aussi les stockages distants montés (/srv/remote/&lt;nom&gt;) : réservé au gestionnaire de fichiers
+    /// et aux copies, pas aux sauvegardes ni au stockage des machines virtuelles.
+    /// </summary>
+    public string ValidatePlace(string? dir) => ValidateTarget(dir, allowRemote: true);
+
+    string ValidateTarget(string? dir, bool allowRemote)
     {
-        var bad = new OperationException(Msg.F("“{0}” is not a mounted disk under {1}.", dir ?? "", string.Join(", ", Roots)));
+        var roots = allowRemote ? Roots.Append(RemoteRoot).ToList() : Roots;
+        var bad = new OperationException(Msg.F("“{0}” is not a mounted disk under {1}.", dir ?? "", string.Join(", ", roots)));
         if (string.IsNullOrWhiteSpace(dir) || !Path.IsPathRooted(dir) || dir.Any(char.IsControl)) throw bad;
         // « .. », « . » et « // » changent le chemin normalisé : refusés. (Antislash unifiés pour que les tests tournent aussi sous Windows.)
         var full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(dir)).Replace('\\', '/');
         if (!string.Equals(full, Path.TrimEndingDirectorySeparator(dir).Replace('\\', '/'), StringComparison.Ordinal)) throw bad;
-        if (!Roots.Any(r => full.StartsWith(r.TrimEnd('/') + "/", StringComparison.Ordinal))) throw bad;
+        if (!roots.Any(r => full.StartsWith(r.TrimEnd('/') + "/", StringComparison.Ordinal))) throw bad;
         if (RequireMount ? !Mounts().Any(m => m.MountPoint == full) : !Directory.Exists(full)) throw bad;
         return full;
     }
