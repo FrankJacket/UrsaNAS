@@ -40,7 +40,7 @@ public enum BackupDiskState { Missing, NotInitialised, Connected, OtherDisk }
 public sealed record BackupDiskStatus(BackupDiskState State, long FreeBytes, long TotalBytes);
 
 /// <summary>Un disque monté que l'on peut choisir comme destination (point de montage sous /mnt, /media…).</summary>
-public sealed record BackupTarget(string Dir, string? Device, string? FileSystem, long TotalBytes, long FreeBytes, string? MarkerId);
+public sealed record BackupTarget(string Dir, string? Device, string? FileSystem, long TotalBytes, long FreeBytes, string? MarkerId, bool Remote = false);
 
 public sealed record InitDiskRequest(string TargetDir);
 

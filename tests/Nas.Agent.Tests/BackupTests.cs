@@ -180,6 +180,13 @@ public class BackupServiceTests : IDisposable
         Assert.Throws<OperationException>(() => strict.ValidatePlace(remote + "/absent")); // pas monté
         Assert.Throws<OperationException>(() => strict.ValidatePlace(remote + "/cloud/../../etc"));
         Assert.Empty(strict.ListTargets());
+
+        // ... mais une sauvegarde peut les viser : ils sont listés, marqués comme distants, et reconnus comme cible
+        var listed = Assert.Single(strict.ListTargets(includeRemote: true));
+        Assert.True(listed.Remote);
+        Assert.Equal(remote + "/cloud", listed.Dir);
+        Assert.Equal(BackupDiskState.NotInitialised, strict.CheckDisk(remote + "/cloud", null).State);
+        Assert.Equal(BackupDiskState.Missing, strict.CheckDisk(remote + "/absent", "x").State);
     }
 
     [Fact]

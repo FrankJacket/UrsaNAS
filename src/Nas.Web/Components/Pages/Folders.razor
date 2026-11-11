@@ -162,7 +162,7 @@ else if (loaded)
             aclShares = shares.Where(s => s.Acl).Select(s => s.Name).ToHashSet();
         }
         catch (Exception e) when (e is AgentException or HttpRequestException) { error = L["Agent unreachable."]; }
-        try { disks = (await Agent.GetBackupTargetsAsync()).ToList(); } // les disques montés (USB…) : facultatif, la page marche sans
+        try { disks = (await Agent.GetBackupTargetsAsync()).Where(t => !t.Remote).ToList(); } // les disques montés (USB…) : facultatif, la page marche sans
         catch (Exception e) when (e is AgentException or HttpRequestException) { }
         try { remotes = (await Agent.GetRemotesAsync()).Where(r => r.Mounted).Select(r => (r.MountPoint, RemoteLabel(r))).ToList(); }
         catch (Exception e) when (e is AgentException or HttpRequestException) { }

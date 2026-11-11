@@ -90,10 +90,10 @@ public class DockerInspectTests
     {
         var (c, i) = Parse(ContainerJson(extraHostConfig: "\"Privileged\":true,\"Memory\":536870912,\"CapAdd\":[\"NET_ADMIN\"],", cmd: "[\"sleep\",\"300\"]"));
         var u = DockerInspect.Unsupported(c, i);
-        Assert.Contains("privileged mode", u);
         Assert.Contains("memory or CPU limits", u);
-        Assert.Contains("added or removed capabilities", u);
         Assert.Contains("custom command", u);
+        Assert.DoesNotContain("privileged mode", u); // le formulaire sait maintenant garder le mode privilégié et les capacités
+        Assert.DoesNotContain("added or removed capabilities", u);
 
         var (c2, i2) = Parse(ContainerJson(networks: "{\"a\":{},\"b\":{}}"));
         Assert.Contains("several networks", DockerInspect.Unsupported(c2, i2));
@@ -258,6 +258,69 @@ public sealed class DockerServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Lance_un_conteneur_avec_ses_capacites_et_le_mode_prive()
+    {
+        var r = new Runner(_ => Good);
+        await Svc(r).RunContainerAsync(new RunContainerRequest("nginx", null, "no", [], [], [], null, true, ["NET_ADMIN", "NET_ADMIN"], ["MKNOD"]));
+        var run = r.Calls.Single();
+        Assert.Contains("--privileged", run);
+        Assert.Equal(1, run.Count(a => a == "--cap-add=NET_ADMIN")); // pas de doublon
+        Assert.Contains("--cap-drop=MKNOD", run);
+        Assert.Equal("nginx", run[^1]); // l'image reste en dernier
+
+        r.Calls.Clear();
+        await Svc(r).RunContainerAsync(new RunContainerRequest("nginx", null, "no", [], [], []));
+        Assert.DoesNotContain(r.Calls.Single(), a => a.StartsWith("--cap") || a == "--privileged");
+
+        await Assert.ThrowsAsync<OperationException>(() => Svc(r).RunContainerAsync(new RunContainerRequest("nginx", null, "no", [], [], [], null, false, ["--rm"])));
+        await Assert.ThrowsAsync<OperationException>(() => Svc(r).RunContainerAsync(new RunContainerRequest("nginx", null, "no", [], [], [], null, false, null, ["cap_chown"])));
+    }
+
+    [Fact]
+    public void Les_droits_effectifs_tiennent_compte_du_mode_prive_des_ajouts_et_des_retraits()
+    {
+        Assert.True(Rules.EffectiveCapabilities(false, null, null).SetEquals(Rules.DefaultCapabilities));
+        Assert.Equal(Rules.AllCapabilities.Count, Rules.EffectiveCapabilities(true, null, null).Count);
+        Assert.Equal(Rules.AllCapabilities.Count, Rules.EffectiveCapabilities(false, ["ALL"], null).Count);
+        Assert.Empty(Rules.EffectiveCapabilities(false, null, ["ALL"]));
+        var only = Rules.EffectiveCapabilities(false, ["NET_BIND_SERVICE"], ["ALL"]);
+        Assert.Equal(["NET_BIND_SERVICE"], only);
+        var some = Rules.EffectiveCapabilities(false, ["NET_ADMIN"], ["CHOWN"]);
+        Assert.Contains("NET_ADMIN", some);
+        Assert.DoesNotContain("CHOWN", some);
+        Assert.All(Rules.DefaultCapabilities, c => Assert.Contains(c, Rules.AllCapabilities));
+    }
+
+    [Fact]
+    public void Relit_le_mode_prive_et_les_capacites_sans_le_prefixe_cap()
+    {
+        var (c, i) = Parse2(DockerInspectTests.ContainerJson(extraHostConfig: "\"Privileged\":true,\"CapAdd\":[\"CAP_NET_ADMIN\",\"sys_time\"],\"CapDrop\":[\"ALL\"],"));
+        var s = DockerInspect.Settings(c, i);
+        Assert.True(s.Privileged);
+        Assert.Equal(["NET_ADMIN", "SYS_TIME"], s.CapAdd);
+        Assert.Equal(["ALL"], s.CapDrop);
+    }
+
+    static (System.Text.Json.JsonElement C, System.Text.Json.JsonElement I) Parse2(string container) =>
+        (System.Text.Json.JsonDocument.Parse(container).RootElement, System.Text.Json.JsonDocument.Parse(DockerInspectTests.ImageJson).RootElement);
+
+    [Fact]
+    public async Task Changer_les_capacites_recree_le_conteneur_mais_les_droits_equivalents_ne_changent_rien()
+    {
+        var r = Inspecting(DockerInspectTests.ContainerJson(extraHostConfig: "\"CapAdd\":[\"CHOWN\"],")); // CHOWN est déjà accordé d'office
+        await Svc(r).UpdateContainerAsync("web", Current());
+        Assert.DoesNotContain(r.Calls, c => c[0] is "update" or "stop" or "rename" or "run" or "rm"); // mêmes droits réels : rien à faire
+
+        await Svc(r).UpdateContainerAsync("web", Current() with { CapAdd = ["NET_ADMIN"] });
+        var run = r.Calls.Single(c => c[0] == "run");
+        Assert.Contains("--cap-add=NET_ADMIN", run);
+
+        r.Calls.Clear();
+        await Svc(r).UpdateContainerAsync("web", Current() with { Privileged = true });
+        Assert.Contains("--privileged", r.Calls.Single(c => c[0] == "run"));
+    }
+
+    [Fact]
     public async Task Le_reseau_choisi_est_cree_seulement_s_il_n_existe_pas()
     {
         var existing = "{\"ID\":\"n1\",\"Name\":\"media\",\"Driver\":\"bridge\",\"Scope\":\"local\"}\n";
@@ -343,7 +406,7 @@ public sealed class DockerServiceTests : IDisposable
         Assert.Contains("stack", e1.Message);
         Assert.DoesNotContain(stacked.Calls, c => c[0] is "stop" or "rename");
 
-        var special = Inspecting(DockerInspectTests.ContainerJson(extraHostConfig: "\"Privileged\":true,"));
+        var special = Inspecting(DockerInspectTests.ContainerJson(extraHostConfig: "\"Memory\":536870912,"));
         var e2 = await Assert.ThrowsAsync<OperationException>(() => Svc(special).UpdateContainerAsync("web", Current(image: "nginx:1.28")));
         Assert.Contains("cannot be kept", e2.Message);
         Assert.DoesNotContain(special.Calls, c => c[0] is "stop" or "rename");

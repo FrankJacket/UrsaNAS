@@ -96,15 +96,25 @@ public sealed class BackupService
     }
 
     /// <summary>Les disques montés sous les racines autorisées, avec le marqueur qu'ils portent éventuellement.</summary>
-    public IReadOnlyList<BackupTarget> ListTargets()
+    /// <param name="includeRemote">Ajoute les stockages distants montés (sauvegardes seulement : les machines virtuelles les refusent).</param>
+    public IReadOnlyList<BackupTarget> ListTargets(bool includeRemote = false)
     {
         var list = new List<BackupTarget>();
         foreach (var m in Mounts())
         {
-            if (!Roots.Any(r => m.MountPoint.StartsWith(r.TrimEnd('/') + "/", StringComparison.Ordinal))) continue;
+            var remote = includeRemote && m.MountPoint.StartsWith(RemoteRoot + "/", StringComparison.Ordinal);
+            if (!remote && !Roots.Any(r => m.MountPoint.StartsWith(r.TrimEnd('/') + "/", StringComparison.Ordinal))) continue;
             long total = 0, free = 0;
-            try { var d = new DriveInfo(m.MountPoint); total = d.TotalSize; free = d.AvailableFreeSpace; } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
-            list.Add(new BackupTarget(m.MountPoint, m.Device, m.FileSystem, total, free, TargetMarker.Read(m.MountPoint)));
+            string? marker = null;
+            void Probe()
+            {
+                try { var d = new DriveInfo(m.MountPoint); total = d.TotalSize; free = d.AvailableFreeSpace; } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+                marker = TargetMarker.Read(m.MountPoint);
+            }
+            // Un serveur distant qui ne répond plus ne doit pas bloquer l'agent : on n'attend sa réponse que quelques secondes.
+            if (remote) { var task = Task.Run(Probe); if (!task.Wait(TimeSpan.FromSeconds(4))) { total = free = 0; marker = null; } }
+            else Probe();
+            list.Add(new BackupTarget(m.MountPoint, m.Device, m.FileSystem, total, free, marker, remote));
         }
         return list.OrderBy(t => t.Dir, StringComparer.Ordinal).ToList();
     }
@@ -112,7 +122,7 @@ public sealed class BackupService
     public BackupDiskStatus CheckDisk(string targetDir, string? targetId)
     {
         string dir;
-        try { dir = ValidateTarget(targetDir); }
+        try { dir = ValidateTarget(targetDir, allowRemote: true); }
         catch (OperationException) { return new(BackupDiskState.Missing, 0, 0); }
         if (string.IsNullOrEmpty(targetId)) return new(BackupDiskState.NotInitialised, 0, 0); // « id= » vide : pas encore initialisé
         var onDisk = TargetMarker.Read(dir);
@@ -124,7 +134,7 @@ public sealed class BackupService
     }
 
     /// <summary>Écrit le marqueur du disque (ou renvoie celui qui existe déjà : initialiser deux fois n'orpheline aucun travail).</summary>
-    public string InitDisk(string targetDir) => TargetMarker.Initialize(ValidateTarget(targetDir));
+    public string InitDisk(string targetDir) => TargetMarker.Initialize(ValidateTarget(targetDir, allowRemote: true));
 
     // ---- Copies
 
@@ -134,7 +144,7 @@ public sealed class BackupService
     public void Start(BackupJobDef job)
     {
         if (BackupRules.Validate(job) is { } error) throw new OperationException(error);
-        var target = ValidateTarget(job.TargetDir);
+        var target = ValidateTarget(job.TargetDir, allowRemote: true);
         if (job.TargetId is null) throw new OperationException(Msg.F("The external disk has not been initialised for this job."));
 
         var state = new RunState();

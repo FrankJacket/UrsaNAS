@@ -123,6 +123,33 @@ public class AlertRulesTests
     }
 }
 
+public class RemoteAlertTests
+{
+    static RemoteStorage R(string name, bool mounted) => new(name, "smb", "srv", "share", null, null, null, false, "/srv/remote/" + name, mounted, 0, 0);
+
+    [Fact]
+    public void Une_connexion_distante_non_montee_donne_une_alerte_et_une_connexion_montee_aucune()
+    {
+        var found = AlertRules.Evaluate(new HealthSnapshot(true, [], [], null, [R("papa", false), R("one", true)]));
+        var alert = Assert.Single(found);
+        Assert.Equal("remote:papa:down", alert.Code);
+        Assert.Equal(AlertRules.Warning, alert.Severity);
+
+        Assert.Empty(AlertRules.Evaluate(new HealthSnapshot(true, [], [], null, [R("papa", true)])));
+        Assert.Empty(AlertRules.Evaluate(new HealthSnapshot(true, [], [], null, null))); // on ne sait pas : pas d'alerte
+    }
+
+    [Fact]
+    public void L_alerte_se_ferme_au_retour_du_montage_mais_pas_quand_l_etat_est_inconnu()
+    {
+        var row = new AlertRow { Id = 1, Code = "remote:papa:down", Severity = AlertRules.Warning, Title = "t" };
+        var (_, resolveOk) = AlertEngine.Step([], [row], new HashSet<string>(), []);
+        Assert.Single(resolveOk);
+        var (_, resolveUnknown) = AlertEngine.Step([], [row], new HashSet<string>(), ["remote:"]);
+        Assert.Empty(resolveUnknown);
+    }
+}
+
 public class AlertEngineTests
 {
     static Candidate C(string code) => new(code, AlertRules.Critical, code, "");

@@ -4,7 +4,7 @@ using Nas.Web.Data;
 namespace Nas.Web.Alerting;
 
 /// <summary>Ce que l'interface a pu observer lors d'un contrôle. <c>null</c> = on n'a pas pu le savoir (agent muet, ZFS absent).</summary>
-public sealed record HealthSnapshot(bool AgentReachable, IReadOnlyList<PoolInfo>? Pools, IReadOnlyList<SmartInfo>? Smart, IReadOnlyList<BackupHealth>? Backups = null);
+public sealed record HealthSnapshot(bool AgentReachable, IReadOnlyList<PoolInfo>? Pools, IReadOnlyList<SmartInfo>? Smart, IReadOnlyList<BackupHealth>? Backups = null, IReadOnlyList<RemoteStorage>? Remotes = null);
 
 /// <summary>Un problème constaté. <c>Code</c> l'identifie de façon stable d'un contrôle à l'autre (ex. <c>pool:tank:health</c>).</summary>
 public sealed record Candidate(string Code, string Severity, string Title, string Detail);
@@ -70,6 +70,11 @@ public static class AlertRules
                 result.Add(new($"backup:{b.JobId}:stale", Warning, Msg.F("Backup {0}: no successful copy for {1} days", b.Name, BackupStaleDays),
                     "Check that the backup disk is connected."));
         }
+
+        // Une connexion enregistrée mais non montée : serveur éteint, réseau coupé, jeton refusé… (l'alerte est fermée dès que le montage revient)
+        foreach (var r in (s.Remotes ?? []).Where(r => !r.Mounted))
+            result.Add(new($"remote:{r.Name}:down", Warning, Msg.F("Remote storage {0}: not connected", r.Name),
+                "The connection is saved but not mounted. Check the server and the network, then mount it again from the Remote storage page."));
 
         foreach (var d in s.Smart ?? [])
         {

@@ -168,7 +168,7 @@ public partial class Program
             Guard(async () => { await a.ResetTreeAsync(r.Share, r.Path, ct); return Results.NoContent(); }));
 
         // Sauvegardes (moteur d'Ursacopy)
-        app.MapGet("/backup/targets", (BackupService b) => Read(() => Task.FromResult(Results.Ok(b.ListTargets()))));
+        app.MapGet("/backup/targets", (BackupService b) => Read(() => Task.FromResult(Results.Ok(b.ListTargets(includeRemote: true)))));
         app.MapGet("/backup/disk", (string dir, string? id, BackupService b) => Read(() => Task.FromResult(Results.Ok(b.CheckDisk(dir, id)))));
         app.MapPost("/backup/disk/init", (InitDiskRequest r, BackupService b) =>
             Read(() => Task.FromResult(Results.Ok(new InitDiskResult(b.InitDisk(r.TargetDir))))));

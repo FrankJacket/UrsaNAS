@@ -6,6 +6,10 @@
             {
                 <MudSelectItem T="string" Value="@s">@s</MudSelectItem>
             }
+            @foreach (var r in Remotes)
+            {
+                <MudSelectItem T="string" Value="@r.Value">@r.Label</MudSelectItem>
+            }
         </MudSelect>
     </DialogContent>
     <DialogActions>
@@ -18,7 +22,10 @@
     [CascadingParameter] IMudDialogInstance Dialog { get; set; } = default!;
     [Parameter, EditorRequired] public IReadOnlyList<string> Shares { get; set; } = [];
 
+    /// <summary>Stockages distants montés (point de montage, libellé) proposés après les partages.</summary>
+    [Parameter] public IReadOnlyList<(string Value, string Label)> Remotes { get; set; } = [];
+
     string share = "";
 
-    protected override void OnInitialized() => share = Shares.FirstOrDefault() ?? "";
+    protected override void OnInitialized() => share = Shares.FirstOrDefault() ?? Remotes.FirstOrDefault().Value ?? "";
 }

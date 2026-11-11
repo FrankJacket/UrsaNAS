@@ -89,6 +89,35 @@
             </MudStack>
         }
         <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="() => env.Add(new())" Disabled="busy">@L["Add variable"]</MudButton>
+
+        <MudText Typo="Typo.subtitle2" Class="mt-5">@L["Capabilities"]</MudText>
+        <MudText Typo="Typo.caption" Class="d-block mb-2">@L["Runtime privilege and Linux capabilities: the rights granted to the container. Checked rights are granted; the ones Docker grants by default are marked."]</MudText>
+        <MudCheckBox T="bool" @bind-Value="privileged" Label="@L["Privileged: all rights and access to every device of the NAS (--privileged)"]" Disabled="busy" />
+        @if (privileged)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2">@L["A privileged container has almost the same power as the NAS itself. Use it only for software you trust."]</MudAlert>
+        }
+        <MudStack Row="true" Class="mb-1" Spacing="2">
+            <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="ResetCaps" Disabled="@(busy || privileged)">@L["Docker defaults"]</MudButton>
+            <MudText Typo="Typo.caption" Class="align-self-center">@L["{0} of {1} granted", privileged ? Rules.AllCapabilities.Count : caps.Count, Rules.AllCapabilities.Count]</MudText>
+        </MudStack>
+        <div class="caps">
+            @foreach (var cap in Rules.AllCapabilities)
+            {
+                var c = cap;
+                <div class="cap">
+                    <MudCheckBox T="bool" Value="@(privileged || caps.Contains(c))" ValueChanged="v => SetCap(c, v)" Disabled="@(busy || privileged)" Dense="true"
+                                 Label="@(c + (Rules.DefaultCapabilities.Contains(c) ? " ★" : ""))" />
+                    <MudText Typo="Typo.caption" Class="cap-info">@L[CapInfo.GetValueOrDefault(c, c)]</MudText>
+                </div>
+            }
+        </div>
+        <MudText Typo="Typo.caption">★ @L["Granted by default by Docker."]</MudText>
+        <style>
+            .caps { border: 1px solid var(--mud-palette-lines-default); border-radius: 8px; max-height: 280px; overflow: auto; padding: 4px 8px; display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); column-gap: 12px; }
+            .cap { padding: 2px 0; }
+            .cap-info { display: block; margin-top: -6px; margin-left: 32px; opacity: .7; }
+        </style>
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="() => Dialog.Cancel()" Disabled="busy">@L["Cancel"]</MudButton>
@@ -108,6 +137,31 @@
     sealed class PortRow { public int? Host { get; set; } public int? Container { get; set; } public string Protocol { get; set; } = "tcp"; public string Ip { get; set; } = ""; }
     sealed class VolumeRow { public string Host { get; set; } = ""; public string Container { get; set; } = ""; public string Mode { get; set; } = "rw"; }
     sealed class EnvRow { public string Name { get; set; } = ""; public string Value { get; set; } = ""; }
+
+    // Droits Linux : cases cochées = droits accordés. À l'enregistrement, on ne transmet que l'écart avec les droits d'office de Docker (--cap-add / --cap-drop).
+    bool privileged;
+    readonly HashSet<string> caps = new(Rules.DefaultCapabilities);
+
+    void SetCap(string cap, bool granted) { if (granted) caps.Add(cap); else caps.Remove(cap); }
+
+    void ResetCaps() { caps.Clear(); caps.UnionWith(Rules.DefaultCapabilities); }
+
+    static readonly Dictionary<string, string> CapInfo = new()
+    {
+        ["AUDIT_CONTROL"] = "Configure the kernel audit system", ["AUDIT_READ"] = "Read the kernel audit log", ["AUDIT_WRITE"] = "Write to the kernel audit log",
+        ["BLOCK_SUSPEND"] = "Prevent the system from suspending", ["BPF"] = "Load and manage BPF programs", ["CHECKPOINT_RESTORE"] = "Checkpoint and restore processes",
+        ["CHOWN"] = "Change the owner of any file", ["DAC_OVERRIDE"] = "Ignore file permission checks", ["DAC_READ_SEARCH"] = "Ignore read and search permission checks",
+        ["FOWNER"] = "Ignore checks that require owning the file", ["FSETID"] = "Keep set-user-ID and set-group-ID bits on modified files", ["IPC_LOCK"] = "Lock memory",
+        ["IPC_OWNER"] = "Ignore permission checks on System V IPC objects", ["KILL"] = "Send signals to any process", ["LEASE"] = "Take leases on any file",
+        ["LINUX_IMMUTABLE"] = "Set the immutable and append-only file attributes", ["MAC_ADMIN"] = "Configure mandatory access control", ["MAC_OVERRIDE"] = "Bypass mandatory access control",
+        ["MKNOD"] = "Create device files", ["NET_ADMIN"] = "Configure the network (interfaces, routes, firewall)", ["NET_BIND_SERVICE"] = "Use ports below 1024",
+        ["NET_BROADCAST"] = "Broadcast and listen to multicast", ["NET_RAW"] = "Use raw and packet sockets (ping)", ["PERFMON"] = "Monitor performance",
+        ["SETFCAP"] = "Set file capabilities", ["SETGID"] = "Change group IDs", ["SETPCAP"] = "Change the capabilities of processes", ["SETUID"] = "Change user IDs",
+        ["SYSLOG"] = "Read and configure the kernel log", ["SYS_ADMIN"] = "Many administration operations (mount, namespaces…)", ["SYS_BOOT"] = "Reboot the system",
+        ["SYS_CHROOT"] = "Use chroot", ["SYS_MODULE"] = "Load and unload kernel modules", ["SYS_NICE"] = "Change process priorities", ["SYS_PACCT"] = "Configure process accounting",
+        ["SYS_PTRACE"] = "Trace and inspect other processes", ["SYS_RAWIO"] = "Raw access to I/O ports and devices", ["SYS_RESOURCE"] = "Exceed resource limits",
+        ["SYS_TIME"] = "Set the system clock", ["SYS_TTY_CONFIG"] = "Configure terminals", ["WAKE_ALARM"] = "Set alarms that wake the system",
+    };
 
     string? image = "", name = "", restart = "unless-stopped";
     readonly List<PortRow> ports = [];
@@ -152,6 +206,9 @@
             restart = r.Restart;
             stack = s.Stack;
             unsupported = s.Unsupported;
+            privileged = r.Privileged;
+            caps.Clear();
+            caps.UnionWith(Rules.EffectiveCapabilities(false, r.CapAdd, r.CapDrop));
             ports.Clear();
             foreach (var p in r.Ports)
             {
@@ -223,7 +280,11 @@
         busy = true;
         try
         {
-            var request = new RunContainerRequest((image ?? "").Trim(), (name ?? "").Trim(), restart ?? "no", portList, envList, volumeList, (network ?? "").Trim());
+            // Privilégié : tous les droits, rien à ajouter ni retirer.
+            var capAdd = privileged ? [] : caps.Except(Rules.DefaultCapabilities).Order(StringComparer.Ordinal).ToList();
+            var capDrop = privileged ? [] : Rules.DefaultCapabilities.Except(caps).Order(StringComparer.Ordinal).ToList();
+            var request = new RunContainerRequest((image ?? "").Trim(), (name ?? "").Trim(), restart ?? "no", portList, envList, volumeList, (network ?? "").Trim(),
+                privileged, capAdd, capDrop);
             if (Editing) await Ops.UpdateContainerAsync(ContainerId!, ContainerName ?? ContainerId!, request);
             else await Ops.RunContainerAsync(request);
             Dialog.Close(DialogResult.Ok(true));

@@ -41,6 +41,7 @@ public sealed class AlertService(Repo repo, IMailSender mail, AlertState state)
             if (snapshot.Pools is null) unknown.Add("pool:");
             if (snapshot.Smart is null) unknown.Add("smart:");
             if (snapshot.Backups is null) unknown.Add("backup:");
+            if (snapshot.Remotes is null) unknown.Add("remote:");
 
             var (raise, resolve) = AlertEngine.Step(current, active, _previous, unknown, immediate);
             _previous = current.Select(c => c.Code).ToHashSet(StringComparer.Ordinal);
@@ -150,7 +151,10 @@ public sealed class AlertMonitor(IServiceScopeFactory scopes, AlertService alert
             IReadOnlyList<BackupHealth>? backups = null;
             try { backups = await scope.ServiceProvider.GetRequiredService<BackupRepo>().GetHealthAsync(); }
             catch (Microsoft.Data.Sqlite.SqliteException) { } // base illisible : on ne sait pas, on ne ferme rien
-            return new HealthSnapshot(true, pools, _smart, backups);
+            IReadOnlyList<RemoteStorage>? remotes = null;
+            try { remotes = await agent.GetRemotesAsync(ct); }
+            catch (AgentException) { } // illisibles : on ne sait pas, on ne ferme rien
+            return new HealthSnapshot(true, pools, _smart, backups, remotes);
         }
         catch (Exception e) when (e is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
         {

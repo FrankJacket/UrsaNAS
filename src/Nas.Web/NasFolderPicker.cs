@@ -18,11 +18,15 @@ public class NasFolderPicker(IDialogService dialogs, AgentClient agent, Repo rep
     public async Task<string?> PickAsync()
     {
         var shares = await repo.GetSharesAsync();
-        if (shares.Count == 0) return null;
-        var share = shares[0].Name;
-        if (shares.Count > 1)
+        // Les stockages distants montés (SMB, NFS, OneDrive, Dropbox) servent aussi d'emplacement ; leur « partage » est leur point de montage.
+        var remotes = new List<(string Value, string Label)>();
+        try { remotes = (await agent.GetRemotesAsync()).Where(r => r.Mounted).Select(r => (r.MountPoint, L["Remote storage"] + " — " + r.Name)).ToList(); }
+        catch (Exception e) when (e is AgentException or HttpRequestException) { } // facultatif
+        if (shares.Count == 0 && remotes.Count == 0) return null;
+        var share = shares.Count > 0 ? shares[0].Name : remotes[0].Value;
+        if (shares.Count + remotes.Count > 1)
         {
-            var pick = new DialogParameters<ShareSelectDialog> { { x => x.Shares, shares.Select(s => s.Name).ToList() } };
+            var pick = new DialogParameters<ShareSelectDialog> { { x => x.Shares, shares.Select(s => s.Name).ToList() }, { x => x.Remotes, remotes } };
             var first = await dialogs.ShowAsync<ShareSelectDialog>(L["Choose a share"], pick, Small);
             if (await first.Result is not { Canceled: false, Data: string chosen }) return null;
             share = chosen;
@@ -35,7 +39,7 @@ public class NasFolderPicker(IDialogService dialogs, AgentClient agent, Repo rep
         var dialog = await dialogs.ShowAsync<FolderPickerDialog>(L["Choose a folder"], parameters, Small);
         if (await dialog.Result is not { Canceled: false, Data: FolderPick { Path: var relative } }) return null;
 
-        var root = (await agent.GetShareRootAsync(share)).TrimEnd('/');
+        var root = (remotes.Any(r => r.Value == share) ? share : await agent.GetShareRootAsync(share)).TrimEnd('/');
         return relative.Length == 0 ? root : $"{root}/{relative.Trim('/')}";
     }
 }

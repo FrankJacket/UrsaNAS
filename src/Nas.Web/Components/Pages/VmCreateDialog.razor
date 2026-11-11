@@ -70,7 +70,7 @@
         try { isos = await Agent.GetIsosAsync((await Repo.GetSharesAsync()).Select(s => s.Name)); }
         catch (Exception e) when (e is AgentException or HttpRequestException) { error = e is AgentException a ? L.Translate(a.Message) : L["Agent unreachable."]; }
         loaded = true;
-        try { targets = await Agent.GetBackupTargetsAsync(); } catch (Exception e) when (e is AgentException or HttpRequestException) { }
+        try { targets = (await Agent.GetBackupTargetsAsync()).Where(t => !t.Remote).ToList(); } catch (Exception e) when (e is AgentException or HttpRequestException) { }
     }
 
     async Task Save()

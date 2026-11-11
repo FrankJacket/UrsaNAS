@@ -75,8 +75,14 @@ public static class DockerInspect
         var networks = P(c, "NetworkSettings", "Networks") is { ValueKind: JsonValueKind.Object } n ? n.EnumerateObject().Select(x => x.Name).ToList() : [];
         var network = networks.FirstOrDefault(x => x != "bridge") ?? "";
 
-        return new RunContainerRequest(Str(c, "Config", "Image"), Name(c), restart, ports, env, volumes, network);
+        return new RunContainerRequest(Str(c, "Config", "Image"), Name(c), restart, ports, env, volumes, network,
+            Flag(c, "HostConfig", "Privileged"), Caps(c, "CapAdd"), Caps(c, "CapDrop"));
     }
+
+    // Selon la version de Docker, les noms portent ou non le préfixe « CAP_ ».
+    static List<string> Caps(JsonElement c, string key) => Items(c, "HostConfig", key)
+        .Select(e => (e.GetString() ?? "").ToUpperInvariant()).Select(s => s.StartsWith("CAP_", StringComparison.Ordinal) ? s[4..] : s)
+        .Where(s => s.Length > 0).Distinct().ToList();
 
     /// <summary>Réglages présents sur le conteneur que le formulaire ne saurait pas recréer (textes courts, traduits par l'interface).</summary>
     public static IReadOnlyList<string> Unsupported(JsonElement c, JsonElement image)
@@ -84,9 +90,7 @@ public static class DockerInspect
         var list = new List<string>();
         void Add(bool condition, string what) { if (condition && !list.Contains(what)) list.Add(what); }
 
-        Add(Flag(c, "HostConfig", "Privileged"), "privileged mode");
         Add(NonEmpty(c, "HostConfig", "Devices"), "devices");
-        Add(NonEmpty(c, "HostConfig", "CapAdd") || NonEmpty(c, "HostConfig", "CapDrop"), "added or removed capabilities");
         Add(Num(c, "HostConfig", "Memory") > 0 || Num(c, "HostConfig", "NanoCpus") > 0 || Num(c, "HostConfig", "CpuShares") > 0, "memory or CPU limits");
         Add(NonEmpty(c, "HostConfig", "Dns") || NonEmpty(c, "HostConfig", "ExtraHosts"), "custom DNS or hosts");
         Add(NonEmpty(c, "HostConfig", "Sysctls"), "kernel parameters");

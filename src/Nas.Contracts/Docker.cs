@@ -26,8 +26,13 @@ public sealed record StackContent(string Name, string Content);
 
 /// <summary>Ports « 8080:80 », variables « CLE=valeur », volumes « /hote:/conteneur[:ro] » ou « volume:/conteneur[:ro] ».</summary>
 /// <summary><c>Network</c> : réseau Docker où brancher le conteneur ; créé s'il n'existe pas. Vide : réseau par défaut.</summary>
+/// <remarks>
+/// <c>Privileged</c> : « --privileged » (tous les droits, accès à tous les périphériques). <c>CapAdd</c> et <c>CapDrop</c> : « --cap-add » et « --cap-drop »
+/// (noms sans « CAP_ », ou ALL) par rapport aux droits que Docker accorde d'office (<see cref="Rules.DefaultCapabilities"/>).
+/// </remarks>
 public sealed record RunContainerRequest(string Image, string? Name, string Restart, IReadOnlyList<string> Ports,
-    IReadOnlyList<string> Env, IReadOnlyList<string> Volumes, string? Network = null);
+    IReadOnlyList<string> Env, IReadOnlyList<string> Volumes, string? Network = null,
+    bool Privileged = false, IReadOnlyList<string>? CapAdd = null, IReadOnlyList<string>? CapDrop = null);
 
 /// <summary>
 /// Réglages actuels d'un conteneur, relus par « docker inspect » (variables de l'image exclues). <c>Stack</c> : stack Compose
@@ -44,6 +49,36 @@ public static partial class Rules
 {
     public static readonly IReadOnlyList<string> RestartPolicies = ["no", "unless-stopped", "always", "on-failure"];
     public const int MaxStackBytes = 100 * 1024;
+
+    /// <summary>Les droits (« capabilities ») que Docker accorde d'office à un conteneur non privilégié.</summary>
+    public static readonly IReadOnlyList<string> DefaultCapabilities =
+    [
+        "AUDIT_WRITE", "CHOWN", "DAC_OVERRIDE", "FOWNER", "FSETID", "KILL", "MKNOD", "NET_BIND_SERVICE", "NET_RAW", "SETFCAP", "SETGID", "SETPCAP", "SETUID", "SYS_CHROOT",
+    ];
+
+    /// <summary>Tous les droits Linux que « --cap-add » et « --cap-drop » acceptent (documentation « Runtime privilege and Linux capabilities » de Docker).</summary>
+    public static readonly IReadOnlyList<string> AllCapabilities =
+    [
+        "AUDIT_CONTROL", "AUDIT_READ", "AUDIT_WRITE", "BLOCK_SUSPEND", "BPF", "CHECKPOINT_RESTORE", "CHOWN", "DAC_OVERRIDE", "DAC_READ_SEARCH", "FOWNER", "FSETID",
+        "IPC_LOCK", "IPC_OWNER", "KILL", "LEASE", "LINUX_IMMUTABLE", "MAC_ADMIN", "MAC_OVERRIDE", "MKNOD", "NET_ADMIN", "NET_BIND_SERVICE", "NET_BROADCAST", "NET_RAW",
+        "PERFMON", "SETFCAP", "SETGID", "SETPCAP", "SETUID", "SYSLOG", "SYS_ADMIN", "SYS_BOOT", "SYS_CHROOT", "SYS_MODULE", "SYS_NICE", "SYS_PACCT", "SYS_PTRACE",
+        "SYS_RAWIO", "SYS_RESOURCE", "SYS_TIME", "SYS_TTY_CONFIG", "WAKE_ALARM",
+    ];
+
+    /// <summary>Les droits réellement accordés : tout si privilégié ; sinon ceux d'office, moins <c>CapDrop</c> (ALL = tous), plus <c>CapAdd</c> (ALL = tous).</summary>
+    public static IReadOnlySet<string> EffectiveCapabilities(bool privileged, IEnumerable<string>? add, IEnumerable<string>? drop)
+    {
+        var all = AllCapabilities.ToHashSet();
+        if (privileged || (add ?? []).Contains("ALL")) return all;
+        var set = DefaultCapabilities.ToHashSet();
+        if ((drop ?? []).Contains("ALL")) set.Clear();
+        else set.ExceptWith(drop ?? []);
+        set.UnionWith(add ?? []);
+        return set;
+    }
+
+    public static string? ValidateCapabilities(IEnumerable<string>? list) =>
+        (list ?? []).FirstOrDefault(c => c != "ALL" && !AllCapabilities.Contains(c)) is { } bad ? Msg.F("Unknown capability “{0}”.", bad) : null;
 
     // 64 caractères : un volume anonyme porte un identifiant hexadécimal de 64 caractères.
     [GeneratedRegex("^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")]
@@ -109,6 +144,8 @@ public static partial class Rules
         if (!string.IsNullOrEmpty(r.Network) && ValidateDockerName(r.Network) is { } e3) return e3;
         if (!RestartPolicies.Contains(r.Restart)) return Msg.F("Unknown restart policy.");
         if ((r.Ports?.Count ?? 0) + (r.Env?.Count ?? 0) + (r.Volumes?.Count ?? 0) > 100) return Msg.F("Too many ports, variables or volumes.");
+        if (ValidateCapabilities(r.CapAdd) is { } c1) return c1;
+        if (ValidateCapabilities(r.CapDrop) is { } c2) return c2;
         foreach (var p in r.Ports ?? []) if (ValidatePort(p) is { } e) return e;
         foreach (var x in r.Env ?? []) if (ValidateEnv(x) is { } e) return e;
         foreach (var v in r.Volumes ?? []) if (ValidateVolumeMount(v) is { } e) return e;

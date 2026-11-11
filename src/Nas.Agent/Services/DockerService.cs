@@ -165,6 +165,9 @@ public sealed class DockerService(ICommandRunner run, IConfiguration cfg)
         foreach (var p in r.Ports ?? []) { args.Add("-p"); args.Add(p); }
         foreach (var x in r.Env ?? []) { args.Add("-e"); args.Add(x); }
         foreach (var v in r.Volumes ?? []) { args.Add("-v"); args.Add(v); }
+        if (r.Privileged) args.Add("--privileged");
+        foreach (var cap in (r.CapAdd ?? []).Distinct()) args.Add("--cap-add=" + cap);
+        foreach (var cap in (r.CapDrop ?? []).Distinct()) args.Add("--cap-drop=" + cap);
         args.Add(r.Image);
         return args;
     }
@@ -222,7 +225,9 @@ public sealed class DockerService(ICommandRunner run, IConfiguration cfg)
             var current = DockerInspect.Settings(c, image);
             var name = string.IsNullOrEmpty(r.Name) ? current.Name! : r.Name;
             var sameExceptRestart = r.Image == current.Image && name == current.Name && (r.Network ?? "") == (current.Network ?? "")
-                && SameList(r.Ports, current.Ports) && SameList(r.Env, current.Env) && SameList(r.Volumes, current.Volumes);
+                && SameList(r.Ports, current.Ports) && SameList(r.Env, current.Env) && SameList(r.Volumes, current.Volumes)
+                && r.Privileged == current.Privileged
+                && Rules.EffectiveCapabilities(r.Privileged, r.CapAdd, r.CapDrop).SetEquals(Rules.EffectiveCapabilities(current.Privileged, current.CapAdd, current.CapDrop)); // seuls les droits réels comptent
 
             if (sameExceptRestart)
             {
