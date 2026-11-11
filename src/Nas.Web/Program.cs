@@ -69,35 +69,13 @@ b.Services.AddScoped<BackupOperations>();
 b.Services.AddHostedService<BackupMonitor>();
 
 // L'interface ne touche jamais au système : elle parle à l'agent par socket Unix (ou par URL en développement).
-var socketPath = b.Configuration["Agent:SocketPath"];
 var agentUrl = b.Configuration["Agent:Url"];
 b.Services.AddHttpClient<AgentClient>(c =>
     {
         c.BaseAddress = new Uri(agentUrl ?? "http://agent/");
         c.Timeout = TimeSpan.FromMinutes(15); // télécharger une image Docker ou monter une stack peut prendre plusieurs minutes
     })
-    .ConfigurePrimaryHttpMessageHandler(() =>
-    {
-        var handler = new SocketsHttpHandler();
-        if (string.IsNullOrWhiteSpace(agentUrl) && !string.IsNullOrWhiteSpace(socketPath))
-        {
-            handler.ConnectCallback = async (_, ct) =>
-            {
-                var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
-                try
-                {
-                    await socket.ConnectAsync(new UnixDomainSocketEndPoint(socketPath), ct);
-                    return new NetworkStream(socket, ownsSocket: true);
-                }
-                catch
-                {
-                    socket.Dispose();
-                    throw;
-                }
-            };
-        }
-        return handler;
-    });
+    .ConfigurePrimaryHttpMessageHandler(() => AgentTransport.CreateHandler(b.Configuration));
 
 var app = b.Build();
 app.Services.GetRequiredService<Db>().Init();
@@ -133,6 +111,7 @@ app.MapGet("/logout", async (HttpContext ctx) =>
     return Results.Redirect("/login");
 }).AllowAnonymous();
 app.MapGet("/vm-console/{name}", (string name, HttpContext ctx, AgentClient agent) => VmConsoleProxy.HandleAsync(name, ctx, agent));
+app.MapGet("/terminal-ws", (HttpContext ctx, IConfiguration cfg, Repo repo) => TerminalProxy.HandleAsync(ctx, cfg, repo));
 app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
 app.Run();
 

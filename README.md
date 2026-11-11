@@ -16,6 +16,7 @@ The menu is organised in groups. The Docker group only appears when Docker is in
 | **Virtual machines** | Virtual machines | Create, run and control KVM machines, with a browser console |
 | **Accounts** | Users, Groups, Admins | NAS accounts, groups, web interface administrators |
 | **Monitoring** | Dashboard, Alerts, Audit log | Health overview, alerts (with email), log of actions |
+| **Terminal** | Terminal | A root shell on the NAS in its own browser window |
 
 ### Sharing
 
@@ -100,6 +101,10 @@ sudo apt install qemu-system-x86 libvirt-daemon-system libvirt-clients virtinst 
 - **Console** in the browser (noVNC). The screen of a machine only listens on `127.0.0.1`; the web interface relays it over an authenticated WebSocket. The noVNC viewer is bundled with the web interface (`wwwroot/lib/novnc`), so the console works without internet access.
 - **Network**: choose a host bridge (for example `br0`) to put a machine on the local network, or the private libvirt network (NAT). UrsaNAS never reconfigures the NAS network; create the bridge yourself (for example with NetworkManager or `/etc/network/interfaces`), because a mistake there cuts off remote access.
 - If `/dev/kvm` is missing, the page warns: machines would be emulated and extremely slow. Enable virtualization in the BIOS, or nested virtualization when the NAS is itself a virtual machine (`Set-VMProcessor -VMName <name> -ExposeVirtualizationExtensions $true` on Hyper-V).
+
+### Terminal
+
+The **Terminal** menu entry opens a window with a shell on the NAS (xterm.js, bundled in `wwwroot/lib/xterm`, so it works offline). It is a **root** shell: the agent starts `bash -l` on a pseudo-terminal and the web interface relays it over an authenticated WebSocket (administrators only, same-origin check). Opening and closing a session are written to the audit log; what is typed is not recorded. Closing the window ends the shell.
 
 ## Architecture
 

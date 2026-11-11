@@ -48,6 +48,7 @@
             </MudNavGroup>
             <MudNavLink Href="/folders" Icon="@Icons.Material.Filled.Folder">@L["File Manager"]</MudNavLink>
             <MudNavLink Href="/vms" Icon="@Icons.Material.Filled.Computer">@L["Virtual machines"]</MudNavLink>
+            <MudNavLink Icon="@Icons.Material.Filled.Terminal" OnClick="OpenTerminal">@L["Terminal"]</MudNavLink>
             @if (Docker.Ready)
             {
                 @* Le groupe n'existe que si Docker est installé et que son service répond ; sinon la page /docker explique quoi faire. *@
@@ -86,6 +87,9 @@
         Docker.Changed += OnThemeChanged; // le groupe Docker apparaît ou disparaît avec l'état du service
     }
     void OnThemeChanged() => InvokeAsync(StateHasChanged);
+
+    // Le terminal s'ouvre dans sa propre fenêtre, comme la console d'une machine virtuelle.
+    async Task OpenTerminal() => await JS.InvokeVoidAsync("open", "/terminal/window", "ursanas-terminal", "popup,width=1000,height=640");
 
     // Rechargement complet : /logout est une vraie réponse HTTP qui supprime le cookie, pas une page du routeur.
     void Logout() => Nav.NavigateTo("/logout", forceLoad: true);

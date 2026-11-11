@@ -30,7 +30,7 @@ die()  { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 # ---------------------------------------------------------------- download (when run on its own, e.g. piped from curl)
 # Without the program next to it, the script fetches the newest release (pre-releases included) and runs the installer it contains.
 # For a private repository, set GITHUB_TOKEN to a token that can read the repository contents.
-if [ ! -x "$SRC/Nas.Agent/Nas.Agent" ]; then
+if [ ! -f "$SRC/Nas.Agent/Nas.Agent" ]; then
   REPO=FrankJacket/UrsaNAS
   fetch() { # fetch URL [OUTPUT]  (stdout when no output file)
     if command -v curl >/dev/null 2>&1; then

@@ -85,6 +85,8 @@ public partial class Program
 
         var app = builder.Build();
 
+        app.UseWebSockets();
+        app.MapGet("/terminal", (HttpContext ctx, IConfiguration cfg) => TerminalEndpoint.HandleAsync(ctx, cfg));
         app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
         app.MapGet("/disks", async (IDiskProvider disks, CancellationToken ct) => Results.Ok(await disks.ListAsync(ct)));
 
