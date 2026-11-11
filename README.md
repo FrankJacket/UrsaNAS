@@ -16,7 +16,7 @@ The menu is organised in groups. The Docker group only appears when Docker is in
 | **Virtual machines** | Virtual machines | Create, run and control KVM machines, with a browser console |
 | **Accounts** | Users, Groups, Admins | NAS accounts, groups, web interface administrators |
 | **Monitoring** | Dashboard, Alerts, Audit log | Health overview, alerts (with email), log of actions |
-| **Terminal** | Terminal | A root shell on the NAS in its own browser window |
+| **Top bar** | Terminal icon | A root shell on the NAS in its own browser window |
 
 ### Sharing
 
@@ -50,7 +50,7 @@ Safety: the agent only accepts a mount point under `/mnt`, `/media` or `/run/med
 
 ### Docker
 
-UrsaNAS does not install Docker. It checks every few seconds whether Docker is installed and its service answers, and shows the **Docker** menu group only when it does. Until then, the `/docker` page (linked from *Services*) explains how to install or start it:
+The installer (`Install.md`) installs Docker. UrsaNAS checks every few seconds whether Docker is installed and its service answers, and shows the **Docker** menu group only when it does. Until then, the `/docker` page (linked from *Services*) explains how to install or start it:
 
 ```bash
 sudo apt install docker.io docker-compose
@@ -90,7 +90,7 @@ The **Disks** page lists each disk with its partitions. A disk is *free* when it
 
 ### Virtual machines
 
-UrsaNAS drives **libvirt/KVM** (it does not install it). The **Virtual machines** page checks that libvirt answers and explains what is missing:
+UrsaNAS drives **libvirt/KVM** (installed by the installer). The **Virtual machines** page checks that libvirt answers and explains what is missing:
 
 ```
 sudo apt install qemu-system-x86 libvirt-daemon-system libvirt-clients virtinst ovmf swtpm
@@ -104,7 +104,7 @@ sudo apt install qemu-system-x86 libvirt-daemon-system libvirt-clients virtinst 
 
 ### Terminal
 
-The **Terminal** menu entry opens a window with a shell on the NAS (xterm.js, bundled in `wwwroot/lib/xterm`, so it works offline). It is a **root** shell: the agent starts `bash -l` on a pseudo-terminal and the web interface relays it over an authenticated WebSocket (administrators only, same-origin check). Opening and closing a session are written to the audit log; what is typed is not recorded. Closing the window ends the shell.
+The **Terminal** icon in the top bar (shown to signed-in administrators) opens a window with a shell on the NAS (xterm.js, bundled in `wwwroot/lib/xterm`, so it works offline). It is a **root** shell: the agent starts `bash -l` on a pseudo-terminal and the web interface relays it over an authenticated WebSocket (administrators only, same-origin check). Opening and closing a session are written to the audit log; what is typed is not recorded. Closing the window ends the shell.
 
 ## Architecture
 

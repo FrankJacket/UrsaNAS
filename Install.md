@@ -8,7 +8,7 @@ UrsaNAS runs on a dedicated machine (physical or virtual) with a fresh **Debian 
 - Give it a fixed address (or a DHCP reservation) so you can always find it.
 - You need a user with `sudo` rights and an internet connection (the installer downloads packages).
 - Data disks: leave them empty and unmounted. You prepare them later from the web interface.
-- Recommended: 2 CPU cores and 4 GB of memory (more if you use ZFS, containers or virtual machines).
+- Recommended: 2 CPU cores and **4 GB of memory** (2 GB is the minimum; more if you use ZFS, containers or virtual machines). On a virtual machine, give it a **fixed** amount of memory: with Hyper-V, switch off *Dynamic Memory*, otherwise the system may kill the installation for lack of memory.
 
 ## 2. Install
 
@@ -33,21 +33,19 @@ wget -qO- --header="Authorization: Bearer $GITHUB_TOKEN" https://raw.githubuserc
 
 That is all. It takes a few minutes (longer on Debian, where the ZFS module is compiled). At the end it prints the address of the interface. If the repository is ever made public, the token and the `-H` / `--header` option are no longer needed.
 
-### Options
+### Option
 
-Add options after `sh -s --`. For example, to also install Docker and virtual machine support:
-
-```bash
-curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" https://raw.githubusercontent.com/FrankJacket/UrsaNAS/master/deploy/install.sh | sudo GITHUB_TOKEN="$GITHUB_TOKEN" sh -s -- --with-docker --with-vm
-```
+Docker (with Docker Compose) and virtual machine support (KVM, libvirt) are always installed. There is one option, added after `sh -s --`:
 
 | Option | Effect |
 |---|---|
-| `--with-docker` | Also installs Docker and Docker Compose, which enables the *Docker* menu. |
-| `--with-vm` | Also installs KVM and libvirt, which enables the *Virtual machines* page. |
 | `--no-zfs` | Does not install ZFS (no pools or datasets). Choose this if you only use ext4, Btrfs or exFAT disks. |
 
-You can run the installer again later to add an option.
+For example:
+
+```bash
+curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" https://raw.githubusercontent.com/FrankJacket/UrsaNAS/master/deploy/install.sh | sudo GITHUB_TOKEN="$GITHUB_TOKEN" sh -s -- --no-zfs
+```
 
 ### Installing from a downloaded file
 
@@ -61,7 +59,7 @@ sudo ./install.sh
 
 ### What the installer does
 
-- Installs Samba, NFS, FTP (vsftpd), SMART monitoring, file system tools (Btrfs, exFAT, XFS), SMB/NFS client tools for remote storage, FUSE, and ZFS. NFS and FTP stay stopped until you switch them on from the *Services* page.
+- Installs Docker with Compose, KVM and libvirt (virtual machines), Samba, NFS, FTP (vsftpd), SMART monitoring, file system tools (Btrfs, exFAT, XFS), SMB/NFS client tools for remote storage, FUSE, and ZFS. NFS and FTP stay stopped until you switch them on from the *Services* page.
 - On Debian, it enables the `contrib` repository component, which provides ZFS.
 - Installs the official `rclone` (checksum verified) for OneDrive and Dropbox.
 - Creates the `ursanas` system account, copies the program to `/opt/ursanas`, and starts two services: `ursanas-agent` (the privileged part, reachable only through a local socket) and `ursanas-web` (the interface, on port 8080).
@@ -95,7 +93,7 @@ cat /opt/ursanas/VERSION                       # installed version
 | The page does not load | Check the address, and that the machine's firewall allows port 8080. |
 | "Agent unreachable" in the interface | `sudo systemctl restart ursanas-agent`, then read its log. |
 | ZFS is missing on Debian | Make sure the `contrib` component is enabled, run `sudo apt-get install zfs-dkms zfsutils-linux`, then reboot. |
-| A feature is greyed out | The program behind it is not installed. Re-run the installer, with `--with-docker` or `--with-vm` if needed. |
+| A feature is greyed out | The program behind it is not installed or not running. Re-run the installer, then check the message on the feature's page. |
 
 ## Uninstalling
 

@@ -1,17 +1,15 @@
 #!/bin/sh
 # UrsaNAS installer / updater. Run as root on the NAS (Debian 13 or Ubuntu Server 26.04, x86-64).
 #
-#   curl -fsSL <raw URL of this script> | sudo sh -s -- [--with-docker] [--with-vm] [--no-zfs]   (downloads the newest release)
-#   sudo ./install.sh [--with-docker] [--with-vm] [--no-zfs] [DIR]   (from an extracted package; DIR defaults to this script's folder)
+#   curl -fsSL <raw URL of this script> | sudo sh -s -- [--no-zfs]   (downloads the newest release)
+#   sudo ./install.sh [--no-zfs] [DIR]   (from an extracted package; DIR defaults to this script's folder)
 #
 # Running it again installs the new binaries over the old ones and keeps all data and settings.
 set -eu
 
-WITH_DOCKER=0; WITH_VM=0; WITH_ZFS=1; SRC=
+WITH_ZFS=1; SRC=
 for arg in "$@"; do
   case "$arg" in
-    --with-docker) WITH_DOCKER=1 ;;
-    --with-vm)     WITH_VM=1 ;;
     --no-zfs)      WITH_ZFS=0 ;;
     -h|--help)     sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*)            echo "Unknown option: $arg" >&2; exit 2 ;;
@@ -69,6 +67,10 @@ fi
 command -v apt-get >/dev/null 2>&1 || die "this installer needs a Debian or Ubuntu system (apt-get not found)"
 ARCH=$(dpkg --print-architecture)
 [ "$ARCH" = amd64 ] || die "only x86-64 (amd64) is supported, this machine is $ARCH"
+MEM_MB=$(awk '/^MemTotal:/ {print int($2 / 1024)}' /proc/meminfo 2>/dev/null || echo 0)
+if [ "${MEM_MB:-0}" -lt 1800 ]; then
+  warn "this machine has only ${MEM_MB} MB of memory (2 GB minimum, 4 GB recommended): the installation may be killed by the system. On Hyper-V, switch off Dynamic Memory."
+fi
 OS_ID=unknown; OS_NAME=
 if [ -r /etc/os-release ]; then OS_ID=$(. /etc/os-release; echo "${ID:-unknown}"); OS_NAME=$(. /etc/os-release; echo "${PRETTY_NAME:-}"); fi
 case "$OS_ID" in
@@ -128,17 +130,14 @@ if [ "$WITH_ZFS" -eq 1 ] && ! command -v zpool >/dev/null 2>&1; then
   modprobe zfs >/dev/null 2>&1 || warn "the ZFS module is not loaded yet; reboot the machine once the installation is over"
 fi
 
-# ---------------------------------------------------------------- optional features
-if [ "$WITH_DOCKER" -eq 1 ]; then
-  say "Installing Docker"
-  apt_install docker.io || warn "Docker could not be installed"
-  command -v docker >/dev/null 2>&1 && { docker compose version >/dev/null 2>&1 || apt_install docker-compose-v2 || apt_install docker-compose || warn "Docker Compose could not be installed (stacks will be unavailable)"; }
-fi
-if [ "$WITH_VM" -eq 1 ]; then
-  say "Installing virtual machine support (KVM / libvirt)"
-  apt_install qemu-system-x86 libvirt-daemon-system libvirt-clients virtinst ovmf swtpm || warn "libvirt could not be installed"
-  [ -e /dev/kvm ] || warn "/dev/kvm is missing: enable virtualization in the BIOS (or nested virtualization if this machine is itself a VM)"
-fi
+# ---------------------------------------------------------------- Docker and virtual machines
+say "Installing Docker"
+apt_install docker.io || warn "Docker could not be installed"
+command -v docker >/dev/null 2>&1 && { docker compose version >/dev/null 2>&1 || apt_install docker-compose-v2 || apt_install docker-compose || warn "Docker Compose could not be installed (stacks will be unavailable)"; }
+
+say "Installing virtual machine support (KVM / libvirt)"
+apt_install qemu-system-x86 libvirt-daemon-system libvirt-clients virtinst ovmf swtpm || warn "libvirt could not be installed"
+[ -e /dev/kvm ] || warn "/dev/kvm is missing: enable virtualization in the BIOS (or nested virtualization if this machine is itself a VM)"
 
 # ---------------------------------------------------------------- rclone (OneDrive, Dropbox)
 # The rclone shipped by Ubuntu (1.60) cannot renew the tokens of our connections: install the official release, checksum verified.

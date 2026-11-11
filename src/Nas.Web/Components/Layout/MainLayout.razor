@@ -17,6 +17,10 @@
         <MudText Typo="Typo.h6">UrsaNAS</MudText>
         <MudSpacer />
         <AuthorizeView>
+            @* Tous les comptes de l'interface sont des administrateurs : l'icône n'existe que pour une session ouverte. *@
+            <MudTooltip Text="@L["Terminal"]">
+                <MudIconButton Icon="@Icons.Material.Filled.Terminal" Color="Color.Inherit" OnClick="OpenTerminal" />
+            </MudTooltip>
             <MudText Typo="Typo.body2" Class="mr-2">@context.User.Identity?.Name</MudText>
             <MudTooltip Text="@L["Sign out"]">
                 <MudIconButton Icon="@Icons.Material.Filled.Logout" Color="Color.Inherit" OnClick="Logout" />
@@ -48,7 +52,6 @@
             </MudNavGroup>
             <MudNavLink Href="/folders" Icon="@Icons.Material.Filled.Folder">@L["File Manager"]</MudNavLink>
             <MudNavLink Href="/vms" Icon="@Icons.Material.Filled.Computer">@L["Virtual machines"]</MudNavLink>
-            <MudNavLink Icon="@Icons.Material.Filled.Terminal" OnClick="OpenTerminal">@L["Terminal"]</MudNavLink>
             @if (Docker.Ready)
             {
                 @* Le groupe n'existe que si Docker est installé et que son service répond ; sinon la page /docker explique quoi faire. *@
