@@ -153,7 +153,7 @@ public class RemoteServiceTests : IDisposable
             ["Disks:Fstab"] = Fwd(_fstab), ["Remote:MountRoot"] = Fwd(_root), ["Remote:CredDir"] = Fwd(_creds),
             ["Remote:BinDirs"] = Fwd(_bin), ["Remote:MountInfo"] = Fwd(_mountInfo),
             ["Remote:UnitDir"] = Fwd(_units), ["Remote:CacheDir"] = Fwd(_cache),
-            ["Remote:OneDriveClientId"] = "11111111-2222-3333-4444-555555555555",
+            ["Remote:OneDriveClientId"] = "11111111-2222-3333-4444-555555555555", ["Remote:DropboxAppKey"] = "dbxkey1234567",
         }).Build();
         _svc = new RemoteService(_run, cfg, _drive);
     }
@@ -351,8 +351,115 @@ public class RemoteServiceTests : IDisposable
 
         await _svc.AddAsync(Cloud(name: "autre"));
         Assert.DoesNotContain("client_id", File.ReadAllText(Path.Combine(_creds, "autre.rclone.conf"))); // jeton collé : rclone garde son application
-        Assert.NotNull(Rules.ValidateRemote(Cloud("dropbox") with { OwnApp = true })); // seulement pour OneDrive
     }
+
+    [Fact]
+    public async Task Un_jeton_dropbox_de_la_connexion_integree_ecrit_la_cle_de_l_application()
+    {
+        await _svc.AddAsync(Cloud("dropbox") with { OwnApp = true });
+        Assert.Contains("client_id = dbxkey1234567", File.ReadAllText(Path.Combine(_creds, "cloud.rclone.conf")));
+    }
+
+    // ---- Modification
+
+    [Fact]
+    public async Task Modifier_une_connexion_smb_garde_le_mot_de_passe_laisse_vide_et_remplace_la_ligne_fstab()
+    {
+        await _svc.AddAsync(Smb());
+        _run.Calls.Clear();
+
+        await _svc.UpdateAsync(Smb() with { Path = "media/films", Password = null, ReadOnly = true });
+
+        Assert.Contains("password=s3cret", File.ReadAllText(Path.Combine(_creds, "photos.cred"))); // gardé
+        var fstab = File.ReadAllText(_fstab);
+        Assert.Single(fstab.Split('\n'), l => l.Contains("# ursanas-remote")); // remplacée, pas ajoutée
+        Assert.Contains("//192.168.1.10/media/films " + Target("photos") + " cifs ", fstab);
+        Assert.DoesNotContain("media/photos", fstab);
+        Assert.Contains("ro", Assert.Single(_run.Calls, c => c.File == "mount").Args[5].Split(','));
+        Assert.Equal("films", _svc.List().Single().Path.Split('/')[1]);
+    }
+
+    [Fact]
+    public async Task Modifier_une_connexion_smb_en_echec_remet_les_anciens_identifiants_et_la_ligne()
+    {
+        await _svc.AddAsync(Smb());
+        var before = File.ReadAllText(_fstab);
+        _run.Handler = c => c.File == "mount" ? new(32, "", "mount error(13): Permission denied") : new(0, "", "");
+
+        await Assert.ThrowsAsync<OperationException>(() => _svc.UpdateAsync(Smb() with { User = "autre", Password = "nouveau" }));
+
+        Assert.Equal(before, File.ReadAllText(_fstab));
+        var cred = File.ReadAllText(Path.Combine(_creds, "photos.cred"));
+        Assert.Contains("username=jean", cred);
+        Assert.DoesNotContain("nouveau", cred);
+    }
+
+    [Fact]
+    public async Task Le_type_et_le_mot_de_passe_obligatoire_d_un_nouvel_utilisateur_sont_controles_a_la_modification()
+    {
+        await _svc.AddAsync(Smb());
+        await Assert.ThrowsAsync<OperationException>(() => _svc.UpdateAsync(new AddRemoteRequest("photos", "nfs", "srv", "/x", null, null, null, null, false))); // autre type
+        await Assert.ThrowsAsync<OperationException>(() => _svc.UpdateAsync(Smb(name: "absent")));
+        Assert.Null(Rules.ValidateRemote(Smb() with { Password = null }, update: true));
+        Assert.NotNull(Rules.ValidateRemote(Smb() with { Password = null }));
+    }
+
+    [Fact]
+    public async Task Modifier_un_onedrive_sans_nouveau_jeton_garde_la_configuration_et_relance_l_unite()
+    {
+        await _svc.AddAsync(Cloud() with { OwnApp = true });
+        var conf = File.ReadAllText(Path.Combine(_creds, "cloud.rclone.conf"));
+        _drive.Calls = 0;
+        _run.Calls.Clear();
+
+        await _svc.UpdateAsync(Cloud() with { Token = null, Path = "Autre", BwLimitMbps = 8, Cache = "writes" });
+
+        Assert.Equal(conf, File.ReadAllText(Path.Combine(_creds, "cloud.rclone.conf"))); // jeton, client_id et disque intacts
+        Assert.Equal(0, _drive.Calls);
+        Assert.Equal("cloud:Autre", Assert.Single(_run.Calls, c => c.Args.Length > 0 && c.Args[0] == "lsd").Args[1]); // le dossier est essayé d'abord
+        var unit = Unit("cloud");
+        Assert.Contains("mount \"cloud:Autre\"", unit);
+        Assert.Contains("--bwlimit 8M", unit);
+        Assert.Contains("--vfs-cache-mode writes", unit);
+        Assert.Contains(_run.Calls, c => c.File == "systemctl" && c.Args.SequenceEqual(["restart", "ursanas-rclone-cloud.service"]));
+        Assert.Equal("Autre", _svc.List().Single().Path);
+    }
+
+    [Fact]
+    public async Task Modifier_un_onedrive_avec_un_nouveau_jeton_le_remplace()
+    {
+        await _svc.AddAsync(Cloud());
+        const string other = "{\"access_token\":\"AT-NEW\",\"token_type\":\"Bearer\",\"refresh_token\":\"RT-NEW\",\"expiry\":\"2026-11-10T16:00:00Z\"}";
+
+        await _svc.UpdateAsync(Cloud() with { Token = other, OwnApp = true });
+
+        var conf = File.ReadAllText(Path.Combine(_creds, "cloud.rclone.conf"));
+        Assert.Contains("RT-NEW", conf);
+        Assert.DoesNotContain("RT-SECRET", conf);
+        Assert.Contains("client_id = 11111111", conf);
+        Assert.False(File.Exists(Path.Combine(_creds, ".cloud.new.conf"))); // pas de fichier temporaire oublié
+    }
+
+    [Fact]
+    public async Task Modifier_un_dossier_inaccessible_ou_un_montage_en_echec_ne_change_rien()
+    {
+        await _svc.AddAsync(Cloud());
+        var unit = Unit("cloud");
+        var conf = File.ReadAllText(Path.Combine(_creds, "cloud.rclone.conf"));
+
+        _run.Handler = c => c.Args.Length > 0 && c.Args[0] == "lsd" ? new(1, "", "directory not found") : new(0, "", "");
+        await Assert.ThrowsAsync<OperationException>(() => _svc.UpdateAsync(Cloud() with { Token = null, Path = "Absent" }));
+        Assert.Equal(unit, Unit("cloud"));
+
+        _run.Handler = c => c.File == "systemctl" && c.Args[0] == "restart" && c.Args.Length > 1 && !_failedOnce ? Fail() : new(0, "", "");
+        await Assert.ThrowsAsync<OperationException>(() => _svc.UpdateAsync(Cloud() with { Token = null, BwLimitMbps = 9 }));
+        Assert.Equal(unit, Unit("cloud")); // l'ancienne unité est remise
+        Assert.Equal(conf, File.ReadAllText(Path.Combine(_creds, "cloud.rclone.conf")));
+        Assert.Equal(0, _svc.List().Single().BwLimitMbps);
+    }
+
+    bool _failedOnce;
+    CommandResult Fail() { _failedOnce = true; return new(1, "", "Job failed"); }
 
     [Fact]
     public async Task Dropbox_n_interroge_pas_de_disque_et_le_cache_complet_est_optionnel()

@@ -57,6 +57,20 @@ public class AgentClient(HttpClient http)
         return (await r.Content.ReadFromJsonAsync<DeviceCodePoll>(ct))!;
     }
 
+    public async Task<OAuthStart> StartDropboxSignInAsync(CancellationToken ct = default)
+    {
+        using var r = await http.PostAsync("remote/oauth/dropbox/start", null, ct);
+        await EnsureOkAsync(r, ct);
+        return (await r.Content.ReadFromJsonAsync<OAuthStart>(ct))!;
+    }
+
+    public async Task<string> CompleteDropboxSignInAsync(string code, string state, CancellationToken ct = default)
+    {
+        using var r = await http.PostAsJsonAsync("remote/oauth/dropbox/complete", new OAuthCompleteRequest(code, state), ct);
+        await EnsureOkAsync(r, ct);
+        return (await r.Content.ReadFromJsonAsync<DeviceCodePoll>(ct))?.Token ?? "";
+    }
+
     public async Task<RemoteTypes> GetRemoteTypesFullAsync(CancellationToken ct = default)
     {
         using var r = await http.GetAsync("remote/types", ct);
@@ -76,6 +90,9 @@ public class AgentClient(HttpClient http)
 
     public async Task AddRemoteAsync(AddRemoteRequest req, CancellationToken ct = default) =>
         await EnsureOkAsync(await http.PostAsJsonAsync("remote", req, ct), ct);
+
+    public async Task UpdateRemoteAsync(AddRemoteRequest req, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PutAsJsonAsync($"remote/{Uri.EscapeDataString(req.Name)}", req, ct), ct);
 
     public async Task MountRemoteAsync(string name, CancellationToken ct = default) =>
         await EnsureOkAsync(await http.PostAsync($"remote/{Uri.EscapeDataString(name)}/mount", null, ct), ct);

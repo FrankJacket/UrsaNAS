@@ -17,6 +17,10 @@ public class RemoteOperations(AgentClient agent, Repo repo, AuthenticationStateP
 
     public Task<DeviceCodePoll> PollSignInAsync(string deviceCode) => agent.PollOneDriveSignInAsync(deviceCode);
 
+    public Task<OAuthStart> StartDropboxSignInAsync() => agent.StartDropboxSignInAsync();
+
+    public Task<string> CompleteDropboxSignInAsync(string code, string state) => agent.CompleteDropboxSignInAsync(code, state);
+
     public async Task TestAsync(AddRemoteRequest r)
     {
         if (Rules.ValidateRemote(r) is { } e) throw new AgentException(e);
@@ -28,6 +32,13 @@ public class RemoteOperations(AgentClient agent, Repo repo, AuthenticationStateP
         if (Rules.ValidateRemote(r) is { } e) throw new AgentException(e);
         await agent.AddRemoteAsync(r);
         await repo.AuditAsync(await ActorAsync(), "Remote storage added", Describe(r));
+    }
+
+    public async Task UpdateAsync(AddRemoteRequest r)
+    {
+        if (Rules.ValidateRemote(r, update: true) is { } e) throw new AgentException(e);
+        await agent.UpdateRemoteAsync(r);
+        await repo.AuditAsync(await ActorAsync(), "Remote storage modified", Describe(r));
     }
 
     public async Task MountAsync(string name)

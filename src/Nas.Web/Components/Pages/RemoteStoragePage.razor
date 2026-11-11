@@ -41,6 +41,7 @@ else if (loaded && types.Count == 0)
             {
                 <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Link" OnClick="() => Mount(context)">@L["Mount"]</MudButton>
             }
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Edit" OnClick="() => Edit(context)">@L["Edit"]</MudButton>
             <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="() => Delete(context)">@L["Remove"]</MudButton>
         </MudTd>
     </RowTemplate>
@@ -50,7 +51,7 @@ else if (loaded && types.Count == 0)
 @code {
     List<RemoteStorage> remotes = new();
     IReadOnlyList<string> types = [];
-    bool signIn;
+    bool signIn, dropboxSignIn;
     string? error;
     bool loaded;
 
@@ -73,6 +74,7 @@ else if (loaded && types.Count == 0)
             var t = await Agent.GetRemoteTypesFullAsync();
             types = t.Available;
             signIn = t.OneDriveSignIn;
+            dropboxSignIn = t.DropboxSignIn;
             error = null;
         }
         catch (AgentException e) { error = L.Translate(e.Message); }
@@ -82,11 +84,25 @@ else if (loaded && types.Count == 0)
 
     async Task Add()
     {
-        var parameters = new DialogParameters<RemoteStorageDialog> { { x => x.Types, types }, { x => x.OneDriveSignIn, signIn } };
+        var parameters = new DialogParameters<RemoteStorageDialog> { { x => x.Types, types }, { x => x.OneDriveSignIn, signIn }, { x => x.DropboxSignIn, dropboxSignIn } };
         var dialog = await Dialogs.ShowAsync<RemoteStorageDialog>(L["New connection"], parameters, Options);
         if (await dialog.Result is { Canceled: false })
         {
             Snack.Add(L["Connection added."], Severity.Success);
+            await LoadAsync();
+        }
+    }
+
+    async Task Edit(RemoteStorage r)
+    {
+        var parameters = new DialogParameters<RemoteStorageDialog>
+        {
+            { x => x.Types, types }, { x => x.OneDriveSignIn, signIn }, { x => x.DropboxSignIn, dropboxSignIn }, { x => x.Existing, r },
+        };
+        var dialog = await Dialogs.ShowAsync<RemoteStorageDialog>(L["Edit {0}", r.Name], parameters, Options);
+        if (await dialog.Result is { Canceled: false })
+        {
+            Snack.Add(L["Connection modified."], Severity.Success);
             await LoadAsync();
         }
     }

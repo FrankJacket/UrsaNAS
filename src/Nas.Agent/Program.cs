@@ -68,11 +68,13 @@ public partial class Program
         {
             builder.Services.AddSingleton<IDriveLookup, FakeDriveLookup>();
             builder.Services.AddSingleton<IOneDriveSignIn, FakeOneDriveSignIn>();
+            builder.Services.AddSingleton<IDropboxSignIn, FakeDropboxSignIn>();
         }
         else
         {
             builder.Services.AddSingleton<IDriveLookup, GraphDriveLookup>();
             builder.Services.AddSingleton<IOneDriveSignIn>(sp => new MicrosoftOneDriveSignIn(sp.GetRequiredService<IConfiguration>()));
+            builder.Services.AddSingleton<IDropboxSignIn>(sp => new DropboxAppSignIn(sp.GetRequiredService<IConfiguration>()));
         }
         builder.Services.AddSingleton<RemoteService>();
         builder.Services.AddSingleton<ShareService>();
@@ -104,7 +106,11 @@ public partial class Program
 
         // Stockages distants (SMB, NFS)
         app.MapGet("/remote", (RemoteService s) => Read(() => Task.FromResult(Results.Ok(s.List()))));
-        app.MapGet("/remote/types", (RemoteService s, IOneDriveSignIn o) => Results.Ok(s.Types() with { OneDriveSignIn = o.Configured }));
+        app.MapGet("/remote/types", (RemoteService s, IOneDriveSignIn o, IDropboxSignIn d) =>
+            Results.Ok(s.Types() with { OneDriveSignIn = o.Configured, DropboxSignIn = d.Configured }));
+        app.MapPost("/remote/oauth/dropbox/start", (IDropboxSignIn d) => Read(() => Task.FromResult(Results.Ok(d.Start()))));
+        app.MapPost("/remote/oauth/dropbox/complete", (OAuthCompleteRequest r, IDropboxSignIn d, CancellationToken ct) =>
+            Read(async () => Results.Ok(new DeviceCodePoll("done", await d.CompleteAsync(r.Code, r.State, ct)))));
         app.MapPost("/remote/oauth/onedrive/start", (IOneDriveSignIn o, CancellationToken ct) =>
             Read(async () => Results.Ok(await o.StartAsync(ct))));
         app.MapPost("/remote/oauth/onedrive/poll", (DeviceCodePollRequest r, IOneDriveSignIn o, CancellationToken ct) =>
@@ -113,6 +119,8 @@ public partial class Program
             Read(async () => { await s.TestAsync(r, ct); return Results.NoContent(); }));
         app.MapPost("/remote", (AddRemoteRequest r, RemoteService s, CancellationToken ct) =>
             Read(async () => { await s.AddAsync(r, ct); return Results.NoContent(); }));
+        app.MapPut("/remote/{name}", (string name, AddRemoteRequest r, RemoteService s, CancellationToken ct) =>
+            Read(async () => { await s.UpdateAsync(r with { Name = name }, ct); return Results.NoContent(); }));
         app.MapPost("/remote/{name}/mount", (string name, RemoteService s, CancellationToken ct) =>
             Read(async () => { await s.MountAsync(name, ct); return Results.NoContent(); }));
         app.MapPost("/remote/{name}/unmount", (string name, RemoteService s, CancellationToken ct) =>

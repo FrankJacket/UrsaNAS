@@ -324,17 +324,18 @@ public sealed class RemoteService(ICommandRunner run, IConfiguration cfg, IDrive
     {
         Rules.IsRcloneToken(r.Token, out var token);
         var conf = $"[{section}]\ntype = {r.Type}\ntoken = {token}\n";
+        // Jeton obtenu par la connexion intégrée : rclone doit le renouveler avec la même application.
+        if (r.OwnApp)
+        {
+            var clientId = cfg[r.Type == "onedrive" ? "Remote:OneDriveClientId" : "Remote:DropboxAppKey"];
+            if (!Rules.IsAppId(clientId))
+                throw new OperationException(r.Type == "onedrive" ? Msg.F("The OneDrive sign-in is not configured on this NAS.") : Msg.F("The Dropbox sign-in is not configured on this NAS."));
+            conf += $"client_id = {clientId}\n";
+        }
         if (r.Type == "onedrive")
         {
             using var doc = JsonDocument.Parse(token);
             var (id, type) = await _lookup.OneDriveAsync(doc.RootElement.GetProperty("access_token").GetString()!, ct);
-            // Jeton obtenu par la connexion intégrée : rclone doit le renouveler avec la même application.
-            if (r.OwnApp)
-            {
-                var clientId = cfg["Remote:OneDriveClientId"];
-                if (!Guid.TryParse(clientId, out _)) throw new OperationException(Msg.F("The OneDrive sign-in is not configured on this NAS."));
-                conf += $"client_id = {clientId}\n";
-            }
             conf += $"drive_id = {id}\ndrive_type = {type}\n";
         }
         return conf;
@@ -503,6 +504,121 @@ public sealed class RemoteService(ICommandRunner run, IConfiguration cfg, IDrive
         if (!IsMounted(e.Target)) return;
         await Ok("umount", [e.Target], "Unmounting", ct);
     });
+
+    // ---- Modification
+
+    string? ReadCredPassword(string name)
+    {
+        var file = CredFile(name);
+        return File.Exists(file) ? File.ReadAllLines(file).FirstOrDefault(l => l.StartsWith("password=", StringComparison.Ordinal))?[9..] : null;
+    }
+
+    /// <summary>
+    /// Modifie une connexion SMB ou NFS : démonte, remonte avec les nouveaux réglages et ne réécrit la ligne fstab qu'une fois le montage réussi.
+    /// En cas d'échec, l'ancien fichier d'identifiants est remis et l'ancien montage est refait.
+    /// </summary>
+    async Task UpdateKernelAsync(Entry old, AddRemoteRequest r, CancellationToken ct)
+    {
+        var target = old.Target;
+        if (r.Type == "smb" && !string.IsNullOrEmpty(r.User) && string.IsNullOrEmpty(r.Password))
+        {
+            var kept = ReadCredPassword(r.Name);
+            if (kept is null) throw new OperationException(Msg.F("Invalid password: 1 to 128 characters, no control character."));
+            r = r with { Password = kept }; // champ laissé vide : on garde le mot de passe enregistré
+        }
+        var oldCred = File.Exists(CredFile(r.Name)) ? File.ReadAllText(CredFile(r.Name)) : null;
+        var wasMounted = IsMounted(target);
+        if (wasMounted) await Ok("umount", [target], "Unmounting", ct);
+        var mounted = false;
+        var done = false;
+        try
+        {
+            string? cred = null;
+            if (r.Type == "smb" && !string.IsNullOrEmpty(r.User)) cred = WriteCred(r.Name, r);
+            else TryDelete(() => File.Delete(CredFile(r.Name)));
+            var options = await OptionsAsync(r, cred, ct);
+            await MountNow(r, target, options, ct);
+            mounted = true;
+            var line = $"{Escape(Device(r.Type, r.Host, r.Path))} {Escape(target)} {(r.Type == "smb" ? "cifs" : "nfs")} {options} 0 0 {Marker}";
+            FstabFile.Edit(Fstab, lines => lines.Select(l => IsOurs(l, target) ? line : l).ToList());
+            done = true;
+        }
+        finally
+        {
+            if (!done)
+            {
+                if (mounted) await Ok("umount", [target], "Unmounting", CancellationToken.None);
+                if (oldCred is not null) WritePrivate(CredFile(r.Name), oldCred); else TryDelete(() => File.Delete(CredFile(r.Name)));
+                if (wasMounted) await RunQuiet("mount", [target], "", CancellationToken.None); // la ligne fstab n'a pas changé
+            }
+        }
+    }
+
+    /// <summary>
+    /// Modifie une connexion OneDrive ou Dropbox. Sans nouveau jeton, le fichier de configuration de rclone est gardé tel quel. Le dossier est essayé avant tout changement ;
+    /// l'unité est ensuite réécrite et relancée, et les anciens fichiers sont remis si le montage n'aboutit pas.
+    /// </summary>
+    async Task UpdateCloudAsync(AddRemoteRequest r, CancellationToken ct)
+    {
+        EnsureCredDir();
+        var conf = RcloneConf(r.Name);
+        var unitFile = UnitFile(r.Name);
+        var def = new CloudDef(r.Name, r.Type, r.Path ?? "", r.ReadOnly, r.Cache, r.CacheGb, r.BwLimitMbps);
+        Rules.IsRcloneToken(r.Token, out var token);
+        var tmp = $"{CredDir}/.{r.Name}.new.conf";
+        try
+        {
+            WritePrivate(tmp, string.IsNullOrEmpty(r.Token) ? File.ReadAllText(conf) : await RcloneConfAsync(r.Name, r, ct));
+            await RcloneLsdAsync(r.Name, def.Path, tmp, token, ct);
+        }
+        catch { TryDelete(() => File.Delete(tmp)); throw; }
+
+        var oldConf = File.ReadAllText(conf);
+        var oldDef = File.ReadAllText(DefFile(r.Name));
+        var oldUnit = File.ReadAllText(unitFile);
+        var done = false;
+        try
+        {
+            WritePrivate(conf, File.ReadAllText(tmp)); // le jeton renouvelé par l'essai est gardé
+            File.WriteAllText(DefFile(r.Name), JsonSerializer.Serialize(def));
+            Directory.CreateDirectory($"{CacheDir}/{r.Name}");
+            File.WriteAllText(unitFile, RenderUnit(def, ToolPath("rclone")!, ToolPath("fusermount3")!, conf, TargetOf(r.Name), $"{CacheDir}/{r.Name}", await NasGidAsync(ct)));
+            await Ok("systemctl", ["daemon-reload"], "Mounting", ct);
+            try { await Ok("systemctl", ["restart", UnitName(r.Name)], "Mounting", ct, token); }
+            catch (OperationException e)
+            {
+                var log = await RunQuiet("journalctl", ["-u", UnitName(r.Name), "-n", "6", "--no-pager", "-o", "cat"], token, ct);
+                throw log.Length > 0 ? new OperationException(Msg.F("{0} failed: {1}", "Mounting", log)) : e;
+            }
+            done = true;
+        }
+        finally
+        {
+            TryDelete(() => File.Delete(tmp));
+            if (!done)
+            {
+                WritePrivate(conf, oldConf);
+                File.WriteAllText(DefFile(r.Name), oldDef);
+                File.WriteAllText(unitFile, oldUnit);
+                await RunQuiet("systemctl", ["daemon-reload"], token, CancellationToken.None);
+                await RunQuiet("systemctl", ["restart", UnitName(r.Name)], token, CancellationToken.None);
+            }
+        }
+    }
+
+    /// <summary>Modifie les réglages d'une connexion enregistrée. Le nom et le type ne changent pas ; un mot de passe ou un jeton laissé vide est conservé.</summary>
+    public Task UpdateAsync(AddRemoteRequest r, CancellationToken ct = default)
+    {
+        if (Rules.ValidateRemote(r, update: true) is { } e) throw new OperationException(e);
+        return Mutate(async () =>
+        {
+            RequireTool(r.Type);
+            var found = Find(r.Name);
+            if (found.Type != r.Type) throw new OperationException(Msg.F("The type of a connection cannot be changed."));
+            if (found.Cloud is not null) await UpdateCloudAsync(r, ct);
+            else await UpdateKernelAsync(Entries().First(x => x.Name == r.Name), r, ct);
+        });
+    }
 
     public Task RemoveAsync(string name, CancellationToken ct = default) => Mutate(async () =>
     {

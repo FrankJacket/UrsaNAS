@@ -11,22 +11,37 @@
         {
             <MudAlert Severity="Severity.Success" Class="mb-3">@ok</MudAlert>
         }
-        <MudSelect T="string" @bind-Value="type" Label="@L["Type"]" Disabled="busy">
+        <MudSelect T="string" Value="type" ValueChanged="OnTypeChanged" Label="@L["Type"]" Disabled="@(busy || editing)">
             @foreach (var t in Types)
             {
                 <MudSelectItem T="string" Value="@t">@TypeLabel(t)</MudSelectItem>
             }
         </MudSelect>
-        <MudTextField @bind-Value="name" Label="@L["Folder name"]" Immediate="true" Disabled="busy" HelperText="@L["The storage will appear under /srv/remote/{0}", name]" />
+        <MudTextField @bind-Value="name" Label="@L["Folder name"]" Immediate="true" Disabled="@(busy || editing)" HelperText="@L["The storage will appear under /srv/remote/{0}", name]" />
         @if (cloud)
         {
             <MudTextField @bind-Value="path" Label="@L["Folder in the account (optional)"]" Disabled="busy" HelperText="@L["Empty: the whole account. For example Documents/Photos"]" />
+            @if (editing && !ownApp && token.Trim().Length == 0)
+            {
+                <MudText Typo="Typo.caption" Class="d-block mt-2">@L["The current sign-in is kept unless you sign in again."]</MudText>
+            }
             @if (integrated)
             {
                 <div class="mt-3 mb-2">
                     @if (ownApp)
                     {
-                        <MudAlert Severity="Severity.Success" Dense="true">@L["Signed in to Microsoft. Finish the form, then add the connection."]</MudAlert>
+                        <MudAlert Severity="Severity.Success" Dense="true">@(type == "dropbox" ? L["Signed in to Dropbox. Finish the form, then add the connection."] : L["Signed in to Microsoft. Finish the form, then add the connection."])</MudAlert>
+                    }
+                    else if (type == "dropbox" && dbx is not null)
+                    {
+                        <MudText Typo="Typo.body2">@L["Open this page, authorize the access, then paste the code Dropbox shows:"]</MudText>
+                        <MudText Typo="Typo.body2" Class="mb-2"><MudLink Href="@dbx.AuthUrl" Target="_blank">@L["Open Dropbox"]</MudLink></MudText>
+                        <MudTextField @bind-Value="dbxCode" Label="@L["Code from Dropbox"]" Immediate="true" Disabled="busy" />
+                        <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="CompleteDropbox" Disabled="@(busy || dbxCode.Trim().Length == 0)" Class="mt-2">@L["Validate the code"]</MudButton>
+                    }
+                    else if (type == "dropbox")
+                    {
+                        <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="StartDropbox" Disabled="busy">@L["Sign in to Dropbox"]</MudButton>
                     }
                     else if (device is not null)
                     {
@@ -49,7 +64,7 @@
                 <MudTextField Value="token" ValueChanged="OnTokenTyped" T="string" Label="@L["Access token"]" Lines="4" Variant="Variant.Outlined" Disabled="busy" Immediate="true"
                               HelperText="@L["The whole text the command prints (it contains access_token). Kept in a file only root can read."]" />
             }
-            else if (device is null && !ownApp)
+            else if (device is null && dbx is null && !ownApp)
             {
                 <MudLink Typo="Typo.caption" OnClick="() => showManual = true">@L["Paste a token from rclone instead"]</MudLink>
             }
@@ -72,7 +87,8 @@
             @if (type == "smb")
             {
                 <MudTextField @bind-Value="user" Label="@L["User (empty: guest access)"]" Disabled="busy" />
-                <MudTextField @bind-Value="password" Label="@L["Password"]" InputType="InputType.Password" Disabled="@(busy || user.Trim().Length == 0)" />
+                <MudTextField @bind-Value="password" Label="@L["Password"]" InputType="InputType.Password" Disabled="@(busy || user.Trim().Length == 0)"
+                              HelperText="@(editing && Existing!.User is not null ? L["Empty: keep the current password."] : null)" />
                 <MudTextField @bind-Value="domain" Label="@L["Domain (optional)"]" Disabled="@(busy || user.Trim().Length == 0)" />
             }
             <MudSelect T="string" @bind-Value="version" Label="@L["Protocol version"]" Disabled="busy">
@@ -84,12 +100,15 @@
             </MudSelect>
         }
         <MudCheckBox T="bool" @bind-Value="readOnly" Label="@L["Read-only"]" Disabled="busy" />
-        <MudText Typo="Typo.caption">@L["The connection is mounted now and at every start."]</MudText>
+        <MudText Typo="Typo.caption">@(editing ? L["The connection is remounted with the new settings."] : L["The connection is mounted now and at every start."])</MudText>
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="() => Dialog.Cancel()" Disabled="busy">@L["Cancel"]</MudButton>
-        <MudButton OnClick="Test" Disabled="@(busy || !Filled)">@(busy && testing ? L["In progress…"] : L["Test the connection"])</MudButton>
-        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save" Disabled="@(busy || !Filled)">@(busy && !testing ? L["In progress…"] : L["Add"])</MudButton>
+        @if (!editing)
+        {
+            <MudButton OnClick="Test" Disabled="@(busy || !Filled)">@(busy && testing ? L["In progress…"] : L["Test the connection"])</MudButton>
+        }
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save" Disabled="@(busy || !Filled)">@(busy && !testing ? L["In progress…"] : editing ? L["Save"] : L["Add"])</MudButton>
     </DialogActions>
 </MudDialog>
 
@@ -101,7 +120,44 @@
     readonly CancellationTokenSource cts = new();
     DeviceCodeStart? device;
     bool ownApp, showManual;
-    bool integrated => type == "onedrive" && OneDriveSignIn;
+    [Parameter] public bool DropboxSignIn { get; set; }
+    OAuthStart? dbx;
+
+    /// <summary>Un jeton obtenu pour un service ne vaut rien pour un autre : on repart de zéro.</summary>
+    void OnTypeChanged(string value)
+    {
+        type = value;
+        token = "";
+        ownApp = false;
+        dbx = null;
+        error = ok = null;
+    }
+
+    string dbxCode = "";
+    bool integrated => (type == "onedrive" && OneDriveSignIn) || (type == "dropbox" && DropboxSignIn);
+
+    async Task StartDropbox()
+    {
+        error = ok = null;
+        try { dbx = await Ops.StartDropboxSignInAsync(); dbxCode = ""; }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable."]; }
+    }
+
+    async Task CompleteDropbox()
+    {
+        error = ok = null;
+        busy = true;
+        try
+        {
+            token = await Ops.CompleteDropboxSignInAsync(dbxCode.Trim(), dbx!.State);
+            ownApp = true;
+            dbx = null;
+        }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable."]; }
+        busy = false;
+    }
 
     public void Dispose() { cts.Cancel(); cts.Dispose(); }
 
@@ -140,14 +196,25 @@
 
     static string TypeLabel(string t) => t switch { "smb" => "SMB / CIFS (Windows, Samba, NAS)", "nfs" => "NFS", "onedrive" => "Microsoft OneDrive", "dropbox" => "Dropbox", _ => t };
 
-    bool Filled => name.Trim().Length > 0 && (cloud ? token.Trim().Length > 0 : host.Trim().Length > 0 && path.Trim().Length > 0);
+    /// <summary>La connexion modifiée ; vide pour une nouvelle connexion. Le nom et le type ne changent pas ; un jeton ou un mot de passe laissé vide est conservé.</summary>
+    [Parameter] public RemoteStorage? Existing { get; set; }
+    bool editing => Existing is not null;
 
-    protected override void OnInitialized() => type = Types.FirstOrDefault() ?? "smb";
+    bool Filled => name.Trim().Length > 0 && (cloud ? editing || token.Trim().Length > 0 : host.Trim().Length > 0 && path.Trim().Length > 0);
+
+    protected override void OnInitialized()
+    {
+        type = Types.FirstOrDefault() ?? "smb";
+        if (Existing is not { } e) return;
+        (type, name, path, readOnly) = (e.Type, e.Name, e.Path, e.ReadOnly);
+        if (Rules.IsCloud(e.Type)) (cache, cacheGb, bwLimit) = (e.Cache ?? "full", e.CacheGb > 0 ? e.CacheGb : 10, e.BwLimitMbps);
+        else (host, user, domain, version) = (e.Host, e.User ?? "", e.Domain ?? "", e.Version ?? "");
+    }
 
     AddRemoteRequest Request()
     {
         if (cloud)
-            return new(name.Trim(), type, "", path.Trim().Trim('/'), null, null, null, null, readOnly, token.Trim(), cache, cacheGb, bwLimit, ownApp && type == "onedrive");
+            return new(name.Trim(), type, "", path.Trim().Trim('/'), null, null, null, null, readOnly, token.Trim(), cache, cacheGb, bwLimit, ownApp);
         var smbUser = type == "smb" && user.Trim().Length > 0;
         return new(name.Trim(), type, host.Trim(), path.Trim(), smbUser ? user.Trim() : null, smbUser ? password : null,
             smbUser && domain.Trim().Length > 0 ? domain.Trim() : null, version.Length > 0 ? version : null, readOnly);
@@ -162,7 +229,7 @@
     async Task Save()
     {
         testing = false;
-        if (await Run(() => Ops.AddAsync(Request()))) Dialog.Close(DialogResult.Ok(name.Trim()));
+        if (await Run(() => editing ? Ops.UpdateAsync(Request()) : Ops.AddAsync(Request()))) Dialog.Close(DialogResult.Ok(name.Trim()));
     }
 
     async Task<bool> Run(Func<Task> action)
