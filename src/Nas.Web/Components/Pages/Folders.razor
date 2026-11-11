@@ -45,29 +45,26 @@ else if (loaded)
         <div class="ex-row ex-head">
             <div class="ex-name">@L["Name"]</div><div class="ex-mod">@L["Modified"]</div><div class="ex-size">@L["Size"]</div><div class="ex-perm">@L["Permissions"]</div>
         </div>
-        @foreach (var n in Visible())
-        {
-            var node = n;
-            var st = St(node);
-            <div class="ex-row @(node == selected ? "sel" : "")" @onclick="() => Select(node)" @ondblclick="() => Toggle(node)"
-                 @oncontextmenu="e => Context(e, node)" @oncontextmenu:preventDefault="true">
-                <div class="ex-name" style="padding-left:@(node.Depth * 24)px">
-                    <span class="ex-chev" @onclick="() => Toggle(node)" @onclick:stopPropagation="true">
-                        @if (!node.IsFile) { <MudIcon Icon="@(node.Expanded ? Icons.Material.Filled.ExpandMore : Icons.Material.Filled.ChevronRight)" Size="Size.Small" /> }
-                    </span>
-                    @if (node.IsFile) { <MudIcon Icon="@Icons.Material.Filled.InsertDriveFile" Color="Color.Default" Class="mr-2" /> }
-                    else { <MudIcon Icon="@NodeIcon(node)" Color="Color.Info" Class="mr-2" /> }
-                    <span>@node.Name</span>
-                    @if (node.Loading) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="ml-2" /> }
-                </div>
-                <div class="ex-mod">@(node.Modified is { } m ? Fmt.Dt(m) : "")</div>
-                <div class="ex-size">@(node.IsFile ? Fmt.Size(node.Size, L.Lang) : "")</div>
-                <div class="ex-perm">
-                    @if (st is { Inherit: false }) { <MudChip T="string" Size="Size.Small" Color="Color.Warning" Icon="@Icons.Material.Filled.LinkOff">@L["Inheritance off"]</MudChip> }
-                    @if (st is { Rules.Count: > 0 }) { <MudChip T="string" Size="Size.Small" Icon="@Icons.Material.Filled.Lock">@L["{0} permission(s)", st.Rules.Count]</MudChip> }
-                </div>
-            </div>
-        }
+        <MudTreeView @key="treeKey" T="Node" Items="@TopItems()" ServerData="LoadChildren" SelectedValue="selected" SelectedValueChanged="Select"
+                     ExpandOnDoubleClick="true" Hover="true" Dense="true" Class="ex-tree">
+            <ItemTemplate Context="item">
+                <MudTreeViewItem @bind-Expanded="@item.Expanded" Items="@item.Children" Value="@item.Value" CanExpand="@item.Expandable"
+                                 Icon="@NodeIcon(item.Value!)" IconColor="@(item.Value!.IsFile ? Color.Default : Color.Info)">
+                    <BodyContent>
+                        @{ var node = item.Value!; var st = St(node); }
+                        <div class="ex-row" @oncontextmenu="e => Context(e, node)" @oncontextmenu:preventDefault="true">
+                            <div class="ex-name">@node.Name</div>
+                            <div class="ex-mod">@(node.Modified is { } m ? Fmt.Dt(m) : "")</div>
+                            <div class="ex-size">@(node.IsFile ? Fmt.Size(node.Size, L.Lang) : "")</div>
+                            <div class="ex-perm">
+                                @if (st is { Inherit: false }) { <MudChip T="string" Size="Size.Small" Color="Color.Warning" Icon="@Icons.Material.Filled.LinkOff">@L["Inheritance off"]</MudChip> }
+                                @if (st is { Rules.Count: > 0 }) { <MudChip T="string" Size="Size.Small" Icon="@Icons.Material.Filled.Lock">@L["{0} permission(s)", st.Rules.Count]</MudChip> }
+                            </div>
+                        </div>
+                    </BodyContent>
+                </MudTreeViewItem>
+            </ItemTemplate>
+        </MudTreeView>
     </MudPaper>
     }
 
@@ -97,13 +94,10 @@ else if (loaded)
 
 <style>
     .explorer { border: 1px solid var(--mud-palette-lines-default); border-radius: 12px; overflow: auto; max-height: calc(100vh - 280px); }
-    .ex-row { display: grid; grid-template-columns: minmax(220px, 1fr) 170px 100px 280px; align-items: center; padding: 6px 12px; cursor: default; user-select: none;
-              border-bottom: 1px solid var(--mud-palette-lines-default); }
-    .ex-row:not(.ex-head):hover { background: var(--mud-palette-action-default-hover); }
-    .ex-row.sel { background: var(--mud-palette-primary-hover); }
-    .ex-head { font-weight: 500; position: sticky; top: 0; background: var(--mud-palette-surface); opacity: .85; }
-    .ex-name { display: flex; align-items: center; }
-    .ex-chev { display: inline-flex; width: 24px; cursor: pointer; }
+    .ex-row { display: grid; grid-template-columns: minmax(160px, 1fr) 170px 100px 280px; align-items: center; width: 100%; user-select: none; }
+    .ex-head { padding: 6px 12px 6px 40px; font-weight: 500; position: sticky; top: 0; z-index: 1; background: var(--mud-palette-surface); border-bottom: 1px solid var(--mud-palette-lines-default); }
+    .ex-tree .mud-treeview-item-content { padding-right: 12px; }
+    .ex-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .ex-size { text-align: right; padding-right: 16px; }
     .ex-perm { display: flex; gap: 6px; flex-wrap: wrap; }
     @@media (max-width: 800px) { .ex-row { grid-template-columns: 1fr; } .ex-mod, .ex-size, .ex-perm { display: none; } }
@@ -117,9 +111,13 @@ else if (loaded)
         public string Place = "", Path = "", Name = "";
         public DateTime? Modified;
         public int Depth;
-        public bool Expanded, Loaded, Loading, IsFile;
+        public bool Loaded, IsFile;
         public long Size;
         public List<Node> Children = new();
+        TreeItemData<Node>? data;
+        /// <summary>L'élément de l'arbre MudBlazor de ce nœud : il porte l'état ouvert/fermé et les enfants déjà lus.</summary>
+        public TreeItemData<Node> Data => data ??= new() { Value = this, Text = Name, Expandable = !IsFile };
+        public bool Expanded { get => Data.Expanded; set => Data.Expanded = value; }
     }
 
     List<string> allShares = [];
@@ -143,7 +141,10 @@ else if (loaded)
     async Task LoadStates(string place) { if (HasAcl(place)) statesBy[place] = await Repo.GetFolderStatesAsync(place); }
     string NodeIcon(Node n) => n.Depth > 0 ? Icons.Material.Filled.Folder : IsRemote(n.Place) ? Icons.Material.Filled.CloudQueue : NasOperations.IsDisk(n.Place) ? Icons.Material.Filled.Storage : Icons.Material.Filled.FolderShared;
     /// <summary>Racine invisible de l'arbre : ses enfants (premier niveau) sont les partages ou les disques montés de la source choisie.</summary>
-    readonly Node top = new() { Depth = -1, Expanded = true, Loaded = true };
+    readonly Node top = new() { Depth = -1, Loaded = true };
+    /// <summary>Change à chaque rechargement de l'arbre : MudTreeView est alors recréé à partir des éléments déjà lus.</summary>
+    int treeKey;
+    IReadOnlyCollection<TreeItemData<Node>> TopItems() => top.Children.Select(c => c.Data).ToList();
     string source = "Shares";
     Node? selected, menuNode;
     MudMenu? menu;
@@ -185,6 +186,7 @@ else if (loaded)
         statesBy = new();
         selected = null;
         top.Children = Places().Select(p => new Node { Place = p.Place, Name = p.Label, Depth = 0 }).ToList();
+        treeKey++;
         // Rien n'est lu tant qu'on n'ouvre pas un dossier (sauf celui demandé explicitement) : lister un stockage distant peut être long.
         var wanted = place is null ? null : top.Children.FirstOrDefault(c => c.Place == place);
         selected = wanted ?? top.Children.FirstOrDefault();
@@ -213,24 +215,12 @@ else if (loaded)
             if (!n.IsFile) await Load(n);
         }
         selected = n;
-    }
-
-    IEnumerable<Node> Visible()
-    {
-        var stack = new Stack<Node>();
-        foreach (var t in Enumerable.Reverse(top.Children)) stack.Push(t);
-        while (stack.Count > 0)
-        {
-            var n = stack.Pop();
-            yield return n;
-            if (n.Expanded) foreach (var c in Enumerable.Reverse(n.Children)) stack.Push(c);
-        }
+        treeKey++;
     }
 
     /// <summary>Lit les sous-dossiers ; les dossiers déjà ouverts gardent leur état après un rechargement.</summary>
     async Task Load(Node n)
     {
-        n.Loading = true;
         try
         {
             if (n.Depth == 0 && !statesBy.ContainsKey(n.Place)) await LoadStates(n.Place);
@@ -240,12 +230,12 @@ else if (loaded)
                 : new Node { Place = n.Place, Name = f.Name, Path = n.Path.Length == 0 ? f.Name : n.Path + "/" + f.Name, Depth = n.Depth + 1, Modified = f.ModifiedUtc }).ToList();
             n.Children.AddRange((listing.Files ?? []).Select(f => new Node { Place = n.Place, Name = f.Name, Path = n.Path.Length == 0 ? f.Name : n.Path + "/" + f.Name,
                 Depth = n.Depth + 1, Modified = f.ModifiedUtc, IsFile = true, Size = f.Size, Loaded = true }));
+            n.Data.Children = n.Children.Select(c => c.Data).ToList();
             n.Loaded = true;
             error = null;
         }
         catch (AgentException e) { Snack.Add(L.Translate(e.Message), Severity.Error); }
         catch (HttpRequestException) { Snack.Add(L["Agent unreachable."], Severity.Error); }
-        n.Loading = false;
     }
 
     static Node Touch(Node n, FolderEntry f) { n.Modified = f.ModifiedUtc; return n; }
@@ -256,14 +246,15 @@ else if (loaded)
         foreach (var c in n.Children.Where(c => c.Expanded)) await Reload(c);
     }
 
-    async Task Toggle(Node n)
-    {
-        if (n.IsFile) return;
-        if (!n.Loaded) await Load(n);
-        n.Expanded = !n.Expanded;
-    }
+    void Select(Node? n) => selected = n;
 
-    void Select(Node n) => selected = n;
+    /// <summary>Charge à l'ouverture d'un dossier (MudTreeView ServerData) ; sans parent, le premier niveau.</summary>
+    async Task<IReadOnlyCollection<TreeItemData<Node>>> LoadChildren(Node? parent)
+    {
+        if (parent is null) return TopItems();
+        if (!parent.Loaded) await Load(parent);
+        return parent.Children.Select(c => c.Data).ToList();
+    }
 
     async Task Context(MouseEventArgs e, Node n)
     {
@@ -288,6 +279,7 @@ else if (loaded)
                 Snack.Add(L["Folder created."], Severity.Success);
                 await Load(n);
                 n.Expanded = true;
+                treeKey++;
             }
             catch (AgentException e) { Snack.Add(L.Translate(e.Message), Severity.Error); }
             catch (HttpRequestException) { Snack.Add(L["Agent unreachable."], Severity.Error); }

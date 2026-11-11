@@ -11,24 +11,21 @@
         }
         <MudText Typo="Typo.body2" Class="mb-2">@L["Tick the shares, folders and files to copy. Everything inside a ticked folder is included."]</MudText>
         <MudPaper Elevation="0" Class="pick">
-            @foreach (var n in Visible())
-            {
-                var node = n;
-                var inherited = Inherited(node.Full);
-                <div class="pick-row" style="padding-left:@(node.Depth * 22 + 6)px">
-                    <span class="ex-chev" @onclick="() => Toggle(node)">
-                        @if (!node.IsFile)
-                        {
-                            <MudIcon Icon="@(node.Expanded ? Icons.Material.Filled.ExpandMore : Icons.Material.Filled.ChevronRight)" Size="Size.Small" />
-                        }
-                    </span>
-                    <MudCheckBox T="bool?" Value="@State(node.Full)" ValueChanged="(bool? v) => Tick(node, v == true)" Disabled="inherited" Size="Size.Small" Class="pick-box" />
-                    <MudIcon Icon="@NodeIcon(node)" Color="@(node.IsFile ? Color.Default : Color.Info)" Size="Size.Small" Class="mr-2" />
-                    <span class="pick-name" @onclick="() => Toggle(node)">@node.Name</span>
-                    @if (node.IsFile) { <MudText Typo="Typo.caption" Class="ml-3 mud-text-secondary">@Fmt.Size(node.Size, L.Lang)</MudText> }
-                    @if (node.Loading) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="ml-2" /> }
-                </div>
-            }
+            <MudTreeView T="Node" Items="@TopItems()" ServerData="LoadChildren" ExpandOnDoubleClick="true" Hover="true" Dense="true">
+                <ItemTemplate Context="item">
+                    <MudTreeViewItem @bind-Expanded="@item.Expanded" Items="@item.Children" Value="@item.Value" CanExpand="@item.Expandable"
+                                     Icon="@NodeIcon(item.Value!)" IconColor="@(item.Value!.IsFile ? Color.Default : Color.Info)">
+                        <BodyContent>
+                            @{ var node = item.Value!; }
+                            <div class="pick-row">
+                                <span @onclick:stopPropagation="true"><MudCheckBox T="bool?" Value="@State(node.Full)" ValueChanged="(bool? v) => Tick(node, v == true)" Disabled="@Inherited(node.Full)" Size="Size.Small" Class="pick-box" /></span>
+                                <span class="pick-name">@node.Name</span>
+                                @if (node.IsFile) { <MudText Typo="Typo.caption" Class="ml-3 mud-text-secondary">@Fmt.Size(node.Size, L.Lang)</MudText> }
+                            </div>
+                        </BodyContent>
+                    </MudTreeViewItem>
+                </ItemTemplate>
+            </MudTreeView>
             @if (roots.Count == 0) { <MudText Class="pa-3">@L["Create a share first."]</MudText> }
         </MudPaper>
         <MudDivider Class="my-2" />
@@ -55,11 +52,8 @@
 
 <style>
     .pick { border: 1px solid var(--mud-palette-lines-default); border-radius: 8px; max-height: 50vh; overflow: auto; }
-    .pick-row { display: flex; align-items: center; padding: 0 6px; cursor: default; user-select: none; }
-    .pick-row:hover { background: var(--mud-palette-action-default-hover); }
+    .pick-row { display: flex; align-items: center; }
     .pick-box { margin: 0; }
-    .pick-name { cursor: pointer; }
-    .ex-chev { display: inline-flex; width: 24px; cursor: pointer; }
 </style>
 
 @code {
@@ -72,9 +66,12 @@
         public string Share = "", Path = "", Name = "";
         public string Full => Path.Length == 0 ? Share : Share + "/" + Path;
         public int Depth;
-        public bool IsFile, Expanded, Loaded, Loading;
+        public bool IsFile, Loaded;
         public long Size;
         public List<Node> Children = new();
+        TreeItemData<Node>? data;
+        public TreeItemData<Node> Data => data ??= new() { Value = this, Text = Name, Expandable = !IsFile };
+        public bool Expanded { get => Data.Expanded; set => Data.Expanded = value; }
     }
 
     List<Node> roots = new();
@@ -93,15 +90,13 @@
         catch (HttpRequestException) { error = L["Agent unreachable."]; }
     }
 
-    IEnumerable<Node> Visible()
+    IReadOnlyCollection<TreeItemData<Node>> TopItems() => roots.Select(c => c.Data).ToList();
+
+    async Task<IReadOnlyCollection<TreeItemData<Node>>> LoadChildren(Node? parent)
     {
-        var stack = new Stack<Node>(Enumerable.Reverse(roots));
-        while (stack.Count > 0)
-        {
-            var n = stack.Pop();
-            yield return n;
-            if (n.Expanded) foreach (var c in Enumerable.Reverse(n.Children)) stack.Push(c);
-        }
+        if (parent is null) return TopItems();
+        if (!parent.Loaded) await Load(parent);
+        return parent.Children.Select(c => c.Data).ToList();
     }
 
     static string NodeIcon(Node n) => n.IsFile ? Icons.Material.Filled.InsertDriveFile : n.Path.Length == 0 ? Icons.Material.Filled.FolderShared : Icons.Material.Filled.Folder;
@@ -127,16 +122,8 @@
         }
     }
 
-    async Task Toggle(Node n)
-    {
-        if (n.IsFile) return;
-        if (!n.Loaded) await Load(n);
-        n.Expanded = !n.Expanded;
-    }
-
     async Task Load(Node n)
     {
-        n.Loading = true;
         try
         {
             var listing = await Agent.GetFoldersAsync(n.Share, n.Path, files: true);
@@ -147,11 +134,11 @@
                 .Concat((listing.Files ?? []).Where(f => !BackupRules.DefaultExcludes.Contains(f.Name))
                     .Select(f => new Node { Share = n.Share, Name = f.Name, Path = Child(f.Name), Depth = n.Depth + 1, IsFile = true, Size = f.Size }))
                 .ToList();
+            n.Data.Children = n.Children.Select(c => c.Data).ToList();
             n.Loaded = true;
         }
         catch (AgentException e) { error = L.Translate(e.Message); }
         catch (HttpRequestException) { error = L["Agent unreachable."]; }
-        n.Loading = false;
     }
 
     void Done() => Dialog.Close(DialogResult.Ok(selected.OrderBy(s => s, StringComparer.Ordinal).ToList()));
