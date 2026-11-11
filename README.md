@@ -122,11 +122,11 @@ Principle: **the agent is the only part with root rights**, and it validates eve
 
 ## Install
 
-### Target requirements
+### Install on a new machine
 
-Debian 13 with ZFS (for pools and datasets) and SSH access with `sudo`. The install script installs NFS, vsftpd, openssl, btrfs-progs, exfatprogs, cifs-utils and nfs-common itself, leaving the services stopped until they are enabled from the *Services* page. exFAT backup disks work through `exfatprogs`.
+See [Install.md](Install.md): download the release package, extract it, run `sudo ./install.sh`. The package is built by the manual GitHub workflow *Release package* (Actions tab, Run workflow).
 
-### Deploy from Windows
+### Deploy from Windows (development)
 
 The script publishes the agent and the interface for `linux-x64` (self-contained, no .NET needed on the target), copies them over SSH and restarts the services.
 

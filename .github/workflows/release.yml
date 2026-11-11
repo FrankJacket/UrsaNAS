@@ -1,0 +1,76 @@
+# Builds the installable package and publishes it as a GitHub release.
+# Manual only: Actions tab > "Release package" > Run workflow. Nothing runs on push or pull request.
+name: Release package
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number, for example 0.1.0 (the release tag will be v0.1.0)'
+        required: true
+        type: string
+      prerelease:
+        description: 'Mark the release as a pre-release'
+        required: false
+        default: true
+        type: boolean
+      run_tests:
+        description: 'Run the unit tests before building'
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ inputs.version }}
+    steps:
+      - name: Check the version
+        run: |
+          case "$VERSION" in
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "Version must look like 1.2.3 (got '$VERSION')" >&2; exit 1 ;;
+          esac
+
+      - uses: actions/checkout@v4
+        with:
+          # The Ursacopy engine is a private submodule: add a repository secret SUBMODULE_TOKEN
+          # (a personal access token with read access to FrankJacket/Ursacopy).
+          submodules: recursive
+          token: ${{ secrets.SUBMODULE_TOKEN || github.token }}
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Unit tests
+        if: ${{ inputs.run_tests }}
+        run: dotnet test -c Release --nologo
+
+      - name: Publish
+        run: |
+          P="ursanas-$VERSION-linux-x64"
+          dotnet publish src/Nas.Agent -c Release -r linux-x64 --self-contained -p:PublishSingleFile=true -p:Version=$VERSION -o "out/$P/Nas.Agent"
+          dotnet publish src/Nas.Web   -c Release -r linux-x64 --self-contained -p:Version=$VERSION -o "out/$P/Nas.Web"
+          cp deploy/install.sh deploy/ursanas-agent.service deploy/ursanas-web.service "out/$P/"
+          sed -i 's/\r$//' "out/$P"/install.sh "out/$P"/*.service
+          chmod +x "out/$P/install.sh"
+          echo "$VERSION" > "out/$P/VERSION"
+          cp Install.md "out/$P/"
+          tar -czf "$P.tar.gz" -C out "$P"
+          sha256sum "$P.tar.gz" > "$P.tar.gz.sha256"
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRE: ${{ inputs.prerelease }}
+        run: |
+          P="ursanas-$VERSION-linux-x64"
+          FLAGS=; [ "$PRE" = true ] && FLAGS=--prerelease
+          gh release create "v$VERSION" "$P.tar.gz" "$P.tar.gz.sha256" \
+            --target "$GITHUB_SHA" --title "UrsaNAS $VERSION" $FLAGS \
+            --notes "Install on Debian 13 or Ubuntu Server 26.04 (x86-64): see Install.md. Download \`$P.tar.gz\`, extract it, run \`sudo ./install.sh\`."
