@@ -1,0 +1,80 @@
+@inject AgentClient Agent
+@inject NetworkOperations Ops
+
+@* Réglages réseau du NAS. Open vSwitch est facultatif : les ponts Linux suffisent aux machines virtuelles tant qu'il n'est pas activé. *@
+<MudDialog>
+    <DialogContent>
+        @if (error is not null)
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-3">@error</MudAlert>
+        }
+        @if (status is null && error is null)
+        {
+            <MudProgressLinear Indeterminate="true" />
+        }
+        else if (status is not null)
+        {
+            <MudText Typo="Typo.subtitle1" Class="mb-1">Open vSwitch</MudText>
+            <MudText Typo="Typo.body2" Class="mb-3">@L["Open vSwitch is an optional virtual switch. Enable it only if you need its features (VLANs, link aggregation, tunnels); the Linux bridges are enough otherwise."]</MudText>
+            <MudSwitch T="bool" Value="status.Active" ValueChanged="Toggle" Disabled="@(busy || (!status.Installed && !status.CanInstall))" Color="Color.Primary"
+                       Label="@(status.Active ? L["Enabled"] : L["Disabled"])" />
+            @if (busy)
+            {
+                <MudStack Row="true" AlignItems="AlignItems.Center" Class="mt-2">
+                    <MudProgressCircular Indeterminate="true" Size="Size.Small" />
+                    <MudText Typo="Typo.caption">@L["Applying the change… installing the package can take a minute."]</MudText>
+                </MudStack>
+            }
+            else if (!status.Installed && !status.CanInstall)
+            {
+                <MudText Typo="Typo.caption">@L["The package cannot be installed on this machine (apt-get not found)."]</MudText>
+            }
+            else if (!status.Installed)
+            {
+                <MudText Typo="Typo.caption">@L["Not installed: enabling it installs the openvswitch-switch package."]</MudText>
+            }
+            else
+            {
+                <MudText Typo="Typo.caption">
+                    @(status.Version is null ? L["Installed"] : L["Version"] + " " + status.Version)
+                    @(status.Bridges.Count > 0 ? " · " + L["Bridges"] + ": " + string.Join(", ", status.Bridges) : "")
+                </MudText>
+            }
+            @if (status.Active && status.Bridges.Count > 0)
+            {
+                <MudAlert Severity="Severity.Info" Dense="true" Class="mt-3">@L["It cannot be disabled while Open vSwitch bridges exist."]</MudAlert>
+            }
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton Disabled="busy" OnClick="() => Dialog.Close()">@L["Close"]</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance Dialog { get; set; } = default!;
+
+    OvsStatus? status;
+    string? error;
+    bool busy;
+
+    protected override async Task OnInitializedAsync() => await Reload();
+
+    async Task Reload()
+    {
+        try { status = await Agent.GetOvsAsync(); }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable."]; }
+    }
+
+    async Task Toggle(bool enable)
+    {
+        error = null;
+        busy = true;
+        try { await Ops.SetOvsAsync(enable); }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable."]; }
+        await Reload();
+        busy = false;
+    }
+}

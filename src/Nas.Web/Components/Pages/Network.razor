@@ -6,9 +6,9 @@
 <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4" Wrap="Wrap.Wrap">
     <MudText Typo="Typo.h4">@L["Network"]</MudText>
     <MudSpacer />
-    @* Agrégation de liens et réglages : étapes suivantes. *@
+    @* Agrégation de liens : étape suivante. *@
     <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.CallMerge" Disabled="true">@L["Create Link Aggregation"]</MudButton>
-    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Settings" Disabled="true">@L["Settings"]</MudButton>
+    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Settings" OnClick="OpenSettings">@L["Settings"]</MudButton>
 </MudStack>
 
 @if (error is not null)
@@ -162,6 +162,9 @@
         await (await Dialogs.ShowAsync<NetworkEditDialog>(L["Edit"] + " — " + i.Name, parameters, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = false, BackdropClick = false })).Result;
         await LoadAsync();
     }
+
+    async Task OpenSettings() =>
+        await (await Dialogs.ShowAsync<NetworkSettingsDialog>(L["Settings"], new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = false, BackdropClick = false })).Result;
 
     string Rate(double bytesPerSecond) => Fmt.Size((long)bytesPerSecond, L.Lang) + "/s";
 

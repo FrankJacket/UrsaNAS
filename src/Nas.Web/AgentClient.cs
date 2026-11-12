@@ -199,6 +199,16 @@ public class AgentClient(HttpClient http)
     public async Task EditNetworkAsync(NetEditRequest req, CancellationToken ct = default) =>
         await EnsureOkAsync(await http.PostAsJsonAsync("network/edit", req, ct), ct);
 
+    public async Task<OvsStatus> GetOvsAsync(CancellationToken ct = default)
+    {
+        using var r = await http.GetAsync("network/ovs", ct);
+        await EnsureOkAsync(r, ct);
+        return await r.Content.ReadFromJsonAsync<OvsStatus>(ct) ?? throw new AgentException(Msg.F("The agent answered {0}.", 204));
+    }
+
+    public async Task SetOvsAsync(bool enabled, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PostAsJsonAsync("network/ovs", new OvsRequest(enabled), ct), ct);
+
     public async Task<SystemStats> GetStatsAsync(CancellationToken ct = default)
     {
         using var r = await http.GetAsync("stats", ct);

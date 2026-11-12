@@ -132,3 +132,8 @@ public static class NetRules
         return ValidateDns(c, true);
     }
 }
+
+/// <summary>Open vSwitch (facultatif) : paquet installé, service actif, version et ponts OVS existants.</summary>
+public sealed record OvsStatus(bool Installed, bool Active, bool CanInstall, string? Version, IReadOnlyList<string> Bridges);
+
+public sealed record OvsRequest(bool Enabled);

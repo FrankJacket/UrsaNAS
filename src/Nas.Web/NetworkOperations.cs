@@ -11,6 +11,18 @@ public class NetworkOperations(AgentClient agent, Repo repo, AuthenticationState
 
     static string Describe(NetIpConfig c) => c.Mode == "auto" ? "auto" : $"{c.Address}/{c.Netmask}" + (string.IsNullOrWhiteSpace(c.Gateway) ? "" : " via " + c.Gateway);
 
+    public async Task SetOvsAsync(bool enabled)
+    {
+        var actor = await ActorAsync();
+        try { await agent.SetOvsAsync(enabled); }
+        catch (AgentException ex)
+        {
+            await repo.AuditAsync(actor, "Open vSwitch change rejected", $"{(enabled ? "enable" : "disable")} — {ex.Message}");
+            throw;
+        }
+        await repo.AuditAsync(actor, enabled ? "Open vSwitch enabled" : "Open vSwitch disabled", "");
+    }
+
     public async Task EditAsync(NetEditRequest r)
     {
         if (NetRules.Validate(r) is { } e) throw new AgentException(e);
