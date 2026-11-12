@@ -188,6 +188,13 @@ public class AgentClient(HttpClient http)
     public async Task DeleteFolderAsync(string share, string path, bool isFile = false, CancellationToken ct = default) =>
         await EnsureOkAsync(await http.DeleteAsync($"acl/folder?share={Uri.EscapeDataString(share)}&path={Uri.EscapeDataString(path)}&file={(isFile ? "true" : "false")}", ct), ct);
 
+    public async Task<NetSnapshot> GetNetworkAsync(CancellationToken ct = default)
+    {
+        using var r = await http.GetAsync("network", ct);
+        await EnsureOkAsync(r, ct);
+        return await r.Content.ReadFromJsonAsync<NetSnapshot>(ct) ?? throw new AgentException(Msg.F("The agent answered {0}.", 204));
+    }
+
     public async Task<SystemStats> GetStatsAsync(CancellationToken ct = default)
     {
         using var r = await http.GetAsync("stats", ct);

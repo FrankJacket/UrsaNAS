@@ -63,6 +63,7 @@ public partial class Program
         builder.Services.AddSingleton<TransferService>();
         builder.Services.AddSingleton<DockerService>();
         builder.Services.AddSingleton<VmService>();
+        builder.Services.AddSingleton<NetworkService>();
         builder.Services.AddSingleton<DiskService>();
         if (builder.Configuration["URSANAS_FAKE"] == "1")
         {
@@ -141,7 +142,8 @@ public partial class Program
         app.MapPut("/shares", (ApplySharesRequest r, ShareService s, CancellationToken ct) =>
             Guard(async () => { await s.ApplyAsync(r.Shares, r.Ftp, ct); return Results.NoContent(); }));
 
-        app.MapGet("/services", (ProtocolService p, CancellationToken ct) => Read(async () => Results.Ok(await p.ListServicesAsync(ct))));
+        app.MapGet("/network", (NetworkService n, CancellationToken ct) => Read(async () => Results.Ok(await n.SnapshotAsync(ct))));
+        app.MapGet("/services",(ProtocolService p, CancellationToken ct) => Read(async () => Results.Ok(await p.ListServicesAsync(ct))));
         app.MapPut("/services/{name}", (string name, SetServiceRequest r, ProtocolService p, CancellationToken ct) =>
             Guard(async () => { await p.SetServiceAsync(name, r.Enabled, ct); return Results.NoContent(); }));
 

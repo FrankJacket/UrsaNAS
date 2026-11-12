@@ -1,0 +1,167 @@
+@page "/network"
+@inherits AutoRefreshBase
+@inject AgentClient Agent
+
+<MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4" Wrap="Wrap.Wrap">
+    <MudText Typo="Typo.h4">@L["Network"]</MudText>
+    <MudSpacer />
+    @* Agrégation de liens et réglages : étapes suivantes. *@
+    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.CallMerge" Disabled="true">@L["Create Link Aggregation"]</MudButton>
+    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Settings" Disabled="true">@L["Settings"]</MudButton>
+</MudStack>
+
+@if (error is not null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">@error</MudAlert>
+}
+@if (loaded && ifaces.Count == 0 && error is null)
+{
+    <MudAlert Severity="Severity.Info">@L["No network interface found."]</MudAlert>
+}
+
+<MudExpansionPanels MultiExpansion="true" Class="mb-4">
+    @foreach (var i in ifaces)
+    {
+        var iface = i;
+        var h = History(iface.Name);
+        <MudExpansionPanel Expanded="@expanded.Contains(iface.Name)" ExpandedChanged="(bool e) => SetExpanded(iface.Name, e)">
+            <TitleContent>
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="3" Wrap="Wrap.Wrap">
+                    <MudIcon Icon="@KindIcon(iface)" Color="@(iface.Connected ? Color.Success : Color.Default)" />
+                    <div style="min-width:120px">
+                        <MudText Typo="Typo.subtitle1"><b>@iface.Name</b></MudText>
+                        <MudText Typo="Typo.caption">@KindLabel(iface.Kind)</MudText>
+                    </div>
+                    @if (iface.Connected) { <MudChip T="string" Size="Size.Small" Color="Color.Success">@L["Connected"]</MudChip> }
+                    else { <MudChip T="string" Size="Size.Small">@L["Not connected"]</MudChip> }
+                    <div style="min-width:130px">
+                        <MudText Typo="Typo.body2">@(iface.Ipv4.Count > 0 ? iface.Ipv4[0].Address : "—")</MudText>
+                    </div>
+                    <div style="min-width:240px">
+                        <MudText Typo="Typo.caption" Color="Color.Info">↓ @Rate(h.LastRx)</MudText>
+                        <MudText Typo="Typo.caption" Color="Color.Warning" Class="ml-3">↑ @Rate(h.LastTx)</MudText>
+                    </div>
+                    <svg viewBox="0 0 120 28" width="120" height="28" style="flex:none">
+                        <polyline points="@Points(h.Rx, h.Max)" fill="none" stroke="var(--mud-palette-info)" stroke-width="1.5" />
+                        <polyline points="@Points(h.Tx, h.Max)" fill="none" stroke="var(--mud-palette-warning)" stroke-width="1.5" />
+                    </svg>
+                </MudStack>
+            </TitleContent>
+            <ChildContent>
+                <MudGrid>
+                    <MudItem xs="12" md="6">
+                        <MudSimpleTable Dense="true" Hover="true" Elevation="0">
+                            <tbody>
+                                <tr><td>@L["Status"]</td><td>@(iface.Connected ? L["Connected"] : L["Not connected"])</td></tr>
+                                <tr><td>@L["Speed"]</td><td>@(iface.SpeedMbps is { } s ? (s >= 1000 ? $"{s / 1000.0:0.#} Gbit/s" : $"{s} Mbit/s") : "—")@(iface.Duplex is { } d ? " · " + (d == "full" ? L["Full duplex"] : d == "half" ? L["Half duplex"] : d) : "")</td></tr>
+                                <tr><td>MTU</td><td>@(iface.Mtu > 0 ? iface.Mtu : "—")</td></tr>
+                                <tr><td>@L["MAC address"]</td><td><code>@(iface.Mac ?? "—")</code></td></tr>
+                                @if (iface.Master is not null) { <tr><td>@L["Member of"]</td><td>@iface.Master</td></tr> }
+                            </tbody>
+                        </MudSimpleTable>
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudSimpleTable Dense="true" Hover="true" Elevation="0">
+                            <tbody>
+                                <tr>
+                                    <td>IPv4</td>
+                                    <td>
+                                        @if (iface.Ipv4.Count == 0) { <span>@L["Not configured"]</span> }
+                                        else { <span>@(iface.Dhcp4 ? L["Automatic (DHCP)"] : L["Manual"])</span> }
+                                    </td>
+                                </tr>
+                                @foreach (var a in iface.Ipv4)
+                                {
+                                    <tr><td>@L["IP address"]</td><td><code>@a.Address</code> · @L["Subnet mask"] <code>@a.Mask</code></td></tr>
+                                }
+                                @if (iface.Gateway4 is not null) { <tr><td>@L["Gateway"]</td><td><code>@iface.Gateway4</code></td></tr> }
+                                <tr>
+                                    <td>IPv6</td>
+                                    <td>@(iface.Ipv6.Any(a => a.Scope == "global") ? (iface.Ipv6.Any(a => a.Scope == "global" && a.Dynamic) ? L["Automatic"] : L["Manual"]) : iface.Ipv6.Count > 0 ? L["Link-local only"] : L["Not configured"])</td>
+                                </tr>
+                                @foreach (var a in iface.Ipv6.OrderBy(x => x.Scope == "global" ? 0 : 1))
+                                {
+                                    <tr><td>@(a.Scope == "global" ? L["IP address"] : L["Link-local address"])</td><td><code>@a.Address/@a.PrefixLength</code></td></tr>
+                                }
+                                @if (iface.Gateway6 is not null) { <tr><td>@L["Gateway"] (IPv6)</td><td><code>@iface.Gateway6</code></td></tr> }
+                                @if (iface.Dns.Count > 0) { <tr><td>DNS</td><td><code>@string.Join(", ", iface.Dns)</code></td></tr> }
+                            </tbody>
+                        </MudSimpleTable>
+                    </MudItem>
+                </MudGrid>
+            </ChildContent>
+        </MudExpansionPanel>
+    }
+</MudExpansionPanels>
+
+@code {
+    protected override TimeSpan Interval => TimeSpan.FromSeconds(2);
+
+    sealed class Hist
+    {
+        public readonly List<double> Rx = new(), Tx = new();
+        public double LastRx => Rx.Count > 0 ? Rx[^1] : 0;
+        public double LastTx => Tx.Count > 0 ? Tx[^1] : 0;
+        public double Max => Math.Max(1, Math.Max(Rx.Count > 0 ? Rx.Max() : 0, Tx.Count > 0 ? Tx.Max() : 0));
+    }
+
+    const int Samples = 60;
+    List<NetIface> ifaces = [];
+    readonly Dictionary<string, Hist> history = new();
+    readonly HashSet<string> expanded = new();
+    NetSnapshot? previous;
+    string? error;
+    bool loaded;
+
+    Hist History(string name) => history.TryGetValue(name, out var h) ? h : new Hist();
+
+    void SetExpanded(string name, bool open) { if (open) expanded.Add(name); else expanded.Remove(name); }
+
+    protected override async Task LoadAsync()
+    {
+        try
+        {
+            var snap = await Agent.GetNetworkAsync();
+            ifaces = snap.Interfaces.ToList();
+            foreach (var i in ifaces)
+            {
+                var h = history.TryGetValue(i.Name, out var x) ? x : history[i.Name] = new Hist();
+                var before = previous?.Interfaces.FirstOrDefault(p => p.Name == i.Name);
+                // Premier instantané : pas de débit à calculer encore.
+                var rx = before is null ? 0 : NetMath.Rate(before.RxBytes, i.RxBytes, previous!.SampleMs, snap.SampleMs);
+                var tx = before is null ? 0 : NetMath.Rate(before.TxBytes, i.TxBytes, previous!.SampleMs, snap.SampleMs);
+                h.Rx.Add(rx); h.Tx.Add(tx);
+                if (h.Rx.Count > Samples) { h.Rx.RemoveAt(0); h.Tx.RemoveAt(0); }
+            }
+            previous = snap;
+            error = null;
+        }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable."]; }
+        loaded = true;
+    }
+
+    string Rate(double bytesPerSecond) => Fmt.Size((long)bytesPerSecond, L.Lang) + "/s";
+
+    static string Points(List<double> values, double max)
+    {
+        if (values.Count < 2) return "";
+        var step = 118.0 / (Samples - 1);
+        var offset = (Samples - values.Count) * step + 1;
+        return string.Join(" ", values.Select((v, k) => FormattableString.Invariant($"{offset + k * step:0.#},{26 - v / max * 24:0.#}")));
+    }
+
+    static string KindIcon(NetIface i) => i.Kind switch
+    {
+        "wifi" => Icons.Material.Filled.Wifi,
+        "bridge" => Icons.Material.Filled.Hub,
+        "bond" => Icons.Material.Filled.CallMerge,
+        "vlan" => Icons.Material.Filled.AccountTree,
+        _ => i.Connected ? Icons.Material.Filled.SettingsEthernet : Icons.Material.Filled.LinkOff,
+    };
+
+    string KindLabel(string kind) => kind switch
+    {
+        "ethernet" => L["Ethernet"], "wifi" => "Wi-Fi", "bridge" => L["Bridge"], "bond" => L["Link aggregation"], "vlan" => "VLAN", _ => L["Virtual interface"],
+    };
+}

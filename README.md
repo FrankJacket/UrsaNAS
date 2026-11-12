@@ -12,6 +12,7 @@ The menu is organised in groups. The Docker group only appears when Docker is in
 |---|---|---|
 | **Storage** | Disks, Pools, Datasets, Backups | Partition, format, mount and erase disks, extend the system disk, create ZFS pools and datasets, take snapshots, back up to a USB disk |
 | **Sharing** | Shares, Folders, Services | Share folders over SMB, NFS and FTP, set per-folder permissions (ACLs), start or stop services |
+| **Network** | Network | Read-only overview of the network interfaces: status, live throughput curve, speed, MTU, IPv4/IPv6, gateway, DNS, MAC |
 | **Docker** | Containers, Images, Stacks, Volumes and networks | Run and monitor containers, manage images, Compose stacks, volumes and networks |
 | **Virtual machines** | Virtual machines | Create, run and control KVM machines, with a browser console |
 | **Accounts** | Users, Groups, Admins | NAS accounts, groups, web interface administrators |
