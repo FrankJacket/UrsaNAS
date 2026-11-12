@@ -171,7 +171,7 @@
         loaded = true;
     }
 
-    bool CanEdit(NetIface i) => backend != "none" && i.Kind is "ethernet" or "bridge" && i.Master is null;
+    bool CanEdit(NetIface i) => backend != "none" && i.Kind is "ethernet" or "bridge" or "ovs" or "bond" && i.Master is null;
 
     async Task Edit(NetIface i)
     {

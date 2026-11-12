@@ -215,6 +215,9 @@ public class AgentClient(HttpClient http)
     public async Task OvsUplinkAsync(OvsUplinkRequest req, CancellationToken ct = default) =>
         await EnsureOkAsync(await http.PostAsJsonAsync("network/ovs/uplink", req, ct), ct);
 
+    public async Task PowerAsync(bool reboot, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PostAsync(reboot ? "system/reboot" : "system/shutdown", null, ct), ct);
+
     public async Task<SystemStats> GetStatsAsync(CancellationToken ct = default)
     {
         using var r = await http.GetAsync("stats", ct);

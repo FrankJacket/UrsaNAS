@@ -62,6 +62,7 @@ b.Services.AddScoped<VmOperations>();
 b.Services.AddScoped<DiskOperations>();
 b.Services.AddScoped<RemoteOperations>();
 b.Services.AddScoped<NetworkOperations>();
+b.Services.AddScoped<PowerOperations>();
 b.Services.AddScoped<NasFolderPicker>();
 
 b.Services.AddSingleton<BackupRepo>();

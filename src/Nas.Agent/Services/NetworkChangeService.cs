@@ -63,13 +63,15 @@ public partial class NetworkChangeService(ICommandRunner runner, NetworkService 
 
         var snap = await net.SnapshotAsync(ct);
         var iface = snap.Interfaces.FirstOrDefault(i => i.Name == req.Iface) ?? throw new OperationException(Msg.F("Network interface {0} not found.", req.Iface));
-        if (iface.Kind is not ("ethernet" or "bridge") || iface.Master is not null) throw new OperationException(Msg.F("This interface cannot be edited here."));
+        if (iface.Kind is not ("ethernet" or "bridge" or "ovs" or "bond") || iface.Master is not null) throw new OperationException(Msg.F("This interface cannot be edited here."));
 
         await lockObj.WaitAsync(ct);
         try
         {
             if (pending is not null) throw new OperationException(Msg.F("A network change is already in progress."));
             if (Simulated) return;
+            if (iface.Kind == "ovs") { await EditOvsBridgeAsync(req, iface, backend, ct); return; }
+            if (iface.Kind == "bond") { await EditBondAsync(req, iface, backend, ct); return; }
             var changes = backend == "netplan" ? PlanNetplan(req, iface.Kind) : PlanIfupdown(req);
             var state = new PendingState(req.Iface, backend, DateTime.UtcNow.AddSeconds(ConfirmSeconds), Backups(changes));
             await CommitLockedAsync(state, changes, null, () => ApplyAsync(backend, req.Iface, null, ct), () => VerifyAsync(t => CheckOnceAsync(req, t), ct));
@@ -407,6 +409,113 @@ public partial class NetworkChangeService(ICommandRunner runner, NetworkService 
             async () => { await DelBridgeAsync(bridge, ct); await ApplyAsync(backend, port, null, ct); },
             () => VerifyAsync(t => CheckOnceAsync(req, t), ct));
         log.LogInformation("The Open vSwitch bridge {Bridge} was removed; {Port} carries the addressing again", bridge, port);
+    }
+
+    /// <summary>Retrouve, dans les fichiers ifupdown, le bloc <c># ursanas-&lt;kind&gt; &lt;nom&gt; &lt;extra&gt;</c> : (fichier, contenu, extra), ou null.</summary>
+    (string File, string Text, string Extra)? FindIfupdownBlock(string kind, string name)
+    {
+        var main = P("/etc/network/interfaces");
+        var dir = P("/etc/network/interfaces.d");
+        var files = new List<string> { main };
+        if (Directory.Exists(dir)) files.AddRange(Directory.GetFiles(dir).Where(f => Regex.IsMatch(Path.GetFileName(f), "^[A-Za-z0-9_-]+$")));
+        foreach (var f in files.Where(File.Exists))
+        {
+            var text = File.ReadAllText(f);
+            if (IfupdownConfig.FindBlocks(text, kind).FirstOrDefault(b => b.Name == name) is { Name: not null } found) return (f, text, found.Extra);
+        }
+        return null;
+    }
+
+    static string Rewritten(string text, string kind, string name, string block)
+    {
+        var rest = IfupdownConfig.RemoveBlock(text, kind, name);
+        return rest.Trim().Length == 0 ? block : rest.TrimEnd('\n') + "\n\n" + block;
+    }
+
+    /// <summary>Change l'adressage d'un pont Open vSwitch créé par UrsaNAS : son fichier est réécrit avec le même port et la même adresse MAC.</summary>
+    async Task EditOvsBridgeAsync(NetEditRequest req, NetIface iface, string backend, CancellationToken ct)
+    {
+        var bridge = req.Iface;
+        var changes = new Dictionary<string, string?>();
+        string? port;
+        if (backend == "netplan")
+        {
+            var ours = P("/etc/netplan/" + NetplanConfig.OvsFileName(bridge));
+            if (!File.Exists(ours)) throw new OperationException(Msg.F("This bridge was not created by UrsaNAS."));
+            var text = Lf(File.ReadAllText(ours));
+            port = Regex.Match(text, @"interfaces: \[([^\],]+)\]") is { Success: true } m ? m.Groups[1].Value.Trim() : null;
+            if (port is null || !NetRules.IsIfaceName(port)) throw new OperationException(Msg.F("This bridge was not created by UrsaNAS."));
+            changes[ours] = NetplanConfig.GenerateOvsBridge(req, port, iface.Mac, text.Contains("\n  bonds:\n", StringComparison.Ordinal) ? "bonds" : "ethernets");
+        }
+        else
+        {
+            if (FindIfupdownBlock("ovs", bridge) is not { } found) throw new OperationException(Msg.F("This bridge was not created by UrsaNAS."));
+            port = found.Extra;
+            if (!NetRules.IsIfaceName(port)) throw new OperationException(Msg.F("This bridge was not created by UrsaNAS."));
+            changes[found.File] = Rewritten(found.Text, "ovs", bridge, IfupdownConfig.GenerateOvsBridge(req, port, iface.Mac, IfupdownConfig.BondOptions(found.Text, port)));
+            AddResolv(changes, req);
+        }
+        var state = new PendingState(port, backend, DateTime.UtcNow.AddSeconds(ConfirmSeconds), Backups(changes), RestoreBridge: bridge);
+        await CommitLockedAsync(state, changes,
+            backend == "ifupdown" ? () => runner.RunAsync("ifdown", ["--force", bridge], ct: ct) : null,
+            () => ApplyAsync(backend, port, bridge, ct),
+            () => VerifyAsync(async t =>
+            {
+                var problem = await CheckOnceAsync(req, t);
+                if (problem.Length > 0) return problem;
+                return (await PortsAsync(bridge, t)).Contains(port) ? ""
+                    : Msg.F("The new settings could not be verified: {0} is not a port of the bridge {1}. The previous settings were restored.", port, bridge);
+            }, ct));
+        log.LogInformation("Network change on the Open vSwitch bridge {Bridge} applied and verified", bridge);
+    }
+
+    /// <summary>Change l'adressage d'une agrégation de liens créée par UrsaNAS : son fichier est réécrit avec les mêmes membres, le même mode et la même adresse MAC.</summary>
+    async Task EditBondAsync(NetEditRequest req, NetIface iface, string backend, CancellationToken ct)
+    {
+        var bond = req.Iface;
+        var changes = new Dictionary<string, string?>();
+        List<string> members;
+        if (backend == "netplan")
+        {
+            var ours = P("/etc/netplan/" + NetplanConfig.BondFileName(bond));
+            if (!File.Exists(ours)) throw new OperationException(Msg.F("This aggregation was not created by UrsaNAS."));
+            var text = Lf(File.ReadAllText(ours));
+            members = Regex.Match(text, @"interfaces: \[([^\]]+)\]") is { Success: true } m
+                ? m.Groups[1].Value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList() : [];
+            var mode = Regex.Match(text, @"^\s+mode: ([A-Za-z0-9.+-]+)\s*$", RegexOptions.Multiline) is { Success: true } mm ? mm.Groups[1].Value : "active-backup";
+            if (members.Count == 0 || members.Any(x => !NetRules.IsIfaceName(x))) throw new OperationException(Msg.F("This aggregation was not created by UrsaNAS."));
+            changes[ours] = NetplanConfig.GenerateBond(req, members, mode, iface.Mac);
+        }
+        else
+        {
+            if (FindIfupdownBlock("bond", bond) is not { } found) throw new OperationException(Msg.F("This aggregation was not created by UrsaNAS."));
+            members = found.Extra.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList();
+            if (members.Count == 0 || members.Any(x => !NetRules.IsIfaceName(x))) throw new OperationException(Msg.F("This aggregation was not created by UrsaNAS."));
+            var mode = Regex.Match(IfupdownConfig.BondOptions(found.Text, bond), @"bond-mode ([A-Za-z0-9.+-]+)") is { Success: true } mm ? mm.Groups[1].Value : "active-backup";
+            changes[found.File] = Rewritten(found.Text, "bond", bond, IfupdownConfig.GenerateBond(req, members, mode, iface.Mac));
+            AddResolv(changes, req);
+        }
+        var joined = string.Join(',', members);
+        var state = new PendingState(joined, backend, DateTime.UtcNow.AddSeconds(ConfirmSeconds), Backups(changes), RestoreBridge: bond);
+        await CommitLockedAsync(state, changes,
+            backend == "ifupdown" ? () => runner.RunAsync("ifdown", ["--force", bond], ct: ct) : null,
+            () => ApplyAsync(backend, joined, bond, ct),
+            () => VerifyAsync(async t =>
+            {
+                var problem = await CheckOnceAsync(req, t);
+                if (problem.Length > 0) return problem;
+                var now = (await net.SnapshotAsync(t)).Interfaces;
+                var missing = members.FirstOrDefault(x => now.FirstOrDefault(i => i.Name == x)?.Master != bond);
+                return missing is null ? "" : Msg.F("The new settings could not be verified: {0} is not a member of {1}. The previous settings were restored.", missing, bond);
+            }, ct));
+        log.LogInformation("Network change on the link aggregation {Bond} applied and verified", bond);
+    }
+
+    void AddResolv(Dictionary<string, string?> changes, NetEditRequest req)
+    {
+        if (req.Ipv4.DnsMode != "manual" && req.Ipv6.DnsMode != "manual") return;
+        var resolv = P("/etc/resolv.conf");
+        if (File.Exists(resolv) && new FileInfo(resolv).LinkTarget is null) changes[resolv] = IfupdownConfig.ResolvConf(req);
     }
 
     Dictionary<string, string?> PlanOvsNetplan(NetEditRequest bridgeReq, string port, string? mac)

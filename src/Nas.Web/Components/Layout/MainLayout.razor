@@ -5,6 +5,9 @@
 @inject DockerAvailability Docker
 @inject IJSRuntime JS
 @inject NavigationManager Nav
+@inject IDialogService Dialogs
+@inject ISnackbar Snack
+@inject PowerOperations PowerOps
 
 <MudThemeProvider IsDarkMode="@Theme.IsDark" />
 <MudPopoverProvider />
@@ -35,6 +38,12 @@
             <MudMenuItem Icon="@Icons.Material.Filled.LightMode" OnClick="() => SetTheme(false)">@L["Light theme"] @(Theme.IsDark ? "" : "✓")</MudMenuItem>
             <MudMenuItem Icon="@Icons.Material.Filled.DarkMode" OnClick="() => SetTheme(true)">@L["Dark theme"] @(Theme.IsDark ? "✓" : "")</MudMenuItem>
         </MudMenu>
+        <AuthorizeView>
+            <MudMenu Icon="@Icons.Material.Filled.PowerSettingsNew" Color="Color.Inherit" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
+                <MudMenuItem Icon="@Icons.Material.Filled.RestartAlt" OnClick="() => Power(true)">@L["Restart"]</MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Filled.PowerOff" OnClick="() => Power(false)">@L["Shutdown"]</MudMenuItem>
+            </MudMenu>
+        </AuthorizeView>
     </MudAppBar>
     <MudDrawer Open="true" Elevation="0" Variant="DrawerVariant.Persistent">
         <MudNavMenu>
@@ -101,6 +110,18 @@
     // /lang pose le cookie de langue puis revient ici : rechargement complet pour que le circuit reparte dans la nouvelle langue.
     void SetLanguage(string code) =>
         Nav.NavigateTo($"/lang/{code}?returnUrl={Uri.EscapeDataString("/" + Nav.ToBaseRelativePath(Nav.Uri))}", forceLoad: true);
+
+    // Arrêt ou redémarrage du NAS, après confirmation : l'interface devient injoignable ensuite.
+    async Task Power(bool reboot)
+    {
+        var ok = await Dialogs.ShowMessageBoxAsync(reboot ? L["Restart"] : L["Shutdown"],
+            reboot ? L["Restart the NAS now? The interface will be unreachable for a few minutes."] : L["Shut down the NAS now? It will have to be turned on again by hand."],
+            yesText: reboot ? L["Restart"] : L["Shutdown"], cancelText: L["Cancel"]);
+        if (ok != true) return;
+        try { await PowerOps.PowerAsync(reboot); Snack.Add(reboot ? L["The NAS is restarting."] : L["The NAS is shutting down."], Severity.Warning); }
+        catch (AgentException e) { Snack.Add(L.Translate(e.Message), Severity.Error); }
+        catch (HttpRequestException) { Snack.Add(L["Agent unreachable."], Severity.Error); }
+    }
 
     async Task SetTheme(bool dark)
     {
