@@ -1,0 +1,99 @@
+@inject NetworkOperations Ops
+
+@* Adressage IPv4 / IPv6 d'une interface. L'agent applique, vérifie (adresse portée, route, passerelle qui répond) et revient en arrière si la vérification échoue. *@
+<MudDialog>
+    <DialogContent>
+        @if (error is not null)
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-3">@error</MudAlert>
+        }
+        @if (done)
+        {
+            <MudAlert Severity="Severity.Success">@L["The new settings are applied and verified."]</MudAlert>
+        }
+        else if (busy)
+        {
+            <MudStack AlignItems="AlignItems.Center" Class="pa-6">
+                <MudProgressCircular Indeterminate="true" />
+                <MudText>@L["Applying and verifying the new settings…"]</MudText>
+                <MudText Typo="Typo.caption">@L["If you changed the address you are connected through, this page will stop answering: open the NAS at its new address."]</MudText>
+            </MudStack>
+        }
+        else
+        {
+            <MudText Typo="Typo.subtitle2" Class="mb-2">@Iface.Name</MudText>
+            <MudTabs Elevation="0" Rounded="true" PanelClass="pt-3">
+                <MudTabPanel Text="IPv4">
+                    <Fields Cfg="v4" Ipv6="false" />
+                </MudTabPanel>
+                <MudTabPanel Text="IPv6">
+                    <Fields Cfg="v6" Ipv6="true" />
+                </MudTabPanel>
+            </MudTabs>
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-3">
+                @L["The change is applied at once. UrsaNAS checks that the NAS carries the new address and reaches its gateway, and restores the previous settings if not. It cannot know whether your computer can still reach the NAS: if you lose access, correcting the network settings is up to you, from the machine's console."]
+            </MudAlert>
+        }
+    </DialogContent>
+    <DialogActions>
+        @if (done)
+        {
+            <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="() => Dialog.Close(DialogResult.Ok(true))">@L["Close"]</MudButton>
+        }
+        else
+        {
+            <MudButton Disabled="busy" OnClick="() => Dialog.Cancel()">@L["Cancel"]</MudButton>
+            <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="busy" OnClick="Apply">@L["Confirm"]</MudButton>
+        }
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance Dialog { get; set; } = default!;
+    [Parameter, EditorRequired] public NetIface Iface { get; set; } = default!;
+
+    /// <summary>Champs modifiables d'un onglet (texte : la validité est contrôlée par NetRules, côté web puis côté agent).</summary>
+    public sealed class Form
+    {
+        public string Mode = "auto", Address = "", Netmask = "", Gateway = "", DnsMode = "auto", Dns1 = "", Dns2 = "";
+        public NetIpConfig ToConfig() => new(Mode, Address.Trim(), Netmask.Trim(), Gateway.Trim(), DnsMode,
+            new[] { Dns1.Trim(), Dns2.Trim() }.Where(s => s.Length > 0).ToList());
+    }
+
+    readonly Form v4 = new(), v6 = new();
+    string? error;
+    bool busy, done;
+
+    protected override void OnInitialized()
+    {
+        var a4 = Iface.Ipv4.FirstOrDefault(a => a.Scope == "global");
+        v4.Mode = Iface.Dhcp4 || a4 is null ? "auto" : "manual";
+        if (a4 is not null) { v4.Address = a4.Address; v4.Netmask = a4.Mask ?? ""; }
+        v4.Gateway = Iface.Gateway4 ?? "";
+        var dns4 = Iface.Dns.Where(d => !d.Contains(':')).ToList();
+        v4.DnsMode = !Iface.Dhcp4 && dns4.Count > 0 ? "manual" : "auto";
+        (v4.Dns1, v4.Dns2) = (dns4.ElementAtOrDefault(0) ?? "", dns4.ElementAtOrDefault(1) ?? "");
+
+        var a6 = Iface.Ipv6.FirstOrDefault(a => a.Scope == "global");
+        v6.Mode = a6 is null || a6.Dynamic ? "auto" : "manual";
+        if (a6 is not null) { v6.Address = a6.Address; v6.Netmask = a6.PrefixLength.ToString(); }
+        v6.Gateway = Iface.Gateway6 ?? "";
+        var dns6 = Iface.Dns.Where(d => d.Contains(':')).ToList();
+        v6.DnsMode = v6.Mode == "manual" && dns6.Count > 0 ? "manual" : "auto";
+        (v6.Dns1, v6.Dns2) = (dns6.ElementAtOrDefault(0) ?? "", dns6.ElementAtOrDefault(1) ?? "");
+    }
+
+    async Task Apply()
+    {
+        error = null;
+        busy = true;
+        try
+        {
+            await Ops.EditAsync(new NetEditRequest(Iface.Name, v4.ToConfig(), v6.ToConfig()));
+            done = true;
+        }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable."]; }
+        busy = false;
+    }
+}

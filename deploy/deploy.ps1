@@ -22,6 +22,8 @@ if ($LASTEXITCODE) { throw 'tar a échoué' }
 scp -q $tar "${Target}:ursanas.tar"
 if ($LASTEXITCODE) { throw 'scp a échoué' }
 
+# Les avertissements de install.sh arrivent sur stderr : sous PowerShell 5.1 ils feraient échouer le script ; seul le code de sortie compte.
+$ErrorActionPreference = 'Continue'
 # Dossier d'extraction dans le répertoire personnel (rien n'est supprimé en dehors de lui).
 ssh $Target 'D=$HOME/ursanas-deploy; mkdir -p $D; tar -mxf $HOME/ursanas.tar -C $D; sed -i "s/\r$//" $D/install.sh; sudo sh $D/install.sh $D'
 if ($LASTEXITCODE) { throw "l'installation a échoué" }

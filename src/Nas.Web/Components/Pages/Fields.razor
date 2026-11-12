@@ -1,0 +1,25 @@
+@* Un onglet d'adressage : mode (auto / manuel), adresse, masque ou préfixe, passerelle, DNS. *@
+<MudStack Spacing="1">
+    <MudText Typo="Typo.subtitle2">@L["IP assignment"]</MudText>
+    <MudRadioGroup T="string" @bind-Value="Cfg.Mode">
+        <MudRadio T="string" Value="@("auto")">@(Ipv6 ? L["Automatic"] : L["Automatic (DHCP)"])</MudRadio>
+        <MudRadio T="string" Value="@("manual")">@L["Manual"]</MudRadio>
+    </MudRadioGroup>
+    <MudTextField T="string" @bind-Value="Cfg.Address" Label="@(Ipv6 ? L["IPv6 address"] : L["IPv4 address"])" Disabled="@(Cfg.Mode != "manual")" Variant="Variant.Outlined" Margin="Margin.Dense" />
+    <MudTextField T="string" @bind-Value="Cfg.Netmask" Label="@(Ipv6 ? L["Prefix length"] : L["Subnet mask"])" Disabled="@(Cfg.Mode != "manual")" Variant="Variant.Outlined" Margin="Margin.Dense"
+                  HelperText="@(Ipv6 ? "64" : "255.255.255.0")" />
+    <MudTextField T="string" @bind-Value="Cfg.Gateway" Label="@L["Gateway"]" Disabled="@(Cfg.Mode != "manual")" Variant="Variant.Outlined" Margin="Margin.Dense" />
+
+    <MudText Typo="Typo.subtitle2" Class="mt-2">DNS</MudText>
+    <MudRadioGroup T="string" @bind-Value="Cfg.DnsMode">
+        <MudRadio T="string" Value="@("auto")">@L["Automatic"]</MudRadio>
+        <MudRadio T="string" Value="@("manual")">@L["Manual"]</MudRadio>
+    </MudRadioGroup>
+    <MudTextField T="string" @bind-Value="Cfg.Dns1" Label="@L["Preferred DNS server"]" Disabled="@(Cfg.DnsMode != "manual")" Variant="Variant.Outlined" Margin="Margin.Dense" />
+    <MudTextField T="string" @bind-Value="Cfg.Dns2" Label="@L["Alternate DNS server"]" Disabled="@(Cfg.DnsMode != "manual")" Variant="Variant.Outlined" Margin="Margin.Dense" />
+</MudStack>
+
+@code {
+    [Parameter, EditorRequired] public NetworkEditDialog.Form Cfg { get; set; } = default!;
+    [Parameter] public bool Ipv6 { get; set; }
+}

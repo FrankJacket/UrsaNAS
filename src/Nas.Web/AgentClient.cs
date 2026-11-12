@@ -195,6 +195,10 @@ public class AgentClient(HttpClient http)
         return await r.Content.ReadFromJsonAsync<NetSnapshot>(ct) ?? throw new AgentException(Msg.F("The agent answered {0}.", 204));
     }
 
+    /// <summary>Applique puis vérifie : ne revient qu'une fois le résultat connu (jusqu'à une trentaine de secondes).</summary>
+    public async Task EditNetworkAsync(NetEditRequest req, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PostAsJsonAsync("network/edit", req, ct), ct);
+
     public async Task<SystemStats> GetStatsAsync(CancellationToken ct = default)
     {
         using var r = await http.GetAsync("stats", ct);

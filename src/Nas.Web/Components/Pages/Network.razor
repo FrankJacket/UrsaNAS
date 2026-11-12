@@ -1,6 +1,7 @@
 @page "/network"
 @inherits AutoRefreshBase
 @inject AgentClient Agent
+@inject IDialogService Dialogs
 
 <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4" Wrap="Wrap.Wrap">
     <MudText Typo="Typo.h4">@L["Network"]</MudText>
@@ -13,6 +14,10 @@
 @if (error is not null)
 {
     <MudAlert Severity="Severity.Error" Class="mb-4">@error</MudAlert>
+}
+@if (loaded && backend == "none" && error is null)
+{
+    <MudAlert Severity="Severity.Info" Class="mb-4">@L["The network configuration of this machine cannot be edited from here (netplan or ifupdown required)."]</MudAlert>
 }
 @if (loaded && ifaces.Count == 0 && error is null)
 {
@@ -45,6 +50,12 @@
                         <polyline points="@Points(h.Rx, h.Max)" fill="none" stroke="var(--mud-palette-info)" stroke-width="1.5" />
                         <polyline points="@Points(h.Tx, h.Max)" fill="none" stroke="var(--mud-palette-warning)" stroke-width="1.5" />
                     </svg>
+                    <MudSpacer />
+                    <div @onclick:stopPropagation="true">
+                        <MudMenu Icon="@Icons.Material.Filled.MoreVert" Size="Size.Small" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
+                            <MudMenuItem Icon="@Icons.Material.Filled.Edit" Disabled="@(!CanEdit(iface))" OnClick="() => Edit(iface)">@L["Edit"]</MudMenuItem>
+                        </MudMenu>
+                    </div>
                 </MudStack>
             </TitleContent>
             <ChildContent>
@@ -110,6 +121,7 @@
     readonly Dictionary<string, Hist> history = new();
     readonly HashSet<string> expanded = new();
     NetSnapshot? previous;
+    string backend = "none";
     string? error;
     bool loaded;
 
@@ -134,11 +146,21 @@
                 if (h.Rx.Count > Samples) { h.Rx.RemoveAt(0); h.Tx.RemoveAt(0); }
             }
             previous = snap;
+            backend = snap.Backend;
             error = null;
         }
         catch (AgentException e) { error = L.Translate(e.Message); }
         catch (HttpRequestException) { error = L["Agent unreachable."]; }
         loaded = true;
+    }
+
+    bool CanEdit(NetIface i) => backend != "none" && i.Kind is "ethernet" or "bridge" && i.Master is null;
+
+    async Task Edit(NetIface i)
+    {
+        var parameters = new DialogParameters<NetworkEditDialog> { { x => x.Iface, i } };
+        await (await Dialogs.ShowAsync<NetworkEditDialog>(L["Edit"] + " — " + i.Name, parameters, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = false, BackdropClick = false })).Result;
+        await LoadAsync();
     }
 
     string Rate(double bytesPerSecond) => Fmt.Size((long)bytesPerSecond, L.Lang) + "/s";

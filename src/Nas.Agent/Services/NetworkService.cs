@@ -21,7 +21,7 @@ public class NetworkService(ICommandRunner runner, IConfiguration cfg)
         var r4 = await runner.RunAsync("ip", ["-j", "-4", "route", "show", "default"], ct: ct);
         var r6 = await runner.RunAsync("ip", ["-j", "-6", "route", "show", "default"], ct: ct);
         var dns = ParseResolvConf(ResolvFiles.Select(f => File.Exists(f) ? File.ReadAllText(f) : null));
-        return new NetSnapshot(ms, Parse(addr.StdOut, r4.StdOut, r6.StdOut, dns, ReadSys));
+        return new NetSnapshot(ms, Parse(addr.StdOut, r4.StdOut, r6.StdOut, dns, ReadSys), NetBackend.Detect(cfg));
     }
 
     /// <summary>Lit un fichier de <c>/sys/class/net/&lt;nom&gt;/</c> (null s'il n'existe pas ou n'est pas lisible : lien coupé, interface virtuelle).</summary>
@@ -140,6 +140,6 @@ public class NetworkService(ICommandRunner runner, IConfiguration cfg)
                 [new NetAddress("192.168.1.20", 24, "255.255.255.0", true, "global")], [new NetAddress("fe80::215:5dff:fe00:aa01", 64, null, false, "link")],
                 "192.168.1.1", null, ["192.168.1.1", "1.1.1.1"], true, null, t * 120_000, t * 45_000),
             new NetIface("eth1", "ethernet", false, "00:15:5d:00:aa:02", 1500, null, null, [], [], null, null, [], false, null, 0, 0),
-        ]);
+        ], "netplan");
     }
 }

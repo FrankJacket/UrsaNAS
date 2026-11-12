@@ -12,7 +12,7 @@ The menu is organised in groups. The Docker group only appears when Docker is in
 |---|---|---|
 | **Storage** | Disks, Pools, Datasets, Backups | Partition, format, mount and erase disks, extend the system disk, create ZFS pools and datasets, take snapshots, back up to a USB disk |
 | **Sharing** | Shares, Folders, Services | Share folders over SMB, NFS and FTP, set per-folder permissions (ACLs), start or stop services |
-| **Network** | Network | Read-only overview of the network interfaces: status, live throughput curve, speed, MTU, IPv4/IPv6, gateway, DNS, MAC |
+| **Network** | Network | Overview of the network interfaces (status, live throughput curve, speed, MTU, IPv4/IPv6, gateway, DNS, MAC) and editing of their IPv4/IPv6 addressing |
 | **Docker** | Containers, Images, Stacks, Volumes and networks | Run and monitor containers, manage images, Compose stacks, volumes and networks |
 | **Virtual machines** | Virtual machines | Create, run and control KVM machines, with a browser console |
 | **Accounts** | Users, Groups, Admins | NAS accounts, groups, web interface administrators |
@@ -89,6 +89,15 @@ The **Disks** page lists each disk with its partitions. A disk is *free* when it
 - **Mount**, **Unmount** and **Remove** act on a saved connection. Removing it forgets the connection; the files on the remote server are never touched. **Edit** changes a connection's settings (server, path, user, folder, cache, speed limit, read-only); its name and type stay. A password or a sign-in left empty is kept. SMB and NFS are remounted with the new settings; an online connection tries the folder first, then its service is restarted. If the new settings fail, the previous ones are put back.
 - Remote mounts live outside `/mnt`, so they are not offered as *Mounted drives*. Using them from the File Manager, shares and backups comes in a later step.
 
+### Network
+
+The **Network** page lists the interfaces (those of Docker and libvirt are hidden). The '...' menu of an Ethernet or bridge interface opens **Edit**: IPv4 and IPv6 tabs, IP assignment *Automatic* (DHCP for IPv4; router advertisements for IPv6 — on ifupdown, no DHCPv6 client is needed) or *Manual* (address, mask or prefix, gateway), DNS *Automatic* or *Manual*.
+
+- **Automatic verification**: the change is applied at once, then the agent checks it for up to 30 seconds: the NAS carries the new address (or obtained a DHCP lease), the default route uses the new gateway, and the gateway answers (ping, or an entry in the neighbour table). If the check fails, the previous configuration is restored and the error says why. The original files are kept on disk (`/var/lib/ursanas/network-pending.json`) while the change is in progress: if the agent restarts in the middle of it, the previous configuration is restored at startup.
+- **Responsibility**: UrsaNAS cannot know whether *your computer* can still reach the NAS (for example after changing the address you are connected through: reopen the NAS at its new address). If access is lost despite a successful check, correcting the network settings is up to you, from the machine's console. The dialog says so.
+- **Supported systems**: *netplan* (Ubuntu Server) and *ifupdown* (Debian). Anything else (NetworkManager…) stays read-only. UrsaNAS only removes the addressing settings of the edited interface from the existing files and writes the new ones in its own file (`/etc/netplan/90-ursanas-<interface>.yaml` or `/etc/network/interfaces.d/ursanas-<interface>`), so other settings (match, MTU, other interfaces…) are kept. On Ubuntu with cloud-init, its network configuration is disabled when its file had to be touched.
+- **Limits**: on ifupdown, manual DNS servers need a manual address (they are written to `dns-nameservers` and to `/etc/resolv.conf` when that is a regular file). Bonds, VLANs, Wi-Fi and Open vSwitch are not editable yet.
+
 ### Virtual machines
 
 UrsaNAS drives **libvirt/KVM** (installed by the installer). The **Virtual machines** page checks that libvirt answers and explains what is missing:
@@ -100,7 +109,7 @@ sudo apt install qemu-system-x86 libvirt-daemon-system libvirt-clients virtinst 
 - **Create** a machine from an `.iso` found in a share or on a mounted disk: name, processors, memory, disk size (qcow2 file in `/var/lib/libvirt/images`) and network. UEFI is used when OVMF is installed.
 - **Start, shut down** (ACPI request), **power off** (immediate) and **delete** (the virtual disk goes, the `.iso` stays).
 - **Console** in the browser (noVNC). The screen of a machine only listens on `127.0.0.1`; the web interface relays it over an authenticated WebSocket. The noVNC viewer is bundled with the web interface (`wwwroot/lib/novnc`), so the console works without internet access.
-- **Network**: choose a host bridge (for example `br0`) to put a machine on the local network, or the private libvirt network (NAT). UrsaNAS never reconfigures the NAS network; create the bridge yourself (for example with NetworkManager or `/etc/network/interfaces`), because a mistake there cuts off remote access.
+- **Network**: choose a host bridge (for example `br0`) to put a machine on the local network, or the private libvirt network (NAT). UrsaNAS does not create bridges; create the bridge yourself (for example with NetworkManager or `/etc/network/interfaces`), because a mistake there cuts off remote access.
 - If `/dev/kvm` is missing, the page warns: machines would be emulated and extremely slow. Enable virtualization in the BIOS, or nested virtualization when the NAS is itself a virtual machine (`Set-VMProcessor -VMName <name> -ExposeVirtualizationExtensions $true` on Hyper-V).
 
 ### Terminal

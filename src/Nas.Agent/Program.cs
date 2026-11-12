@@ -64,6 +64,7 @@ public partial class Program
         builder.Services.AddSingleton<DockerService>();
         builder.Services.AddSingleton<VmService>();
         builder.Services.AddSingleton<NetworkService>();
+        builder.Services.AddSingleton<NetworkChangeService>();
         builder.Services.AddSingleton<DiskService>();
         if (builder.Configuration["URSANAS_FAKE"] == "1")
         {
@@ -143,6 +144,7 @@ public partial class Program
             Guard(async () => { await s.ApplyAsync(r.Shares, r.Ftp, ct); return Results.NoContent(); }));
 
         app.MapGet("/network", (NetworkService n, CancellationToken ct) => Read(async () => Results.Ok(await n.SnapshotAsync(ct))));
+        app.MapPost("/network/edit", (NetEditRequest r, NetworkChangeService c, CancellationToken ct) => Guard(async () => { await c.EditAsync(r, ct); return Results.NoContent(); }));
         app.MapGet("/services",(ProtocolService p, CancellationToken ct) => Read(async () => Results.Ok(await p.ListServicesAsync(ct))));
         app.MapPut("/services/{name}", (string name, SetServiceRequest r, ProtocolService p, CancellationToken ct) =>
             Guard(async () => { await p.SetServiceAsync(name, r.Enabled, ct); return Results.NoContent(); }));
@@ -281,6 +283,11 @@ public partial class Program
         app.Lifetime.ApplicationStarted.Register(() =>
         {
             if (OperatingSystem.IsWindows()) return;
+            _ = Task.Run(async () =>
+            {
+                try { await app.Services.GetRequiredService<NetworkChangeService>().RestoreOnStartupAsync(); }
+                catch (Exception e) { app.Logger.LogWarning(e, "Restoring a pending network change failed."); }
+            });
             _ = Task.Run(async () =>
             {
                 await Gate.WaitAsync();
