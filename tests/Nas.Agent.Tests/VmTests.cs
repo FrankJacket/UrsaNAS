@@ -68,6 +68,23 @@ public class VmTests : IDisposable
     }
 
     [Fact]
+    public async Task Les_ponts_open_vswitch_s_ajoutent_aux_ponts_linux()
+    {
+        var baseHandler = _run.Handler!;
+        _run.Handler = c => c.File == "ovs-vsctl" ? new(0, "ovsbr0\nbad name!\n", "") : baseHandler(c);
+        var s = await _svc.StatusAsync();
+        Assert.Equal(["br0", "ovsbr0"], s.Bridges);
+    }
+
+    [Fact]
+    public async Task Sans_open_vswitch_les_ponts_ne_changent_pas()
+    {
+        var baseHandler = _run.Handler!;
+        _run.Handler = c => c.File == "ovs-vsctl" ? throw new System.ComponentModel.Win32Exception("not found") : baseHandler(c);
+        Assert.Equal(["br0"], (await _svc.StatusAsync()).Bridges);
+    }
+
+    [Fact]
     public async Task L_etat_signale_les_ponts_sans_ceux_de_docker()
     {
         var s = await _svc.StatusAsync();

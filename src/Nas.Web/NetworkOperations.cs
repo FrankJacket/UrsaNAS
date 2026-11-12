@@ -23,6 +23,19 @@ public class NetworkOperations(AgentClient agent, Repo repo, AuthenticationState
         await repo.AuditAsync(actor, enabled ? "Open vSwitch enabled" : "Open vSwitch disabled", "");
     }
 
+    /// <summary>Met une carte en sortie d'un pont Open vSwitch (<c>Enable</c>), ou retire ce pont (<c>Name</c> est alors le pont).</summary>
+    public async Task UplinkAsync(bool enable, string name)
+    {
+        var actor = await ActorAsync();
+        try { await agent.OvsUplinkAsync(new OvsUplinkRequest(enable, name)); }
+        catch (AgentException ex)
+        {
+            await repo.AuditAsync(actor, "Open vSwitch change rejected", $"{(enable ? "uplink" : "remove bridge")} {name} — {ex.Message}");
+            throw;
+        }
+        await repo.AuditAsync(actor, enable ? "Network card moved to Open vSwitch" : "Open vSwitch bridge removed", name);
+    }
+
     public async Task EditAsync(NetEditRequest r)
     {
         if (NetRules.Validate(r) is { } e) throw new AgentException(e);

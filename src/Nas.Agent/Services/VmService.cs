@@ -78,13 +78,29 @@ public sealed partial class VmService(ICommandRunner run, AclService acl, Backup
         CommandResult v;
         try { v = await run.RunAsync(Virsh, ["-c", Connect, "version", "--daemon"], ct: ct); }
         catch (Win32Exception) { return new(VmHostState.NotInstalled, null, false, []); }
-        if (v.ExitCode != 0) return new(VmHostState.Stopped, null, File.Exists(KvmDevice), Bridges());
+        if (v.ExitCode != 0) return new(VmHostState.Stopped, null, File.Exists(KvmDevice), await BridgesAsync(ct));
         var line = v.StdOut.Replace("\r\n", "\n").Split('\n').FirstOrDefault(l => l.Contains("libvirt", StringComparison.OrdinalIgnoreCase));
-        return new(VmHostState.Ready, line?[(line.LastIndexOf(' ') + 1)..], File.Exists(KvmDevice), Bridges());
+        return new(VmHostState.Ready, line?[(line.LastIndexOf(' ') + 1)..], File.Exists(KvmDevice), await BridgesAsync(ct));
     }
 
-    /// <summary>Ponts réseau de la machine, sauf ceux de Docker et le NAT interne de libvirt.</summary>
-    public IReadOnlyList<string> Bridges()
+    /// <summary>Ponts Linux et, si Open vSwitch est installé et actif, ses ponts. Un pont OVS se branche avec un « virtualport openvswitch ».</summary>
+    public async Task<IReadOnlyList<string>> BridgesAsync(CancellationToken ct = default)
+        => LinuxBridges().Concat(await OvsBridgesAsync(ct)).Distinct().Order().ToList();
+
+    /// <summary>Ponts Open vSwitch (<c>ovs-vsctl list-br</c>); vide si OVS n'est pas installé ou ne répond pas.</summary>
+    public async Task<IReadOnlyList<string>> OvsBridgesAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            var r = await run.RunAsync("ovs-vsctl", ["--timeout=3", "list-br"], ct: ct);
+            return r.ExitCode != 0 ? [] : r.StdOut.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(n => Rules.ValidateBridge(n) is null).ToList();
+        }
+        catch (Win32Exception) { return []; }
+    }
+
+    /// <summary>Ponts réseau Linux de la machine, sauf ceux de Docker et le NAT interne de libvirt.</summary>
+    public IReadOnlyList<string> LinuxBridges()
     {
         try
         {
@@ -253,13 +269,14 @@ public sealed partial class VmService(ICommandRunner run, AclService acl, Backup
             try { File.Copy(iso, isoCopy, overwrite: true); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             { throw new OperationException(Msg.F("{0} failed: {1}", "Copying the installation image", ex.Message)); }
+            var ovsBridge = !string.IsNullOrEmpty(r.Bridge) && (await OvsBridgesAsync(ct)).Contains(r.Bridge);
             var args = new List<string>
             {
                 "--connect", Connect, "--name", r.Name,
                 "--memory", r.MemoryMb.ToString(CultureInfo.InvariantCulture), "--vcpus", r.Vcpus.ToString(CultureInfo.InvariantCulture),
                 "--disk", $"path={disk},size={r.DiskGb.ToString(CultureInfo.InvariantCulture)},format=qcow2",
                 "--cdrom", isoCopy,
-                "--network", string.IsNullOrEmpty(r.Bridge) ? "network=default" : "bridge=" + r.Bridge,
+                "--network", string.IsNullOrEmpty(r.Bridge) ? "network=default" : "bridge=" + r.Bridge + (ovsBridge ? ",virtualport.type=openvswitch" : ""),
                 "--graphics", "vnc,listen=127.0.0.1",
                 "--osinfo", "detect=on,require=off",
                 "--noautoconsole",

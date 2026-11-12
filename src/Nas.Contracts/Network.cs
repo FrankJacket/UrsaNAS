@@ -4,7 +4,7 @@ namespace Nas.Contracts;
 public sealed record NetAddress(string Address, int PrefixLength, string? Mask, bool Dynamic, string Scope);
 
 /// <summary>
-/// Une interface réseau de la machine. <c>Kind</c> : ethernet, wifi, bridge, bond, vlan ou virtual. <c>Connected</c> : un câble (ou le lien) est détecté.
+/// Une interface réseau de la machine. <c>Kind</c> : ethernet, wifi, bridge, ovs (pont Open vSwitch), bond, vlan ou virtual. <c>Connected</c> : un câble (ou le lien) est détecté.
 /// Les octets sont cumulés depuis le démarrage : l'interface en déduit le débit entre deux lectures.
 /// </summary>
 public sealed record NetIface(string Name, string Kind, bool Connected, string? Mac, int Mtu, int? SpeedMbps, string? Duplex,
@@ -137,3 +137,9 @@ public static class NetRules
 public sealed record OvsStatus(bool Installed, bool Active, bool CanInstall, string? Version, IReadOnlyList<string> Bridges);
 
 public sealed record OvsRequest(bool Enabled);
+
+/// <summary>
+/// Branche une carte Ethernet sur un pont Open vSwitch créé pour elle (l'adressage passe de la carte au pont), ou défait ce montage.
+/// <c>Name</c> : la carte quand <c>Enable</c>, le pont quand on le retire.
+/// </summary>
+public sealed record OvsUplinkRequest(bool Enable, string Name);

@@ -84,10 +84,11 @@ public static partial class NetplanConfig
     }
 
     /// <summary>Fichier d'UrsaNAS pour l'interface : tout l'adressage, que netplan fusionne avec le reste de la définition.</summary>
-    public static string Generate(NetEditRequest r, string section)
+    public static string Generate(NetEditRequest r, string section, string topExtra = "", string ifaceExtra = "")
     {
         var sb = new StringBuilder();
-        sb.Append("# Written by UrsaNAS. Edit the addressing from the Network page.\nnetwork:\n  version: 2\n  ").Append(section).Append(":\n    ").Append(r.Iface).Append(":\n");
+        sb.Append("# Written by UrsaNAS. Edit the addressing from the Network page.\nnetwork:\n  version: 2\n").Append(topExtra)
+            .Append("  ").Append(section).Append(":\n    ").Append(r.Iface).Append(":\n").Append(ifaceExtra);
         var v4 = r.Ipv4;
         var v6 = r.Ipv6;
         sb.Append("      dhcp4: ").Append(v4.Mode == "auto" ? "true" : "false").Append('\n');
@@ -116,6 +117,17 @@ public static partial class NetplanConfig
         if (dns.Count > 0) sb.Append("      nameservers:\n        addresses: [").Append(string.Join(", ", dns)).Append("]\n");
         return sb.ToString();
     }
+
+    /// <summary>
+    /// Pont Open vSwitch <c>bridge.Iface</c> qui porte l'adressage, avec la carte <paramref name="port"/> comme sortie. Le pont reprend l'adresse MAC de la carte
+    /// (le bail DHCP et les réservations du routeur restent valables). La carte n'a plus d'adressage : elle n'est qu'un port.
+    /// </summary>
+    public static string GenerateOvsBridge(NetEditRequest bridge, string port, string? mac)
+        => Generate(bridge, "bridges",
+            topExtra: $"  ethernets:\n    {port}:\n      dhcp4: false\n      dhcp6: false\n      accept-ra: false\n",
+            ifaceExtra: $"      openvswitch: {{}}\n      interfaces: [{port}]\n" + (string.IsNullOrEmpty(mac) ? "" : $"      macaddress: \"{mac}\"\n"));
+
+    public static string OvsFileName(string bridge) => $"90-ursanas-ovs-{bridge}.yaml";
 }
 
 public static partial class IfupdownConfig
@@ -156,15 +168,16 @@ public static partial class IfupdownConfig
     });
 
     /// <summary>Blocs ifupdown de l'interface. Le DNS manuel passe par <c>dns-nameservers</c> (pris en charge avec resolvconf ou systemd-resolved).</summary>
-    public static string Generate(NetEditRequest r, bool addAuto)
+    public static string Generate(NetEditRequest r, bool addAuto, string afterAuto = "", string v4Options = "")
     {
         var sb = new StringBuilder("# Written by UrsaNAS. Edit the addressing from the Network page.\n");
         if (addAuto) sb.Append("auto ").Append(r.Iface).Append('\n');
+        sb.Append(afterAuto);
         var v4 = r.Ipv4;
-        if (v4.Mode == "auto") sb.Append("iface ").Append(r.Iface).Append(" inet dhcp\n");
+        if (v4.Mode == "auto") sb.Append("iface ").Append(r.Iface).Append(" inet dhcp\n").Append(v4Options);
         else
         {
-            sb.Append("iface ").Append(r.Iface).Append(" inet static\n    address ").Append(v4.Address).Append('/').Append(NetRules.PrefixOf4(v4.Netmask)).Append('\n');
+            sb.Append("iface ").Append(r.Iface).Append(" inet static\n").Append(v4Options).Append("    address ").Append(v4.Address).Append('/').Append(NetRules.PrefixOf4(v4.Netmask)).Append('\n');
             if (!string.IsNullOrWhiteSpace(v4.Gateway)) sb.Append("    gateway ").Append(v4.Gateway).Append('\n');
             if (v4.DnsMode == "manual") sb.Append("    dns-nameservers ").Append(string.Join(' ', v4.Dns)).Append('\n');
         }
@@ -177,6 +190,39 @@ public static partial class IfupdownConfig
             if (v6.DnsMode == "manual") sb.Append("    dns-nameservers ").Append(string.Join(' ', v6.Dns)).Append('\n');
         }
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Pont Open vSwitch <c>bridge.Iface</c> avec la carte <paramref name="port"/> pour sortie (paquet openvswitch-switch : options <c>ovs_*</c> d'ifupdown).
+    /// Le bloc est encadré de repères pour qu'UrsaNAS le retrouve et le retire, où qu'il soit écrit.
+    /// </summary>
+    public static string GenerateOvsBridge(NetEditRequest bridge, string port, string? mac)
+    {
+        var options = $"    ovs_type OVSBridge\n    ovs_ports {port}\n" + (string.IsNullOrEmpty(mac) ? "" : $"    ovs_extra set bridge ${{IFACE}} other-config:hwaddr={mac}\n");
+        var b = bridge.Iface;
+        return $"# ursanas-ovs {b} {port}\n"
+            + Generate(bridge, addAuto: true, afterAuto: $"allow-ovs {b}\n", v4Options: options)
+            + $"\nallow-{b} {port}\niface {port} inet manual\n    ovs_bridge {b}\n    ovs_type OVSPort\n# end ursanas-ovs {b}\n";
+    }
+
+    /// <summary>Les montages Open vSwitch d'UrsaNAS écrits dans ce texte : (pont, carte).</summary>
+    public static IReadOnlyList<(string Bridge, string Port)> FindOvs(string text)
+        => text.Replace("\r", "").Split('\n').Select(l => l.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            .Where(p => p.Length == 4 && p[0] == "#" && p[1] == "ursanas-ovs").Select(p => (p[2], p[3])).ToList();
+
+    /// <summary>Retire le bloc écrit par <see cref="GenerateOvsBridge"/> (repère de début à repère de fin).</summary>
+    public static string RemoveOvs(string text, string bridge)
+    {
+        var lines = text.Replace("\r", "").Split('\n');
+        var output = new List<string>();
+        var skipping = false;
+        foreach (var l in lines)
+        {
+            if (!skipping && l.StartsWith($"# ursanas-ovs {bridge} ", StringComparison.Ordinal)) { skipping = true; continue; }
+            if (skipping) { if (l == $"# end ursanas-ovs {bridge}") skipping = false; continue; }
+            output.Add(l);
+        }
+        return string.Join("\n", output);
     }
 
     /// <summary>Contenu de /etc/resolv.conf pour un DNS manuel (ifupdown seul ne le fait pas sans resolvconf).</summary>

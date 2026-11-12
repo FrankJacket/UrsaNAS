@@ -2,6 +2,8 @@
 @inherits AutoRefreshBase
 @inject AgentClient Agent
 @inject IDialogService Dialogs
+@inject NetworkOperations Ops
+@inject ISnackbar Snackbar
 
 <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4" Wrap="Wrap.Wrap">
     <MudText Typo="Typo.h4">@L["Network"]</MudText>
@@ -11,6 +13,10 @@
     <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Settings" OnClick="OpenSettings">@L["Settings"]</MudButton>
 </MudStack>
 
+@if (working is not null)
+{
+    <MudAlert Severity="Severity.Info" Class="mb-4"><MudStack Row="true" AlignItems="AlignItems.Center"><MudProgressCircular Indeterminate="true" Size="Size.Small" /><span>@working</span></MudStack></MudAlert>
+}
 @if (error is not null)
 {
     <MudAlert Severity="Severity.Error" Class="mb-4">@error</MudAlert>
@@ -54,6 +60,14 @@
                     <div @onclick:stopPropagation="true">
                         <MudMenu Icon="@Icons.Material.Filled.MoreVert" Size="Size.Small" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
                             <MudMenuItem Icon="@Icons.Material.Filled.Edit" Disabled="@(!CanEdit(iface))" OnClick="() => Edit(iface)">@L["Edit"]</MudMenuItem>
+                            @if (CanUplink(iface))
+                            {
+                                <MudMenuItem Icon="@Icons.Material.Filled.Hub" Disabled="@(working is not null)" OnClick="() => Uplink(iface)">@L["Use with Open vSwitch"]</MudMenuItem>
+                            }
+                            @if (iface.Kind == "ovs")
+                            {
+                                <MudMenuItem Icon="@Icons.Material.Filled.LinkOff" Disabled="@(working is not null)" OnClick="() => RemoveBridge(iface)">@L["Remove from Open vSwitch"]</MudMenuItem>
+                            }
                         </MudMenu>
                     </div>
                 </MudStack>
@@ -67,7 +81,7 @@
                                 <tr><td>@L["Speed"]</td><td>@(iface.SpeedMbps is { } s ? (s >= 1000 ? $"{s / 1000.0:0.#} Gbit/s" : $"{s} Mbit/s") : "—")@(iface.Duplex is { } d ? " · " + (d == "full" ? L["Full duplex"] : d == "half" ? L["Half duplex"] : d) : "")</td></tr>
                                 <tr><td>MTU</td><td>@(iface.Mtu > 0 ? iface.Mtu : "—")</td></tr>
                                 <tr><td>@L["MAC address"]</td><td><code>@(iface.Mac ?? "—")</code></td></tr>
-                                @if (iface.Master is not null) { <tr><td>@L["Member of"]</td><td>@iface.Master</td></tr> }
+                                @if (iface.Master is not null) { <tr><td>@L["Member of"]</td><td>@(iface.Master == "ovs-system" ? "Open vSwitch" : iface.Master)</td></tr> }
                             </tbody>
                         </MudSimpleTable>
                     </MudItem>
@@ -163,6 +177,38 @@
         await LoadAsync();
     }
 
+    string? working;   // message affiché pendant qu'une opération réseau s'applique et se vérifie
+
+    // Une carte Ethernet libre peut devenir la sortie d'un pont Open vSwitch (le pont n'existe pas encore : l'agent le crée).
+    bool CanUplink(NetIface i) => backend != "none" && i.Kind == "ethernet" && i.Master is null;
+
+    async Task Uplink(NetIface i)
+    {
+        var ok = await Dialogs.ShowMessageBoxAsync(L["Use {0} with Open vSwitch?", i.Name],
+            L["A new Open vSwitch bridge is created with {0} as its uplink, and the IP address, gateway and MAC address of {0} move to the bridge. The change is applied at once and checked; the previous settings come back if the check fails. If you are connected through {0}, the NAS keeps its address but the connection may drop for a few seconds. Open vSwitch must be enabled in the Settings.", i.Name],
+            yesText: L["Continue"], cancelText: L["Cancel"]);
+        if (ok == true) await RunUplink(true, i.Name);
+    }
+
+    async Task RemoveBridge(NetIface bridge)
+    {
+        var ok = await Dialogs.ShowMessageBoxAsync(L["Remove the bridge {0}?", bridge.Name],
+            L["The bridge is deleted and its card gets the IP address, gateway and MAC address back. Virtual machines plugged into this bridge lose their network until you choose another one."],
+            yesText: L["Remove"], cancelText: L["Cancel"]);
+        if (ok == true) await RunUplink(false, bridge.Name);
+    }
+
+    async Task RunUplink(bool enable, string name)
+    {
+        error = null;
+        working = L["Applying and verifying the new settings…"];
+        try { await Ops.UplinkAsync(enable, name); Snackbar.Add(enable ? L["The card is now an Open vSwitch uplink."] : L["The bridge was removed."], Severity.Success); }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable."]; }
+        working = null;
+        await LoadAsync();
+    }
+
     async Task OpenSettings() =>
         await (await Dialogs.ShowAsync<NetworkSettingsDialog>(L["Settings"], new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = false, BackdropClick = false })).Result;
 
@@ -179,7 +225,7 @@
     static string KindIcon(NetIface i) => i.Kind switch
     {
         "wifi" => Icons.Material.Filled.Wifi,
-        "bridge" => Icons.Material.Filled.Hub,
+        "bridge" or "ovs" => Icons.Material.Filled.Hub,
         "bond" => Icons.Material.Filled.CallMerge,
         "vlan" => Icons.Material.Filled.AccountTree,
         _ => i.Connected ? Icons.Material.Filled.SettingsEthernet : Icons.Material.Filled.LinkOff,
@@ -187,6 +233,6 @@
 
     string KindLabel(string kind) => kind switch
     {
-        "ethernet" => L["Ethernet"], "wifi" => "Wi-Fi", "bridge" => L["Bridge"], "bond" => L["Link aggregation"], "vlan" => "VLAN", _ => L["Virtual interface"],
+        "ethernet" => L["Ethernet"], "wifi" => "Wi-Fi", "bridge" => L["Bridge"], "ovs" => L["Open vSwitch bridge"], "bond" => L["Link aggregation"], "vlan" => "VLAN", _ => L["Virtual interface"],
     };
 }

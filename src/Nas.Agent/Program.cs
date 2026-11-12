@@ -147,6 +147,7 @@ public partial class Program
         app.MapGet("/network", (NetworkService n, CancellationToken ct) => Read(async () => Results.Ok(await n.SnapshotAsync(ct))));
         app.MapGet("/network/ovs", (OvsService o, CancellationToken ct) => Read(async () => Results.Ok(await o.StatusAsync(ct))));
         app.MapPost("/network/ovs", (OvsRequest r, OvsService o, CancellationToken ct) => Guard(async () => { await o.SetEnabledAsync(r.Enabled, ct); return Results.NoContent(); }));
+        app.MapPost("/network/ovs/uplink", (OvsUplinkRequest r, NetworkChangeService c, CancellationToken ct) => Guard(async () => { await c.UplinkAsync(r, ct); return Results.NoContent(); }));
         app.MapPost("/network/edit", (NetEditRequest r, NetworkChangeService c, CancellationToken ct) => Guard(async () => { await c.EditAsync(r, ct); return Results.NoContent(); }));
         app.MapGet("/services",(ProtocolService p, CancellationToken ct) => Read(async () => Results.Ok(await p.ListServicesAsync(ct))));
         app.MapPut("/services/{name}", (string name, SetServiceRequest r, ProtocolService p, CancellationToken ct) =>

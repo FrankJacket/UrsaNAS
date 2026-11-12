@@ -236,15 +236,20 @@ public static class VmXml
 
     // ---- Cartes réseau
 
-    static XElement NicXml(string model, string? bridge) =>
-        new("interface", new XAttribute("type", string.IsNullOrEmpty(bridge) ? "network" : "bridge"),
-            string.IsNullOrEmpty(bridge) ? new XElement("source", new XAttribute("network", "default")) : new XElement("source", new XAttribute("bridge", bridge)),
-            new XElement("model", new XAttribute("type", model)));
+    /// <summary><paramref name="ovs"/> : le pont est un pont Open vSwitch, que libvirt branche avec un <c>virtualport</c> du même nom.</summary>
+    static XElement NicXml(string model, string? bridge, bool ovs = false)
+    {
+        var nic = new XElement("interface", new XAttribute("type", string.IsNullOrEmpty(bridge) ? "network" : "bridge"),
+            string.IsNullOrEmpty(bridge) ? new XElement("source", new XAttribute("network", "default")) : new XElement("source", new XAttribute("bridge", bridge)));
+        if (ovs && !string.IsNullOrEmpty(bridge)) nic.Add(new XElement("virtualport", new XAttribute("type", "openvswitch")));
+        nic.Add(new XElement("model", new XAttribute("type", model)));
+        return nic;
+    }
 
-    public static XDocument AddNic(XDocument source, string model, string? bridge)
+    public static XDocument AddNic(XDocument source, string model, string? bridge, bool ovs = false)
     {
         var d = Copy(source);
-        Devices(d).Add(NicXml(model, bridge));
+        Devices(d).Add(NicXml(model, bridge, ovs));
         return d;
     }
 
@@ -259,11 +264,11 @@ public static class VmXml
         return d;
     }
 
-    public static XDocument UpdateNic(XDocument source, string mac, string model, string? bridge)
+    public static XDocument UpdateNic(XDocument source, string mac, string model, string? bridge, bool ovs = false)
     {
         var d = Copy(source);
         var old = Nic(d, mac);
-        var fresh = NicXml(model, bridge);
+        var fresh = NicXml(model, bridge, ovs);
         fresh.AddFirst(new XElement("mac", new XAttribute("address", Attr(old.Element("mac"), "address")))); // la machine garde son adresse
         if (old.Element("boot") is { } boot) fresh.Add(new XElement(boot));
         old.ReplaceWith(fresh);

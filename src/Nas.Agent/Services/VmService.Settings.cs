@@ -151,13 +151,15 @@ public sealed partial class VmService
         if (!Rules.VmNicModels.Contains(model) || Rules.ValidateBridge(bridge) is not null) throw new OperationException(Msg.F("Unknown setting."));
     }
 
+    async Task<bool> IsOvsAsync(string? bridge, CancellationToken ct) => !string.IsNullOrEmpty(bridge) && (await OvsBridgesAsync(ct)).Contains(bridge);
+
     public Task AddNicAsync(string name, AddVmNicRequest r, CancellationToken ct = default)
     {
         CheckNic(r.Model, r.Bridge);
         return Mutate(async () =>
         {
             await RequireStoppedAsync(name, ct);
-            await DefineAsync(VmXml.AddNic(await DefinitionAsync(name, ct), r.Model, r.Bridge), ct);
+            await DefineAsync(VmXml.AddNic(await DefinitionAsync(name, ct), r.Model, r.Bridge, await IsOvsAsync(r.Bridge, ct)), ct);
         });
     }
 
@@ -168,7 +170,7 @@ public sealed partial class VmService
         return Mutate(async () =>
         {
             await RequireStoppedAsync(name, ct);
-            await DefineAsync(VmXml.UpdateNic(await DefinitionAsync(name, ct), r.Mac, r.Model, r.Bridge), ct);
+            await DefineAsync(VmXml.UpdateNic(await DefinitionAsync(name, ct), r.Mac, r.Model, r.Bridge, await IsOvsAsync(r.Bridge, ct)), ct);
         });
     }
 

@@ -168,6 +168,23 @@ public class VmXmlTests
         Assert.Throws<OperationException>(() => VmXml.RemoveNic(Doc(), "52:54:00:00:00:01"));
     }
 
+    [Fact]
+    public void Une_carte_sur_un_pont_open_vswitch_porte_un_virtualport()
+    {
+        var d = VmXml.AddNic(Doc(), "virtio", "ovsbr0", ovs: true);
+        var nic = d.Descendants("interface").Last();
+        Assert.Equal("bridge", (string?)nic.Attribute("type"));
+        Assert.Equal("ovsbr0", (string?)nic.Element("source")!.Attribute("bridge"));
+        Assert.Equal("openvswitch", (string?)nic.Element("virtualport")!.Attribute("type"));
+        Assert.Equal(new VmNic("", "virtio", "ovsbr0"), Read(d).Nics[1]);
+
+        var plain = VmXml.AddNic(Doc(), "virtio", "br0").Descendants("interface").Last();
+        Assert.Null(plain.Element("virtualport"));
+
+        var changed = VmXml.UpdateNic(Doc(), "52:54:00:AA:BB:CC", "virtio", "ovsbr0", ovs: true);
+        Assert.Equal("openvswitch", (string?)changed.Descendants("interface").First().Element("virtualport")!.Attribute("type"));
+    }
+
     [Theory]
     [InlineData(0, 2, 2048, "host-passthrough", "seabios", "q35")]
     [InlineData(1, 0, 2048, "host-passthrough", "seabios", "q35")]

@@ -30,7 +30,7 @@ public static class NetBackend
 public partial class NetworkChangeService(ICommandRunner runner, NetworkService net, IConfiguration cfg, ILogger<NetworkChangeService> log)
 {
     public sealed record FileBackup(string Path, string? Content);
-    public sealed record PendingState(string Iface, string Backend, DateTime DeadlineUtc, List<FileBackup> Files);
+    public sealed record PendingState(string Iface, string Backend, DateTime DeadlineUtc, List<FileBackup> Files, string? DropBridge = null, string? RestoreBridge = null);
 
     readonly SemaphoreSlim lockObj = new(1, 1);
     PendingState? pending;
@@ -71,28 +71,8 @@ public partial class NetworkChangeService(ICommandRunner runner, NetworkService 
             if (pending is not null) throw new OperationException(Msg.F("A network change is already in progress."));
             if (Simulated) return;
             var changes = backend == "netplan" ? PlanNetplan(req, iface.Kind) : PlanIfupdown(req);
-            var backups = changes.Keys.Select(path => new FileBackup(path, File.Exists(path) ? File.ReadAllText(path) : null)).ToList();
-            var state = new PendingState(req.Iface, backend, DateTime.UtcNow.AddSeconds(ConfirmSeconds), backups);
-
-            // L'état d'abord : si l'agent s'arrête en plein milieu, le prochain démarrage sait quoi restaurer. L'échéance sert aussi de garde-fou.
-            Directory.CreateDirectory(Path.GetDirectoryName(StateFile)!);
-            File.WriteAllText(StateFile, JsonSerializer.Serialize(state));
-            pending = state;
-            StartTimer(state.DeadlineUtc);
-            try
-            {
-                foreach (var (path, content) in changes) Write(path, content);
-                await ApplyAsync(backend, req.Iface, ct);
-                if (await VerifyAsync(req, ct) is { } problem) throw new OperationException(problem);
-            }
-            catch
-            {
-                await RollbackLockedAsync(CancellationToken.None);
-                throw;
-            }
-            timer?.Cancel();
-            pending = null;
-            try { File.Delete(StateFile); } catch (IOException) { }
+            var state = new PendingState(req.Iface, backend, DateTime.UtcNow.AddSeconds(ConfirmSeconds), Backups(changes));
+            await CommitLockedAsync(state, changes, null, () => ApplyAsync(backend, req.Iface, null, ct), () => VerifyAsync(t => CheckOnceAsync(req, t), ct));
             log.LogInformation("Network change on {Iface} applied and verified", req.Iface);
         }
         finally { lockObj.Release(); }
@@ -102,13 +82,13 @@ public partial class NetworkChangeService(ICommandRunner runner, NetworkService 
     int VerifyPollMs => cfg.GetValue("Network:VerifyPollMs", 2000);
 
     /// <summary>Attend (jusqu'à <c>VerifySeconds</c>, un bail DHCP peut tarder) que l'état réel corresponde à la demande. Renvoie le problème, ou null si tout est bon.</summary>
-    async Task<string?> VerifyAsync(NetEditRequest req, CancellationToken ct)
+    async Task<string?> VerifyAsync(Func<CancellationToken, Task<string>> check, CancellationToken ct)
     {
         var deadline = DateTime.UtcNow.AddSeconds(VerifySeconds);
         string problem;
         while (true)
         {
-            problem = await CheckOnceAsync(req, ct);
+            problem = await check(ct);
             if (problem.Length == 0) return null;
             if (DateTime.UtcNow >= deadline) return problem;
             await Task.Delay(VerifyPollMs, ct);
@@ -213,7 +193,8 @@ public partial class NetworkChangeService(ICommandRunner runner, NetworkService 
                 try { if (f.Content is null) File.Delete(f.Path); else File.WriteAllText(f.Path, f.Content); }
                 catch (Exception e) when (e is IOException or UnauthorizedAccessException) { log.LogError(e, "Could not restore {Path}", f.Path); }
             }
-            try { await ApplyAsync(state.Backend, state.Iface, ct); }
+            if (state.DropBridge is not null) await DelBridgeAsync(state.DropBridge, ct);
+            try { await ApplyAsync(state.Backend, state.Iface, state.RestoreBridge, ct); }
             catch (OperationException e) { log.LogError("Reapplying the previous network configuration failed: {Message}", e.Message); }
             try { File.Delete(StateFile); } catch (IOException) { }
         }
@@ -231,7 +212,7 @@ public partial class NetworkChangeService(ICommandRunner runner, NetworkService 
         if (secret && !OperatingSystem.IsWindows()) File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite); // netplan se plaint des fichiers lisibles par tous
     }
 
-    async Task ApplyAsync(string backend, string iface, CancellationToken ct)
+    async Task ApplyAsync(string backend, string iface, string? bridge, CancellationToken ct)
     {
         if (backend == "netplan")
         {
@@ -243,6 +224,7 @@ public partial class NetworkChangeService(ICommandRunner runner, NetworkService 
         await runner.RunAsync("ifdown", ["--force", iface], ct: ct);
         await runner.RunAsync("ip", ["-4", "addr", "flush", "dev", iface], ct: ct);
         await runner.RunAsync("ip", ["-6", "addr", "flush", "dev", iface, "scope", "global"], ct: ct);
+        if (bridge is not null) await Run("ifup", [bridge], ct);   // le pont Open vSwitch reprend sa carte comme port
         await Run("ifup", [iface], ct);
     }
 
@@ -256,18 +238,230 @@ public partial class NetworkChangeService(ICommandRunner runner, NetworkService 
         }
     }
 
-    // ---------------------------------------------------------------- plans : chemin → nouveau contenu (null = supprimer)
+    static List<FileBackup> Backups(Dictionary<string, string?> changes)
+        => changes.Keys.Select(path => new FileBackup(path, File.Exists(path) ? File.ReadAllText(path) : null)).ToList();
 
-    Dictionary<string, string?> PlanNetplan(NetEditRequest req, string kind)
+    /// <summary>
+    /// Écrit l'état d'abord (un arrêt de l'agent en plein milieu se rattrape au démarrage), écrit les fichiers, applique, vérifie ; revient en arrière au moindre échec.
+    /// <paramref name="beforeWrite"/> s'exécute avec l'ancienne configuration encore en place (par exemple couper l'interface proprement). À appeler avec le verrou pris.
+    /// </summary>
+    async Task CommitLockedAsync(PendingState state, Dictionary<string, string?> changes, Func<Task>? beforeWrite, Func<Task> apply, Func<Task<string?>> verify)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(StateFile)!);
+        File.WriteAllText(StateFile, JsonSerializer.Serialize(state));
+        pending = state;
+        StartTimer(state.DeadlineUtc);
+        try
+        {
+            if (beforeWrite is not null) await beforeWrite();
+            foreach (var (path, content) in changes) Write(path, content);
+            await apply();
+            if (await verify() is { } problem) throw new OperationException(problem);
+        }
+        catch
+        {
+            await RollbackLockedAsync(CancellationToken.None);
+            throw;
+        }
+        timer?.Cancel();
+        pending = null;
+        try { File.Delete(StateFile); } catch (IOException) { }
+    }
+
+    // ---------------------------------------------------------------- Open vSwitch : une carte comme sortie d'un pont
+
+    async Task DelBridgeAsync(string bridge, CancellationToken ct)
+    {
+        try { await runner.RunAsync("ovs-vsctl", ["--if-exists", "del-br", bridge], ct: ct); }
+        catch (System.ComponentModel.Win32Exception) { }
+    }
+
+    /// <summary>Ponts Open vSwitch existants, ou null si Open vSwitch n'est pas installé ou ne répond pas.</summary>
+    async Task<IReadOnlyList<string>?> OvsBridgesAsync(CancellationToken ct)
+    {
+        try
+        {
+            var r = await runner.RunAsync("ovs-vsctl", ["--timeout=3", "list-br"], ct: ct);
+            return r.ExitCode != 0 ? null : r.StdOut.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        }
+        catch (System.ComponentModel.Win32Exception) { return null; }
+    }
+
+    async Task<IReadOnlyList<string>> PortsAsync(string bridge, CancellationToken ct)
+    {
+        var r = await runner.RunAsync("ovs-vsctl", ["--timeout=3", "list-ports", bridge], ct: ct);
+        return r.ExitCode != 0 ? [] : r.StdOut.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    }
+
+    /// <summary>L'adressage actuel d'une interface, repris tel quel pour <paramref name="newName"/> (la carte qui le passe au pont, ou l'inverse).</summary>
+    public static NetEditRequest Addressing(NetIface i, string newName)
+    {
+        var a4 = i.Ipv4.FirstOrDefault(a => a.Scope == "global");
+        var dns4 = i.Dns.Where(d => !d.Contains(':')).ToList();
+        var v4 = i.Dhcp4 || a4 is null ? new NetIpConfig("auto", null, null, null, "auto", [])
+            : new NetIpConfig("manual", a4.Address, a4.Mask, i.Gateway4, dns4.Count > 0 ? "manual" : "auto", dns4);
+        var a6 = i.Ipv6.FirstOrDefault(a => a.Scope == "global");
+        var dns6 = i.Dns.Where(d => d.Contains(':')).ToList();
+        var v6 = a6 is null || a6.Dynamic ? new NetIpConfig("auto", null, null, null, "auto", [])
+            : new NetIpConfig("manual", a6.Address, a6.PrefixLength.ToString(), i.Gateway6, dns6.Count > 0 ? "manual" : "auto", dns6);
+        return new NetEditRequest(newName, v4, v6);
+    }
+
+    /// <summary>
+    /// Met la carte en sortie d'un pont Open vSwitch créé pour elle (<c>ovsbrN</c>, qui reprend adresse IP, passerelle et adresse MAC), ou défait ce montage.
+    /// Même filet que l'édition d'adresse : appliqué, vérifié (adresse, route, passerelle, carte bien dans le pont), sinon l'ancienne configuration revient.
+    /// </summary>
+    public async Task UplinkAsync(OvsUplinkRequest r, CancellationToken ct = default)
+    {
+        if (!NetRules.IsIfaceName(r.Name)) throw new OperationException(Msg.F("Unknown setting."));
+        var backend = NetBackend.Detect(cfg);
+        if (backend == "none") throw new OperationException(Msg.F("The network configuration of this machine cannot be edited from here (netplan or ifupdown required)."));
+        await lockObj.WaitAsync(ct);
+        try
+        {
+            if (pending is not null) throw new OperationException(Msg.F("A network change is already in progress."));
+            if (Simulated) return;
+            var bridges = await OvsBridgesAsync(ct) ?? throw new OperationException(Msg.F("Open vSwitch is not enabled: turn it on in the network Settings first."));
+            var snap = await net.SnapshotAsync(ct);
+            if (r.Enable) await EnableUplinkAsync(r.Name, backend, snap, bridges, ct);
+            else await DisableUplinkAsync(r.Name, backend, snap, ct);
+        }
+        finally { lockObj.Release(); }
+    }
+
+    async Task EnableUplinkAsync(string port, string backend, NetSnapshot snap, IReadOnlyList<string> bridges, CancellationToken ct)
+    {
+        var iface = snap.Interfaces.FirstOrDefault(i => i.Name == port) ?? throw new OperationException(Msg.F("Network interface {0} not found.", port));
+        if (iface.Kind != "ethernet" || iface.Master is not null) throw new OperationException(Msg.F("This interface cannot be edited here."));
+        var bridge = Enumerable.Range(0, 100).Select(n => "ovsbr" + n).First(b => !bridges.Contains(b) && snap.Interfaces.All(i => i.Name != b));
+        var req = Addressing(iface, bridge);
+        if (NetRules.Validate(req) is { } invalid) throw new OperationException(invalid);
+        if (backend == "ifupdown" && ((req.Ipv4.Mode == "auto" && req.Ipv4.DnsMode == "manual") || (req.Ipv6.Mode == "auto" && req.Ipv6.DnsMode == "manual")))
+            throw new OperationException(Msg.F("Manual DNS servers need a manual address on this system."));
+
+        var changes = backend == "netplan" ? PlanOvsNetplan(req, port, iface.Mac) : PlanOvsIfupdown(req, port, iface.Mac);
+        var state = new PendingState(port, backend, DateTime.UtcNow.AddSeconds(ConfirmSeconds), Backups(changes), DropBridge: bridge);
+        await CommitLockedAsync(state, changes,
+            backend == "ifupdown" ? () => runner.RunAsync("ifdown", ["--force", port], ct: ct) : null,   // avec l'ancien bloc encore en place : le client DHCP s'arrête proprement
+            () => ApplyAsync(backend, port, bridge, ct),
+            () => VerifyAsync(async t =>
+            {
+                var problem = await CheckOnceAsync(req, t);
+                if (problem.Length > 0) return problem;
+                return (await PortsAsync(bridge, t)).Contains(port) ? ""
+                    : Msg.F("The new settings could not be verified: {0} is not a port of the bridge {1}. The previous settings were restored.", port, bridge);
+            }, ct));
+        log.LogInformation("{Port} is now the uplink of the Open vSwitch bridge {Bridge}", port, bridge);
+    }
+
+    async Task DisableUplinkAsync(string bridge, string backend, NetSnapshot snap, CancellationToken ct)
+    {
+        var iface = snap.Interfaces.FirstOrDefault(i => i.Name == bridge) ?? throw new OperationException(Msg.F("Network interface {0} not found.", bridge));
+        if (iface.Kind != "ovs") throw new OperationException(Msg.F("This bridge was not created by UrsaNAS."));
+        var pre = new Dictionary<string, string?>();
+        string? port = null;
+        if (backend == "netplan")
+        {
+            var ours = P("/etc/netplan/" + NetplanConfig.OvsFileName(bridge));
+            if (File.Exists(ours))
+            {
+                pre[ours] = null;
+                port = Regex.Match(File.ReadAllText(ours), @"interfaces: \[([^\],]+)\]") is { Success: true } m ? m.Groups[1].Value.Trim() : null;
+            }
+        }
+        else
+        {
+            var main = P("/etc/network/interfaces");
+            var dir = P("/etc/network/interfaces.d");
+            var files = new List<string> { main };
+            if (Directory.Exists(dir)) files.AddRange(Directory.GetFiles(dir).Where(f => Regex.IsMatch(Path.GetFileName(f), "^[A-Za-z0-9_-]+$")));
+            foreach (var f in files.Where(File.Exists))
+            {
+                var text = File.ReadAllText(f);
+                var found = IfupdownConfig.FindOvs(text).Where(o => o.Bridge == bridge).Select(o => o.Port).FirstOrDefault();
+                if (found is null) continue;
+                port = found;
+                var rest = IfupdownConfig.RemoveOvs(text, bridge);
+                pre[f] = f != main && rest.Trim().Length == 0 ? null : rest;
+            }
+        }
+        if (port is null || !NetRules.IsIfaceName(port)) throw new OperationException(Msg.F("This bridge was not created by UrsaNAS."));
+
+        var req = Addressing(iface, port);
+        if (NetRules.Validate(req) is { } invalid) throw new OperationException(invalid);
+        if (backend == "ifupdown" && ((req.Ipv4.Mode == "auto" && req.Ipv4.DnsMode == "manual") || (req.Ipv6.Mode == "auto" && req.Ipv6.DnsMode == "manual")))
+            throw new OperationException(Msg.F("Manual DNS servers need a manual address on this system."));
+        var changes = backend == "netplan" ? PlanNetplan(req, "ethernet", pre) : PlanIfupdown(req, pre);
+        var state = new PendingState(port, backend, DateTime.UtcNow.AddSeconds(ConfirmSeconds), Backups(changes), RestoreBridge: bridge);
+        await CommitLockedAsync(state, changes,
+            backend == "ifupdown" ? () => runner.RunAsync("ifdown", ["--force", bridge], ct: ct) : null,
+            async () => { await DelBridgeAsync(bridge, ct); await ApplyAsync(backend, port, null, ct); },
+            () => VerifyAsync(t => CheckOnceAsync(req, t), ct));
+        log.LogInformation("The Open vSwitch bridge {Bridge} was removed; {Port} carries the addressing again", bridge, port);
+    }
+
+    Dictionary<string, string?> PlanOvsNetplan(NetEditRequest bridgeReq, string port, string? mac)
     {
         var dir = P("/etc/netplan");
-        var ours = Path.Combine(dir, $"90-ursanas-{req.Iface}.yaml");
+        var ours = Path.Combine(dir, NetplanConfig.OvsFileName(bridgeReq.Iface));
         var changes = new Dictionary<string, string?>();
-        string? section = null;
         foreach (var file in Directory.GetFiles(dir, "*.yaml").OrderBy(f => f, StringComparer.Ordinal))
         {
             if (file == ours) continue;
             var text = File.ReadAllText(file);
+            if (NetplanConfig.SectionOf(text, port) is not { } s) continue;
+            if (s != "ethernets") throw new OperationException(Msg.F("This interface cannot be edited here."));
+            var stripped = NetplanConfig.StripIface(text, port);
+            if (stripped != Lf(text)) changes[file] = stripped;
+        }
+        changes[ours] = NetplanConfig.GenerateOvsBridge(bridgeReq, port, mac);
+        GuardCloudInit(changes);
+        return changes;
+    }
+
+    Dictionary<string, string?> PlanOvsIfupdown(NetEditRequest bridgeReq, string port, string? mac)
+    {
+        var main = P("/etc/network/interfaces");
+        var dir = P("/etc/network/interfaces.d");
+        var ours = Path.Combine(dir, $"ursanas-ovs-{bridgeReq.Iface}");
+        var files = new List<string> { main };
+        if (Directory.Exists(dir)) files.AddRange(Directory.GetFiles(dir).Where(f => f != ours && Regex.IsMatch(Path.GetFileName(f), "^[A-Za-z0-9_-]+$")).OrderBy(f => f, StringComparer.Ordinal));
+        var changes = new Dictionary<string, string?>();
+        foreach (var file in files.Where(File.Exists))
+        {
+            var text = File.ReadAllText(file);
+            var stripped = IfupdownConfig.Strip(text, port);
+            if (stripped != Lf(text)) changes[file] = stripped;
+        }
+        var block = IfupdownConfig.GenerateOvsBridge(bridgeReq, port, mac);
+        var mainText = changes.TryGetValue(main, out var m) && m is not null ? m : File.ReadAllText(main);
+        if (SourcesDir().IsMatch(mainText)) changes[ours] = block;
+        else changes[main] = mainText.TrimEnd('\n') + "\n\n" + block;
+        return changes;
+    }
+
+    /// <summary>cloud-init réécrirait sa propre configuration réseau au prochain démarrage : on la désactive si on a dû toucher son fichier.</summary>
+    void GuardCloudInit(Dictionary<string, string?> changes)
+    {
+        if (!changes.Keys.Any(f => Path.GetFileName(f).Contains("cloud-init", StringComparison.Ordinal)) || !Directory.Exists(P("/etc/cloud"))) return;
+        var marker = Path.Combine(P("/etc/cloud/cloud.cfg.d"), "99-disable-network-config.cfg");
+        if (!File.Exists(marker)) changes[marker] = "# Written by UrsaNAS: the network is configured from the UrsaNAS Network page.\nnetwork: {config: disabled}\n";
+    }
+
+    // ---------------------------------------------------------------- plans : chemin → nouveau contenu (null = supprimer)
+
+    Dictionary<string, string?> PlanNetplan(NetEditRequest req, string kind, Dictionary<string, string?>? pre = null)
+    {
+        var dir = P("/etc/netplan");
+        var ours = Path.Combine(dir, $"90-ursanas-{req.Iface}.yaml");
+        var changes = pre is null ? new Dictionary<string, string?>() : new Dictionary<string, string?>(pre);
+        string? section = null;
+        foreach (var file in Directory.GetFiles(dir, "*.yaml").OrderBy(f => f, StringComparer.Ordinal))
+        {
+            if (file == ours) continue;
+            string text;
+            if (changes.TryGetValue(file, out var preText)) { if (preText is null) continue; text = preText; }   // déjà modifié (ou retiré) par l'opération en cours
+            else text = File.ReadAllText(file);
             if (NetplanConfig.SectionOf(text, req.Iface) is not { } s) continue;
             if (s is not ("ethernets" or "bridges")) throw new OperationException(Msg.F("This interface cannot be edited here."));
             section ??= s;
@@ -286,7 +480,7 @@ public partial class NetworkChangeService(ICommandRunner runner, NetworkService 
         return changes;
     }
 
-    Dictionary<string, string?> PlanIfupdown(NetEditRequest req)
+    Dictionary<string, string?> PlanIfupdown(NetEditRequest req, Dictionary<string, string?>? pre = null)
     {
         var main = P("/etc/network/interfaces");
         var dir = P("/etc/network/interfaces.d");
@@ -294,12 +488,14 @@ public partial class NetworkChangeService(ICommandRunner runner, NetworkService 
         var files = new List<string> { main };
         if (Directory.Exists(dir)) files.AddRange(Directory.GetFiles(dir).Where(f => f != ours && Regex.IsMatch(Path.GetFileName(f), "^[A-Za-z0-9_-]+$")).OrderBy(f => f, StringComparer.Ordinal));
 
-        var changes = new Dictionary<string, string?>();
+        var changes = pre is null ? new Dictionary<string, string?>() : new Dictionary<string, string?>(pre);
         var hasAuto = false;
         foreach (var file in files)
         {
             if (!File.Exists(file)) continue;
-            var text = File.ReadAllText(file);
+            string text;
+            if (changes.TryGetValue(file, out var preText)) { if (preText is null) continue; text = preText; }
+            else text = File.ReadAllText(file);
             hasAuto |= IfupdownConfig.HasAuto(text, req.Iface);
             var stripped = IfupdownConfig.Strip(text, req.Iface);
             if (stripped != Lf(text)) changes[file] = stripped;

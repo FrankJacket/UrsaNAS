@@ -37,7 +37,7 @@ public class NetworkService(ICommandRunner runner, IConfiguration cfg)
 
     // Les interfaces gérées par Docker et libvirt (ponts, paires veth, cartes des machines) ne sont pas des cartes du NAS.
     static bool Hidden(string name, string? kind)
-        => name == "lo" || kind is "veth" or "tun" or "tap"
+        => name is "lo" or "ovs-system" || kind is "veth" or "tun" or "tap"
            || name.StartsWith("docker", StringComparison.Ordinal) || name.StartsWith("br-", StringComparison.Ordinal)
            || name.StartsWith("virbr", StringComparison.Ordinal) || name.StartsWith("vnet", StringComparison.Ordinal)
            || name.StartsWith("veth", StringComparison.Ordinal) || name.StartsWith("tap", StringComparison.Ordinal);
@@ -78,7 +78,7 @@ public class NetworkService(ICommandRunner runner, IConfiguration cfg)
                 ? fl.EnumerateArray().Select(x => x.GetString()).ToHashSet() : [];
             var type = kind switch
             {
-                "bridge" => "bridge", "bond" => "bond", "vlan" => "vlan",
+                "bridge" => "bridge", "bond" => "bond", "vlan" => "vlan", "openvswitch" => "ovs",
                 null when sys(name, "wireless") is not null || sys(name, "phy80211") is not null => "wifi",
                 null => "ethernet",
                 _ => "virtual",
@@ -94,7 +94,7 @@ public class NetworkService(ICommandRunner runner, IConfiguration cfg)
                 speed, duplex, v4, v6, gw4.GetValueOrDefault(name)?.Via, gw6.GetValueOrDefault(name)?.Via, hasRoute ? dns : [],
                 dhcp, Str(e, "master"), rx, tx));
         }
-        return result.OrderBy(i => i.Kind is "bridge" or "bond" or "vlan" ? 1 : 0).ThenBy(i => i.Name, StringComparer.Ordinal).ToList();
+        return result.OrderBy(i => i.Kind is "bridge" or "ovs" or "bond" or "vlan" ? 1 : 0).ThenBy(i => i.Name, StringComparer.Ordinal).ToList();
     }
 
     sealed record Gateway(string Via, bool Dhcp);
