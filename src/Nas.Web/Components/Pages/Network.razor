@@ -8,8 +8,7 @@
 <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4" Wrap="Wrap.Wrap">
     <MudText Typo="Typo.h4">@L["Network"]</MudText>
     <MudSpacer />
-    @* Agrégation de liens : étape suivante. *@
-    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.CallMerge" Disabled="true">@L["Create Link Aggregation"]</MudButton>
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.CallMerge" Disabled="@(backend == "none" || working is not null)" OnClick="CreateBond">@L["Create Link Aggregation"]</MudButton>
     <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Settings" OnClick="OpenSettings">@L["Settings"]</MudButton>
 </MudStack>
 
@@ -63,6 +62,10 @@
                             @if (CanUplink(iface))
                             {
                                 <MudMenuItem Icon="@Icons.Material.Filled.Hub" Disabled="@(working is not null)" OnClick="() => Uplink(iface)">@L["Use with Open vSwitch"]</MudMenuItem>
+                            }
+                            @if (iface.Kind == "bond")
+                            {
+                                <MudMenuItem Icon="@Icons.Material.Filled.LinkOff" Disabled="@(working is not null)" OnClick="() => RemoveBond(iface)">@L["Remove the aggregation"]</MudMenuItem>
                             }
                             @if (iface.Kind == "ovs")
                             {
@@ -179,8 +182,8 @@
 
     string? working;   // message affiché pendant qu'une opération réseau s'applique et se vérifie
 
-    // Une carte Ethernet libre peut devenir la sortie d'un pont Open vSwitch (le pont n'existe pas encore : l'agent le crée).
-    bool CanUplink(NetIface i) => backend != "none" && i.Kind == "ethernet" && i.Master is null;
+    // Une carte Ethernet libre, ou une agrégation de liens, peut devenir la sortie d'un pont Open vSwitch (le pont n'existe pas encore : l'agent le crée).
+    bool CanUplink(NetIface i) => backend != "none" && i.Kind is "ethernet" or "bond" && i.Master is null;
 
     async Task Uplink(NetIface i)
     {
@@ -203,6 +206,33 @@
         error = null;
         working = L["Applying and verifying the new settings…"];
         try { await Ops.UplinkAsync(enable, name); Snackbar.Add(enable ? L["The card is now an Open vSwitch uplink."] : L["The bridge was removed."], Severity.Success); }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable."]; }
+        working = null;
+        await LoadAsync();
+    }
+
+    async Task CreateBond()
+    {
+        var cards = ifaces.Where(i => i.Kind == "ethernet" && CanUplink(i)).ToList();   // cartes Ethernet libres
+        var parameters = new DialogParameters<NetworkBondDialog> { { x => x.Cards, cards } };
+        await (await Dialogs.ShowAsync<NetworkBondDialog>(L["Create Link Aggregation"], parameters, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = false, BackdropClick = false })).Result;
+        await LoadAsync();
+    }
+
+    async Task RemoveBond(NetIface bond)
+    {
+        var ok = await Dialogs.ShowMessageBoxAsync(L["Remove the aggregation {0}?", bond.Name],
+            L["The aggregation is deleted and its first card gets the IP address, gateway and MAC address back; the other cards stay without settings."],
+            yesText: L["Remove"], cancelText: L["Cancel"]);
+        if (ok == true) await RunBond(bond.Name);
+    }
+
+    async Task RunBond(string name)
+    {
+        error = null;
+        working = L["Applying and verifying the new settings…"];
+        try { await Ops.BondAsync(new BondRequest(false, name, [], "")); Snackbar.Add(L["The aggregation was removed."], Severity.Success); }
         catch (AgentException e) { error = L.Translate(e.Message); }
         catch (HttpRequestException) { error = L["Agent unreachable."]; }
         working = null;

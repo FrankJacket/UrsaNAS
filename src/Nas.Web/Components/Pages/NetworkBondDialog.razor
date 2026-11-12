@@ -1,0 +1,83 @@
+@inject NetworkOperations Ops
+
+@* Agrégation de liens : plusieurs cartes Ethernet libres réunies en une seule interface (reprise sur panne ou débit cumulé). *@
+<MudDialog>
+    <DialogContent>
+        @if (error is not null)
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-3">@error</MudAlert>
+        }
+        @if (done)
+        {
+            <MudAlert Severity="Severity.Success">@L["The new settings are applied and verified."]</MudAlert>
+        }
+        else if (busy)
+        {
+            <MudStack AlignItems="AlignItems.Center" Class="pa-6">
+                <MudProgressCircular Indeterminate="true" />
+                <MudText>@L["Applying and verifying the new settings…"]</MudText>
+            </MudStack>
+        }
+        else if (Cards.Count < 2)
+        {
+            <MudAlert Severity="Severity.Info">@L["Link aggregation needs at least two free Ethernet cards."]</MudAlert>
+        }
+        else
+        {
+            <MudText Typo="Typo.subtitle2" Class="mb-1">@L["Network cards"]</MudText>
+            @foreach (var c in Cards)
+            {
+                var name = c.Name;
+                <MudCheckBox T="bool" Value="@selected.Contains(name)" ValueChanged="(bool on) => Toggle(name, on)" Color="Color.Primary" Dense="true"
+                             Label="@($"{name} — {(c.Ipv4.Count > 0 ? c.Ipv4[0].Address : L["Not configured"])}{(c.Connected ? "" : " · " + L["Not connected"])}")" />
+            }
+            <MudSelect T="string" @bind-Value="mode" Label="@L["Mode"]" Class="mt-3">
+                <MudSelectItem T="string" Value="@("active-backup")">@L["Failover (active-backup): one card works, the other takes over"]</MudSelectItem>
+                <MudSelectItem T="string" Value="@("balance-alb")">@L["Adaptive load balancing (balance-alb): no switch setting needed"]</MudSelectItem>
+                <MudSelectItem T="string" Value="@("802.3ad")">@L["LACP (802.3ad): the switch ports must be set up for LACP"]</MudSelectItem>
+            </MudSelect>
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-3">
+                @L["The IP address, gateway and MAC address of one of the cards move to the aggregation; the other cards lose their own settings. The change is applied at once and checked, and the previous settings come back if the check fails. The connection may drop for a few seconds. If your computer loses access anyway, correcting the network settings is up to you, from the machine's console."]
+            </MudAlert>
+        }
+    </DialogContent>
+    <DialogActions>
+        @if (done)
+        {
+            <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="() => Dialog.Close(DialogResult.Ok(true))">@L["Close"]</MudButton>
+        }
+        else
+        {
+            <MudButton Disabled="busy" OnClick="() => Dialog.Cancel()">@L["Cancel"]</MudButton>
+            <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(busy || selected.Count < 2)" OnClick="Apply">@L["Create"]</MudButton>
+        }
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance Dialog { get; set; } = default!;
+
+    /// <summary>Cartes Ethernet libres (ni déjà membres d'une agrégation ou d'un pont).</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<NetIface> Cards { get; set; } = [];
+
+    readonly HashSet<string> selected = new();
+    string mode = "active-backup";
+    string? error;
+    bool busy, done;
+
+    void Toggle(string name, bool on) { if (on) selected.Add(name); else selected.Remove(name); }
+
+    async Task Apply()
+    {
+        error = null;
+        busy = true;
+        try
+        {
+            await Ops.BondAsync(new BondRequest(true, "", Cards.Select(c => c.Name).Where(selected.Contains).ToList(), mode));
+            done = true;
+        }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable."]; }
+        busy = false;
+    }
+}

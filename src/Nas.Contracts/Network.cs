@@ -143,3 +143,21 @@ public sealed record OvsRequest(bool Enabled);
 /// <c>Name</c> : la carte quand <c>Enable</c>, le pont quand on le retire.
 /// </summary>
 public sealed record OvsUplinkRequest(bool Enable, string Name);
+
+/// <summary>
+/// Crée une agrégation de liens (bond) avec ces cartes, ou la défait. L'adressage d'une des cartes passe à l'agrégation.
+/// <c>Mode</c> : <c>active-backup</c> (reprise sur panne, sans réglage du commutateur), <c>802.3ad</c> (LACP, le commutateur doit le gérer) ou <c>balance-alb</c>.
+/// Pour retirer, <c>Name</c> est l'agrégation (les autres champs sont ignorés).
+/// </summary>
+public sealed record BondRequest(bool Enable, string Name, IReadOnlyList<string> Members, string Mode)
+{
+    public static readonly string[] Modes = ["active-backup", "802.3ad", "balance-alb"];
+
+    public static string? Validate(BondRequest r)
+    {
+        if (!r.Enable) return NetRules.IsIfaceName(r.Name) ? null : Msg.F("Unknown setting.");
+        if (r.Members.Count is < 2 or > 8 || r.Members.Any(m => !NetRules.IsIfaceName(m)) || r.Members.Distinct().Count() != r.Members.Count)
+            return Msg.F("Choose two or more network cards.");
+        return Modes.Contains(r.Mode) ? null : Msg.F("Unknown setting.");
+    }
+}

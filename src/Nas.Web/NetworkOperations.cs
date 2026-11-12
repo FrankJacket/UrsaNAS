@@ -36,6 +36,21 @@ public class NetworkOperations(AgentClient agent, Repo repo, AuthenticationState
         await repo.AuditAsync(actor, enable ? "Network card moved to Open vSwitch" : "Open vSwitch bridge removed", name);
     }
 
+    /// <summary>Crée une agrégation de liens avec ces cartes, ou la retire (<c>Name</c> : l'agrégation).</summary>
+    public async Task BondAsync(BondRequest r)
+    {
+        if (BondRequest.Validate(r) is { } e) throw new AgentException(e);
+        var actor = await ActorAsync();
+        var detail = r.Enable ? $"{string.Join(", ", r.Members)} ({r.Mode})" : r.Name;
+        try { await agent.BondAsync(r); }
+        catch (AgentException ex)
+        {
+            await repo.AuditAsync(actor, "Link aggregation change rejected", $"{detail} — {ex.Message}");
+            throw;
+        }
+        await repo.AuditAsync(actor, r.Enable ? "Link aggregation created" : "Link aggregation removed", detail);
+    }
+
     public async Task EditAsync(NetEditRequest r)
     {
         if (NetRules.Validate(r) is { } e) throw new AgentException(e);

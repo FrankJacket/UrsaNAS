@@ -30,7 +30,7 @@ public static class NetBackend
 public partial class NetworkChangeService(ICommandRunner runner, NetworkService net, IConfiguration cfg, ILogger<NetworkChangeService> log)
 {
     public sealed record FileBackup(string Path, string? Content);
-    public sealed record PendingState(string Iface, string Backend, DateTime DeadlineUtc, List<FileBackup> Files, string? DropBridge = null, string? RestoreBridge = null);
+    public sealed record PendingState(string Iface, string Backend, DateTime DeadlineUtc, List<FileBackup> Files, string? DropBridge = null, string? RestoreBridge = null, string? DropLink = null);
 
     readonly SemaphoreSlim lockObj = new(1, 1);
     PendingState? pending;
@@ -194,6 +194,7 @@ public partial class NetworkChangeService(ICommandRunner runner, NetworkService 
                 catch (Exception e) when (e is IOException or UnauthorizedAccessException) { log.LogError(e, "Could not restore {Path}", f.Path); }
             }
             if (state.DropBridge is not null) await DelBridgeAsync(state.DropBridge, ct);
+            if (state.DropLink is not null) await DelLinkAsync(state.DropLink, ct);
             try { await ApplyAsync(state.Backend, state.Iface, state.RestoreBridge, ct); }
             catch (OperationException e) { log.LogError("Reapplying the previous network configuration failed: {Message}", e.Message); }
             try { File.Delete(StateFile); } catch (IOException) { }
@@ -221,11 +222,17 @@ public partial class NetworkChangeService(ICommandRunner runner, NetworkService 
             return;
         }
         // ifupdown : on coupe l'interface, on vide ses adresses (l'ancienne ne doit pas rester), puis on la remonte avec la nouvelle configuration.
-        await runner.RunAsync("ifdown", ["--force", iface], ct: ct);
-        await runner.RunAsync("ip", ["-4", "addr", "flush", "dev", iface], ct: ct);
-        await runner.RunAsync("ip", ["-6", "addr", "flush", "dev", iface, "scope", "global"], ct: ct);
-        if (bridge is not null) await Run("ifup", [bridge], ct);   // le pont Open vSwitch reprend sa carte comme port
-        await Run("ifup", [iface], ct);
+        // « iface » peut nommer plusieurs cartes séparées par des virgules (les membres d'une agrégation).
+        var names = iface.Split(',');
+        foreach (var n in names)
+        {
+            await runner.RunAsync("ifdown", ["--force", n], ct: ct);
+            await runner.RunAsync("ip", ["-4", "addr", "flush", "dev", n], ct: ct);
+            await runner.RunAsync("ip", ["-6", "addr", "flush", "dev", n, "scope", "global"], ct: ct);
+        }
+        if (bridge is not null) await Run("ifup", [bridge], ct);   // le pont Open vSwitch reprend sa carte comme port; l'agrégation reprend ses membres
+        if (bridge is not null && bridge.StartsWith("bond", StringComparison.Ordinal)) return;   // ifenslave a déjà enrôlé les membres
+        foreach (var n in names) await Run("ifup", [n], ct);
     }
 
     async Task Run(string file, string[] args, CancellationToken ct)
@@ -332,7 +339,7 @@ public partial class NetworkChangeService(ICommandRunner runner, NetworkService 
     async Task EnableUplinkAsync(string port, string backend, NetSnapshot snap, IReadOnlyList<string> bridges, CancellationToken ct)
     {
         var iface = snap.Interfaces.FirstOrDefault(i => i.Name == port) ?? throw new OperationException(Msg.F("Network interface {0} not found.", port));
-        if (iface.Kind != "ethernet" || iface.Master is not null) throw new OperationException(Msg.F("This interface cannot be edited here."));
+        if (iface.Kind is not ("ethernet" or "bond") || iface.Master is not null) throw new OperationException(Msg.F("This interface cannot be edited here."));   // une carte, ou une agrégation de liens
         var bridge = Enumerable.Range(0, 100).Select(n => "ovsbr" + n).First(b => !bridges.Contains(b) && snap.Interfaces.All(i => i.Name != b));
         var req = Addressing(iface, bridge);
         if (NetRules.Validate(req) is { } invalid) throw new OperationException(invalid);
@@ -360,6 +367,7 @@ public partial class NetworkChangeService(ICommandRunner runner, NetworkService 
         if (iface.Kind != "ovs") throw new OperationException(Msg.F("This bridge was not created by UrsaNAS."));
         var pre = new Dictionary<string, string?>();
         string? port = null;
+        var portOptions = "";
         if (backend == "netplan")
         {
             var ours = P("/etc/netplan/" + NetplanConfig.OvsFileName(bridge));
@@ -381,6 +389,7 @@ public partial class NetworkChangeService(ICommandRunner runner, NetworkService 
                 var found = IfupdownConfig.FindOvs(text).Where(o => o.Bridge == bridge).Select(o => o.Port).FirstOrDefault();
                 if (found is null) continue;
                 port = found;
+                portOptions = IfupdownConfig.BondOptions(text, found);   // si le port est une agrégation, ses options reviennent avec elle
                 var rest = IfupdownConfig.RemoveOvs(text, bridge);
                 pre[f] = f != main && rest.Trim().Length == 0 ? null : rest;
             }
@@ -391,7 +400,7 @@ public partial class NetworkChangeService(ICommandRunner runner, NetworkService 
         if (NetRules.Validate(req) is { } invalid) throw new OperationException(invalid);
         if (backend == "ifupdown" && ((req.Ipv4.Mode == "auto" && req.Ipv4.DnsMode == "manual") || (req.Ipv6.Mode == "auto" && req.Ipv6.DnsMode == "manual")))
             throw new OperationException(Msg.F("Manual DNS servers need a manual address on this system."));
-        var changes = backend == "netplan" ? PlanNetplan(req, "ethernet", pre) : PlanIfupdown(req, pre);
+        var changes = backend == "netplan" ? PlanNetplan(req, "ethernet", pre) : PlanIfupdown(req, pre, portOptions);
         var state = new PendingState(port, backend, DateTime.UtcNow.AddSeconds(ConfirmSeconds), Backups(changes), RestoreBridge: bridge);
         await CommitLockedAsync(state, changes,
             backend == "ifupdown" ? () => runner.RunAsync("ifdown", ["--force", bridge], ct: ct) : null,
@@ -405,16 +414,18 @@ public partial class NetworkChangeService(ICommandRunner runner, NetworkService 
         var dir = P("/etc/netplan");
         var ours = Path.Combine(dir, NetplanConfig.OvsFileName(bridgeReq.Iface));
         var changes = new Dictionary<string, string?>();
+        var portSection = "ethernets";
         foreach (var file in Directory.GetFiles(dir, "*.yaml").OrderBy(f => f, StringComparer.Ordinal))
         {
             if (file == ours) continue;
             var text = File.ReadAllText(file);
             if (NetplanConfig.SectionOf(text, port) is not { } s) continue;
-            if (s != "ethernets") throw new OperationException(Msg.F("This interface cannot be edited here."));
+            if (s is not ("ethernets" or "bonds")) throw new OperationException(Msg.F("This interface cannot be edited here."));
+            portSection = s;
             var stripped = NetplanConfig.StripIface(text, port);
             if (stripped != Lf(text)) changes[file] = stripped;
         }
-        changes[ours] = NetplanConfig.GenerateOvsBridge(bridgeReq, port, mac);
+        changes[ours] = NetplanConfig.GenerateOvsBridge(bridgeReq, port, mac, portSection);
         GuardCloudInit(changes);
         return changes;
     }
@@ -427,13 +438,15 @@ public partial class NetworkChangeService(ICommandRunner runner, NetworkService 
         var files = new List<string> { main };
         if (Directory.Exists(dir)) files.AddRange(Directory.GetFiles(dir).Where(f => f != ours && Regex.IsMatch(Path.GetFileName(f), "^[A-Za-z0-9_-]+$")).OrderBy(f => f, StringComparer.Ordinal));
         var changes = new Dictionary<string, string?>();
+        var portOptions = "";   // pour une agrégation : ses options bond-* suivent le port
         foreach (var file in files.Where(File.Exists))
         {
             var text = File.ReadAllText(file);
+            if (portOptions.Length == 0) portOptions = IfupdownConfig.BondOptions(text, port);
             var stripped = IfupdownConfig.Strip(text, port);
             if (stripped != Lf(text)) changes[file] = stripped;
         }
-        var block = IfupdownConfig.GenerateOvsBridge(bridgeReq, port, mac);
+        var block = IfupdownConfig.GenerateOvsBridge(bridgeReq, port, mac, portOptions);
         var mainText = changes.TryGetValue(main, out var m) && m is not null ? m : File.ReadAllText(main);
         if (SourcesDir().IsMatch(mainText)) changes[ours] = block;
         else changes[main] = mainText.TrimEnd('\n') + "\n\n" + block;
@@ -446,6 +459,170 @@ public partial class NetworkChangeService(ICommandRunner runner, NetworkService 
         if (!changes.Keys.Any(f => Path.GetFileName(f).Contains("cloud-init", StringComparison.Ordinal)) || !Directory.Exists(P("/etc/cloud"))) return;
         var marker = Path.Combine(P("/etc/cloud/cloud.cfg.d"), "99-disable-network-config.cfg");
         if (!File.Exists(marker)) changes[marker] = "# Written by UrsaNAS: the network is configured from the UrsaNAS Network page.\nnetwork: {config: disabled}\n";
+    }
+
+    // ---------------------------------------------------------------- agrégation de liens (bond)
+
+    async Task DelLinkAsync(string link, CancellationToken ct)
+    {
+        try { await runner.RunAsync("ip", ["link", "delete", link], ct: ct); }
+        catch (System.ComponentModel.Win32Exception) { }
+    }
+
+    /// <summary>
+    /// Réunit des cartes Ethernet libres en une agrégation <c>bondN</c> qui reprend l'adressage (et l'adresse MAC) d'une d'elles, ou défait cette agrégation.
+    /// Même filet que les autres changements : appliqué, vérifié (adresse, route, passerelle, membres enrôlés), sinon l'ancienne configuration revient.
+    /// </summary>
+    public async Task BondAsync(BondRequest r, CancellationToken ct = default)
+    {
+        if (BondRequest.Validate(r) is { } invalid) throw new OperationException(invalid);
+        var backend = NetBackend.Detect(cfg);
+        if (backend == "none") throw new OperationException(Msg.F("The network configuration of this machine cannot be edited from here (netplan or ifupdown required)."));
+        await lockObj.WaitAsync(ct);
+        try
+        {
+            if (pending is not null) throw new OperationException(Msg.F("A network change is already in progress."));
+            if (Simulated) return;
+            var snap = await net.SnapshotAsync(ct);
+            if (r.Enable) await CreateBondAsync(r, backend, snap, ct);
+            else await RemoveBondAsync(r.Name, backend, snap, ct);
+        }
+        finally { lockObj.Release(); }
+    }
+
+    async Task CreateBondAsync(BondRequest r, string backend, NetSnapshot snap, CancellationToken ct)
+    {
+        var cards = r.Members.Select(m => snap.Interfaces.FirstOrDefault(i => i.Name == m) ?? throw new OperationException(Msg.F("Network interface {0} not found.", m))).ToList();
+        if (cards.Any(c => c.Kind != "ethernet" || c.Master is not null)) throw new OperationException(Msg.F("This interface cannot be edited here."));
+        var bond = Enumerable.Range(0, 100).Select(n => "bond" + n).First(b => snap.Interfaces.All(i => i.Name != b));
+        // l'agrégation reprend l'adressage d'une carte : celle qui porte la passerelle, sinon une qui a une adresse, sinon la première
+        var source = cards.FirstOrDefault(c => c.Gateway4 is not null) ?? cards.FirstOrDefault(c => c.Ipv4.Any(a => a.Scope == "global")) ?? cards[0];
+        var req = Addressing(source, bond);
+        if (NetRules.Validate(req) is { } bad) throw new OperationException(bad);
+        if (backend == "ifupdown" && ((req.Ipv4.Mode == "auto" && req.Ipv4.DnsMode == "manual") || (req.Ipv6.Mode == "auto" && req.Ipv6.DnsMode == "manual")))
+            throw new OperationException(Msg.F("Manual DNS servers need a manual address on this system."));
+        if (backend == "ifupdown") await EnsureIfenslaveAsync(ct);
+        try { await runner.RunAsync("modprobe", ["bonding"], ct: ct); } catch (System.ComponentModel.Win32Exception) { }
+
+        var members = r.Members.ToList();
+        var changes = backend == "netplan" ? PlanBondNetplan(req, members, r.Mode, source.Mac) : PlanBondIfupdown(req, members, r.Mode, source.Mac);
+        var joined = string.Join(',', members);
+        var state = new PendingState(joined, backend, DateTime.UtcNow.AddSeconds(ConfirmSeconds), Backups(changes), DropLink: bond);
+        await CommitLockedAsync(state, changes,
+            backend == "ifupdown" ? async () => { foreach (var m in members) await runner.RunAsync("ifdown", ["--force", m], ct: ct); } : null,
+            () => ApplyAsync(backend, joined, bond, ct),
+            () => VerifyAsync(async t =>
+            {
+                var problem = await CheckOnceAsync(req, t);
+                if (problem.Length > 0) return problem;
+                var now = (await net.SnapshotAsync(t)).Interfaces;
+                var missing = members.FirstOrDefault(m => now.FirstOrDefault(i => i.Name == m)?.Master != bond);
+                return missing is null ? "" : Msg.F("The new settings could not be verified: {0} is not a member of {1}. The previous settings were restored.", missing, bond);
+            }, ct));
+        log.LogInformation("Link aggregation {Bond} created with {Members}", bond, joined);
+    }
+
+    async Task EnsureIfenslaveAsync(CancellationToken ct)
+    {
+        if (File.Exists(P("/sbin/ifenslave")) || File.Exists(P("/usr/sbin/ifenslave")) || File.Exists(P("/etc/network/if-pre-up.d/ifenslave"))) return;
+        var i = await runner.RunAsync("env", ["DEBIAN_FRONTEND=noninteractive", "apt-get", "install", "-y", "--no-install-recommends", "ifenslave"], ct: ct);
+        if (i.ExitCode != 0)
+            throw new OperationException(Msg.F("Link aggregation needs the ifenslave package, which could not be installed: {0}",
+                (i.StdErr + "\n" + i.StdOut).Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).LastOrDefault() ?? "apt-get"));
+    }
+
+    async Task RemoveBondAsync(string bond, string backend, NetSnapshot snap, CancellationToken ct)
+    {
+        var iface = snap.Interfaces.FirstOrDefault(i => i.Name == bond) ?? throw new OperationException(Msg.F("Network interface {0} not found.", bond));
+        if (iface.Kind != "bond") throw new OperationException(Msg.F("This aggregation was not created by UrsaNAS."));
+        if (iface.Master is not null) throw new OperationException(Msg.F("This aggregation is a port of an Open vSwitch bridge: remove that bridge first."));
+        var pre = new Dictionary<string, string?>();
+        List<string> members = [];
+        if (backend == "netplan")
+        {
+            var ours = P("/etc/netplan/" + NetplanConfig.BondFileName(bond));
+            if (File.Exists(ours))
+            {
+                pre[ours] = null;
+                if (Regex.Match(File.ReadAllText(ours), @"interfaces: \[([^\]]+)\]") is { Success: true } m)
+                    members = m.Groups[1].Value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+            }
+        }
+        else
+        {
+            var main = P("/etc/network/interfaces");
+            var dir = P("/etc/network/interfaces.d");
+            var files = new List<string> { main };
+            if (Directory.Exists(dir)) files.AddRange(Directory.GetFiles(dir).Where(f => Regex.IsMatch(Path.GetFileName(f), "^[A-Za-z0-9_-]+$")));
+            foreach (var f in files.Where(File.Exists))
+            {
+                var text = File.ReadAllText(f);
+                var found = IfupdownConfig.FindBlocks(text, "bond").Where(b => b.Name == bond).Select(b => b.Extra).FirstOrDefault();
+                if (found is null) continue;
+                members = found.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList();
+                var rest = IfupdownConfig.RemoveBlock(text, "bond", bond);
+                pre[f] = f != main && rest.Trim().Length == 0 ? null : rest;
+            }
+        }
+        if (members.Count == 0 || members.Any(m => !NetRules.IsIfaceName(m))) throw new OperationException(Msg.F("This aggregation was not created by UrsaNAS."));
+
+        var port = members[0];   // la première carte retrouve l'adressage; les autres redeviennent libres, sans configuration
+        var req = Addressing(iface, port);
+        if (NetRules.Validate(req) is { } invalid) throw new OperationException(invalid);
+        if (backend == "ifupdown" && ((req.Ipv4.Mode == "auto" && req.Ipv4.DnsMode == "manual") || (req.Ipv6.Mode == "auto" && req.Ipv6.DnsMode == "manual")))
+            throw new OperationException(Msg.F("Manual DNS servers need a manual address on this system."));
+        var changes = backend == "netplan" ? PlanNetplan(req, "ethernet", pre) : PlanIfupdown(req, pre);
+        var state = new PendingState(port, backend, DateTime.UtcNow.AddSeconds(ConfirmSeconds), Backups(changes), RestoreBridge: bond);
+        await CommitLockedAsync(state, changes,
+            backend == "ifupdown" ? () => runner.RunAsync("ifdown", ["--force", bond], ct: ct) : null,
+            async () => { await DelLinkAsync(bond, ct); await ApplyAsync(backend, port, null, ct); },
+            () => VerifyAsync(t => CheckOnceAsync(req, t), ct));
+        log.LogInformation("Link aggregation {Bond} removed; {Port} carries the addressing again", bond, port);
+    }
+
+    Dictionary<string, string?> PlanBondNetplan(NetEditRequest bondReq, List<string> members, string mode, string? mac)
+    {
+        var dir = P("/etc/netplan");
+        var ours = Path.Combine(dir, NetplanConfig.BondFileName(bondReq.Iface));
+        var changes = new Dictionary<string, string?>();
+        foreach (var file in Directory.GetFiles(dir, "*.yaml").OrderBy(f => f, StringComparer.Ordinal))
+        {
+            if (file == ours) continue;
+            var text = File.ReadAllText(file);
+            var stripped = text;
+            foreach (var m in members)
+            {
+                if (NetplanConfig.SectionOf(stripped, m) is not { } s) continue;
+                if (s != "ethernets") throw new OperationException(Msg.F("This interface cannot be edited here."));
+                stripped = NetplanConfig.StripIface(stripped, m);
+            }
+            if (stripped != Lf(text)) changes[file] = stripped;
+        }
+        changes[ours] = NetplanConfig.GenerateBond(bondReq, members, mode, mac);
+        GuardCloudInit(changes);
+        return changes;
+    }
+
+    Dictionary<string, string?> PlanBondIfupdown(NetEditRequest bondReq, List<string> members, string mode, string? mac)
+    {
+        var main = P("/etc/network/interfaces");
+        var dir = P("/etc/network/interfaces.d");
+        var ours = Path.Combine(dir, $"ursanas-bond-{bondReq.Iface}");
+        var files = new List<string> { main };
+        if (Directory.Exists(dir)) files.AddRange(Directory.GetFiles(dir).Where(f => f != ours && Regex.IsMatch(Path.GetFileName(f), "^[A-Za-z0-9_-]+$")).OrderBy(f => f, StringComparer.Ordinal));
+        var changes = new Dictionary<string, string?>();
+        foreach (var file in files.Where(File.Exists))
+        {
+            var text = File.ReadAllText(file);
+            var stripped = text;
+            foreach (var m in members) stripped = IfupdownConfig.Strip(stripped, m);
+            if (stripped != Lf(text)) changes[file] = stripped;
+        }
+        var block = IfupdownConfig.GenerateBond(bondReq, members, mode, mac);
+        var mainText = changes.TryGetValue(main, out var mt) && mt is not null ? mt : File.ReadAllText(main);
+        if (SourcesDir().IsMatch(mainText)) changes[ours] = block;
+        else changes[main] = mainText.TrimEnd('\n') + "\n\n" + block;
+        return changes;
     }
 
     // ---------------------------------------------------------------- plans : chemin → nouveau contenu (null = supprimer)
@@ -463,7 +640,7 @@ public partial class NetworkChangeService(ICommandRunner runner, NetworkService 
             if (changes.TryGetValue(file, out var preText)) { if (preText is null) continue; text = preText; }   // déjà modifié (ou retiré) par l'opération en cours
             else text = File.ReadAllText(file);
             if (NetplanConfig.SectionOf(text, req.Iface) is not { } s) continue;
-            if (s is not ("ethernets" or "bridges")) throw new OperationException(Msg.F("This interface cannot be edited here."));
+            if (s is not ("ethernets" or "bridges" or "bonds")) throw new OperationException(Msg.F("This interface cannot be edited here."));
             section ??= s;
             var stripped = NetplanConfig.StripIface(text, req.Iface);
             if (stripped != Lf(text)) changes[file] = stripped;
@@ -480,7 +657,7 @@ public partial class NetworkChangeService(ICommandRunner runner, NetworkService 
         return changes;
     }
 
-    Dictionary<string, string?> PlanIfupdown(NetEditRequest req, Dictionary<string, string?>? pre = null)
+    Dictionary<string, string?> PlanIfupdown(NetEditRequest req, Dictionary<string, string?>? pre = null, string v4Options = "")
     {
         var main = P("/etc/network/interfaces");
         var dir = P("/etc/network/interfaces.d");
@@ -500,7 +677,7 @@ public partial class NetworkChangeService(ICommandRunner runner, NetworkService 
             var stripped = IfupdownConfig.Strip(text, req.Iface);
             if (stripped != Lf(text)) changes[file] = stripped;
         }
-        var block = IfupdownConfig.Generate(req, addAuto: !hasAuto);
+        var block = IfupdownConfig.Generate(req, addAuto: !hasAuto, v4Options: v4Options);
         var mainText = changes.TryGetValue(main, out var m) && m is not null ? m : File.ReadAllText(main);
         if (SourcesDir().IsMatch(mainText)) changes[ours] = block;
         else

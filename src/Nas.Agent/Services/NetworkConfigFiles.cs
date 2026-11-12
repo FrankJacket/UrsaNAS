@@ -52,8 +52,10 @@ public static partial class NetplanConfig
             if (m.Success && m.Groups[1].Length == 4 && m.Groups[2].Value == iface)
             {
                 var rest = m.Groups[3].Value.Trim();
-                if (rest.StartsWith('{') || rest.StartsWith('[') )
+                if ((rest.StartsWith('{') && rest != "{}") || rest.StartsWith('['))
                     throw new OperationException(Msg.F("The network configuration of {0} is written in a style UrsaNAS cannot edit safely.", iface));
+                var headerAt = output.Count;
+                var kept = 0;
                 output.Add(line);
                 i++;
                 // Bloc de l'interface : lignes plus indentées que « iface: ».
@@ -73,8 +75,11 @@ public static partial class NetplanConfig
                         continue;
                     }
                     output.Add(l);
+                    kept++;
                     i++;
                 }
+                // Plus rien sous « iface: » : une définition vide doit s'écrire {} (netplan refuse une valeur nulle).
+                if (kept == 0 && rest.Length == 0) output[headerAt] = line.TrimEnd() + " {}";
                 continue;
             }
             output.Add(line);
@@ -122,12 +127,21 @@ public static partial class NetplanConfig
     /// Pont Open vSwitch <c>bridge.Iface</c> qui porte l'adressage, avec la carte <paramref name="port"/> comme sortie. Le pont reprend l'adresse MAC de la carte
     /// (le bail DHCP et les réservations du routeur restent valables). La carte n'a plus d'adressage : elle n'est qu'un port.
     /// </summary>
-    public static string GenerateOvsBridge(NetEditRequest bridge, string port, string? mac)
+    public static string GenerateOvsBridge(NetEditRequest bridge, string port, string? mac, string portSection = "ethernets")
         => Generate(bridge, "bridges",
-            topExtra: $"  ethernets:\n    {port}:\n      dhcp4: false\n      dhcp6: false\n      accept-ra: false\n",
+            topExtra: $"  {portSection}:\n    {port}:\n      dhcp4: false\n      dhcp6: false\n      accept-ra: false\n",
             ifaceExtra: $"      openvswitch: {{}}\n      interfaces: [{port}]\n" + (string.IsNullOrEmpty(mac) ? "" : $"      macaddress: \"{mac}\"\n"));
 
     public static string OvsFileName(string bridge) => $"90-ursanas-ovs-{bridge}.yaml";
+
+    public static string BondFileName(string bond) => $"90-ursanas-bond-{bond}.yaml";
+
+    /// <summary>Agrégation de liens <c>bond.Iface</c> : elle porte l'adressage et reprend l'adresse MAC d'une carte; les cartes ne sont que des membres.</summary>
+    public static string GenerateBond(NetEditRequest bond, IReadOnlyList<string> members, string mode, string? mac)
+        => Generate(bond, "bonds",
+            topExtra: "  ethernets:\n" + string.Concat(members.Select(m => $"    {m}:\n      dhcp4: false\n      dhcp6: false\n      accept-ra: false\n")),
+            ifaceExtra: $"      interfaces: [{string.Join(", ", members)}]\n" + (string.IsNullOrEmpty(mac) ? "" : $"      macaddress: \"{mac}\"\n")
+                + $"      parameters:\n        mode: {mode}\n        mii-monitor-interval: 100\n");
 }
 
 public static partial class IfupdownConfig
@@ -196,13 +210,36 @@ public static partial class IfupdownConfig
     /// Pont Open vSwitch <c>bridge.Iface</c> avec la carte <paramref name="port"/> pour sortie (paquet openvswitch-switch : options <c>ovs_*</c> d'ifupdown).
     /// Le bloc est encadré de repères pour qu'UrsaNAS le retrouve et le retire, où qu'il soit écrit.
     /// </summary>
-    public static string GenerateOvsBridge(NetEditRequest bridge, string port, string? mac)
+    public static string GenerateOvsBridge(NetEditRequest bridge, string port, string? mac, string portOptions = "")
     {
         var options = $"    ovs_type OVSBridge\n    ovs_ports {port}\n" + (string.IsNullOrEmpty(mac) ? "" : $"    ovs_extra set bridge ${{IFACE}} other-config:hwaddr={mac}\n");
         var b = bridge.Iface;
         return $"# ursanas-ovs {b} {port}\n"
             + Generate(bridge, addAuto: true, afterAuto: $"allow-ovs {b}\n", v4Options: options)
-            + $"\nallow-{b} {port}\niface {port} inet manual\n    ovs_bridge {b}\n    ovs_type OVSPort\n# end ursanas-ovs {b}\n";
+            + $"\nallow-{b} {port}\niface {port} inet manual\n{portOptions}    ovs_bridge {b}\n    ovs_type OVSPort\n# end ursanas-ovs {b}\n";
+    }
+
+    /// <summary>
+    /// Les options d'agrégation (<c>bond-*</c>, <c>bond_*</c>, <c>hwaddress</c>) du bloc <c>iface &lt;iface&gt; …</c> : elles doivent suivre l'agrégation quand elle devient le port d'un pont.
+    /// </summary>
+    public static string BondOptions(string text, string iface)
+    {
+        var lines = text.Replace("\r", "").Split('\n');
+        var sb = new StringBuilder();
+        var seen = new HashSet<string>();
+        for (var i = 0; i < lines.Length; i++)
+        {
+            var parts = lines[i].Split([' ', '\t'], StringSplitOptions.RemoveEmptyEntries);
+            if (lines[i].StartsWith(' ') || parts.Length < 3 || parts[0] != "iface" || parts[1] != iface) continue;
+            for (; i + 1 < lines.Length && !StartsStanza(lines[i + 1]); i++)
+            {
+                var o = lines[i + 1].Trim();
+                var key = o.Split([' ', '\t'], 2)[0];
+                if ((key.StartsWith("bond-", StringComparison.Ordinal) || key.StartsWith("bond_", StringComparison.Ordinal) || key == "hwaddress") && key != "bond-master" && seen.Add(key))
+                    sb.Append("    ").Append(o).Append('\n');
+            }
+        }
+        return sb.ToString();
     }
 
     /// <summary>Les montages Open vSwitch d'UrsaNAS écrits dans ce texte : (pont, carte).</summary>
@@ -211,18 +248,39 @@ public static partial class IfupdownConfig
             .Where(p => p.Length == 4 && p[0] == "#" && p[1] == "ursanas-ovs").Select(p => (p[2], p[3])).ToList();
 
     /// <summary>Retire le bloc écrit par <see cref="GenerateOvsBridge"/> (repère de début à repère de fin).</summary>
-    public static string RemoveOvs(string text, string bridge)
+    public static string RemoveOvs(string text, string bridge) => RemoveBlock(text, "ovs", bridge);
+
+    /// <summary>Retire le bloc <c># ursanas-&lt;kind&gt; &lt;name&gt; …</c> jusqu'à <c># end ursanas-&lt;kind&gt; &lt;name&gt;</c>.</summary>
+    public static string RemoveBlock(string text, string kind, string name)
     {
         var lines = text.Replace("\r", "").Split('\n');
         var output = new List<string>();
         var skipping = false;
         foreach (var l in lines)
         {
-            if (!skipping && l.StartsWith($"# ursanas-ovs {bridge} ", StringComparison.Ordinal)) { skipping = true; continue; }
-            if (skipping) { if (l == $"# end ursanas-ovs {bridge}") skipping = false; continue; }
+            if (!skipping && l.StartsWith($"# ursanas-{kind} {name} ", StringComparison.Ordinal)) { skipping = true; continue; }
+            if (skipping) { if (l == $"# end ursanas-{kind} {name}") skipping = false; continue; }
             output.Add(l);
         }
         return string.Join("\n", output);
+    }
+
+    /// <summary>Les blocs <c># ursanas-&lt;kind&gt; &lt;name&gt; &lt;extra&gt;</c> de ce texte : (name, extra).</summary>
+    public static IReadOnlyList<(string Name, string Extra)> FindBlocks(string text, string kind)
+        => text.Replace("\r", "").Split('\n').Select(l => l.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            .Where(p => p.Length == 4 && p[0] == "#" && p[1] == "ursanas-" + kind).Select(p => (p[2], p[3])).ToList();
+
+    /// <summary>
+    /// Agrégation de liens (paquet ifenslave : options <c>bond-*</c>). L'adressage va sur <c>bond.Iface</c>; les cartes ne sont plus que des membres.
+    /// </summary>
+    public static string GenerateBond(NetEditRequest bond, IReadOnlyList<string> members, string mode, string? mac)
+    {
+        var options = $"    bond-slaves {string.Join(' ', members)}\n    bond-mode {mode}\n    bond-miimon 100\n" + (string.IsNullOrEmpty(mac) ? "" : $"    hwaddress ether {mac}\n");
+        var b = bond.Iface;
+        return $"# ursanas-bond {b} {string.Join(',', members)}\n"
+            + Generate(bond, addAuto: true, v4Options: options)
+            + string.Concat(members.Select(m => $"\niface {m} inet manual\n    bond-master {b}\n"))
+            + $"# end ursanas-bond {b}\n";
     }
 
     /// <summary>Contenu de /etc/resolv.conf pour un DNS manuel (ifupdown seul ne le fait pas sans resolvconf).</summary>

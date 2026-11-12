@@ -209,6 +209,9 @@ public class AgentClient(HttpClient http)
     public async Task SetOvsAsync(bool enabled, CancellationToken ct = default) =>
         await EnsureOkAsync(await http.PostAsJsonAsync("network/ovs", new OvsRequest(enabled), ct), ct);
 
+    public async Task BondAsync(BondRequest req, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PostAsJsonAsync("network/bond", req, ct), ct);
+
     public async Task OvsUplinkAsync(OvsUplinkRequest req, CancellationToken ct = default) =>
         await EnsureOkAsync(await http.PostAsJsonAsync("network/ovs/uplink", req, ct), ct);
 
