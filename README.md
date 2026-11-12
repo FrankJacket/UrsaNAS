@@ -187,6 +187,8 @@ dotnet run --project src/Nas.Web --no-launch-profile
 
 In fake mode, system commands answer "OK" and do nothing. For the list of backup disks to be non-empty, set `Backup__MountInfo` to a file in the `/proc/self/mountinfo` format declaring your fake disk. `Backup__RequireMountPoint=false` alone is enough to test a copy, but it does not make the disk appear in the list.
 
+In Visual Studio, the `fake` launch profile of both projects does the same (agent on port 5002 with `URSANAS_FAKE=1`, web interface on port 5018 talking to it). Create `C:\temp\mnt`, set `Nas.Agent` and `Nas.Web` as multiple startup projects ("Configure Startup Projects…"), select the `fake` profile for both, then press F5.
+
 In Visual Studio, a first-chance `NavigationException` at start-up on `/setup` is normal (Blazor's way of redirecting while rendering on the server, when no account exists yet). Continue, or untick "Break when this exception type is thrown".
 
 ### Interface texts
