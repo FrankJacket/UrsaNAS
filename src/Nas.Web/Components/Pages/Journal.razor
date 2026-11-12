@@ -3,7 +3,7 @@
 @inject Repo Repo
 
 <MudText Typo="Typo.h4" Class="mb-4">@L["Audit log"]</MudText>
-<MudTable Items="rows" Hover="true" Dense="true">
+<MudTable Items="rows" Hover="true" Dense="true" FixedHeader Virtualize Height="calc(100vh - 150px)">
     <HeaderContent><MudTh>@L["Date"]</MudTh><MudTh>@L["Author"]</MudTh><MudTh>@L["Action"]</MudTh><MudTh>@L["Detail"]</MudTh></HeaderContent>
     <RowTemplate>
         <MudTd>@Fmt.Dt(context.At)</MudTd>

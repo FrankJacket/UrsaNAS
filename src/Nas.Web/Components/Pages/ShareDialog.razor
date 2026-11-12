@@ -1,7 +1,7 @@
 @inject NasOperations Ops
 
 @* Création ou modification d'un partage. Le dossier est toujours /srv/nas/<nom> et ne se choisit pas. *@
-<MudDialog>
+<MudDialog DefaultFocus="DefaultFocus.FirstChild">
     <DialogContent>
         @if (error is not null)
         {

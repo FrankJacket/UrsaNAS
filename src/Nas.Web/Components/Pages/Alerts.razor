@@ -24,45 +24,51 @@
     </MudAlert>
 }
 
-<MudText Typo="Typo.h5" Class="mt-8 mb-2">@L["Email notifications"]</MudText>
-<MudPaper Class="pa-4 mb-8" Style="max-width:640px">
-    @if (formError is not null)
-    {
-        <MudAlert Severity="Severity.Error" Class="mb-3">@formError</MudAlert>
-    }
-    <MudSwitch T="bool" @bind-Value="mail.Enabled" Label="@L["Send an email for each alert"]" Color="Color.Primary" />
-    <MudStack Row="true">
-        <MudTextField @bind-Value="mail.Host" Label="@L["SMTP server"]" Style="flex:3" />
-        <MudNumericField T="int" @bind-Value="mail.Port" Label="Port" Min="1" Max="65535" HideSpinButtons="true" Style="flex:1" />
-    </MudStack>
-    <MudSelect T="string" @bind-Value="mail.Security" Label="@L["Secure connection"]">
-        <MudSelectItem T="string" Value="@("starttls")">STARTTLS (port 587)</MudSelectItem>
-        <MudSelectItem T="string" Value="@("ssl")">SSL/TLS (port 465)</MudSelectItem>
-        <MudSelectItem T="string" Value="@("none")">@L["None (local network only)"]</MudSelectItem>
-    </MudSelect>
-    <MudTextField @bind-Value="mail.User" Label="@L["Username (optional)"]" />
-    <MudTextField @bind-Value="mail.Password" Label="@L["Password"]" InputType="InputType.Password"
-                  HelperText="@(hasPassword ? L["A password is saved; leave empty to keep it."] : null)" />
-    <MudTextField @bind-Value="mail.From" Label="@L["Sender"]" />
-    <MudTextField @bind-Value="mail.To" Label="@L["Recipients"]" HelperText="@L["Up to five addresses, separated by commas."]" />
-    <MudStack Row="true" Class="mt-4">
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Save" Disabled="busy">@L["Save"]</MudButton>
-        <MudButton Variant="Variant.Outlined" OnClick="SendTest" Disabled="busy">@(busy ? L["Sending…"] : L["Send a test email"])</MudButton>
-    </MudStack>
-    <MudText Typo="Typo.caption" Class="mt-2">@L["The test uses the saved settings. Alert emails are written in the language in use when you save."]</MudText>
-</MudPaper>
+<MudTabs>
+    <MudTabPanel Text="@L["History"]">
+        <MudTable Items="history" Hover="true" Dense="true">
+            <HeaderContent><MudTh>@L["Opened"]</MudTh><MudTh>@L["Severity"]</MudTh><MudTh>@L["Alert"]</MudTh><MudTh>@L["Resolved"]</MudTh></HeaderContent>
+            <RowTemplate>
+                <MudTd>@Fmt.Dt(context.RaisedAt)</MudTd>
+                <MudTd><MudChip T="string" Size="Size.Small" Color="@(context.Severity == "critical" ? Color.Error : Color.Warning)">@(context.Severity == "critical" ? L["Critical"] : L["Warning"])</MudChip></MudTd>
+                <MudTd>@L.Translate(context.Title)</MudTd>
+                <MudTd>@(context.ResolvedAt is { } r ? Fmt.Dt(r) : "—")</MudTd>
+            </RowTemplate>
+            <NoRecordsContent><MudText Class="pa-4">@L["No alerts yet."]</MudText></NoRecordsContent>
+        </MudTable>
 
-<MudText Typo="Typo.h5" Class="mb-2">@L["History"]</MudText>
-<MudTable Items="history" Hover="true" Dense="true">
-    <HeaderContent><MudTh>@L["Opened"]</MudTh><MudTh>@L["Severity"]</MudTh><MudTh>@L["Alert"]</MudTh><MudTh>@L["Resolved"]</MudTh></HeaderContent>
-    <RowTemplate>
-        <MudTd>@Fmt.Dt(context.RaisedAt)</MudTd>
-        <MudTd><MudChip T="string" Size="Size.Small" Color="@(context.Severity == "critical" ? Color.Error : Color.Warning)">@(context.Severity == "critical" ? L["Critical"] : L["Warning"])</MudChip></MudTd>
-        <MudTd>@L.Translate(context.Title)</MudTd>
-        <MudTd>@(context.ResolvedAt is { } r ? Fmt.Dt(r) : "—")</MudTd>
-    </RowTemplate>
-    <NoRecordsContent><MudText Class="pa-4">@L["No alerts yet."]</MudText></NoRecordsContent>
-</MudTable>
+    </MudTabPanel>
+    <MudTabPanel Text="@L["Email notifications"]">
+        <MudPaper Class="pa-4 mb-8" Style="max-width:640px">
+            @if (formError is not null)
+            {
+                <MudAlert Severity="Severity.Error" Class="mb-3">@formError</MudAlert>
+            }
+            <MudSwitch T="bool" @bind-Value="mail.Enabled" Label="@L["Send an email for each alert"]" Color="Color.Primary" />
+            <MudStack Row="true">
+                <MudTextField @bind-Value="mail.Host" Label="@L["SMTP server"]" Style="flex:3" />
+                <MudNumericField T="int" @bind-Value="mail.Port" Label="Port" Min="1" Max="65535" HideSpinButtons="true" Style="flex:1" />
+            </MudStack>
+            <MudSelect T="string" @bind-Value="mail.Security" Label="@L["Secure connection"]">
+                <MudSelectItem T="string" Value="@("starttls")">STARTTLS (port 587)</MudSelectItem>
+                <MudSelectItem T="string" Value="@("ssl")">SSL/TLS (port 465)</MudSelectItem>
+                <MudSelectItem T="string" Value="@("none")">@L["None (local network only)"]</MudSelectItem>
+            </MudSelect>
+            <MudTextField @bind-Value="mail.User" Label="@L["Username (optional)"]" />
+            <MudTextField @bind-Value="mail.Password" Label="@L["Password"]" InputType="InputType.Password"
+                          HelperText="@(hasPassword ? L["A password is saved; leave empty to keep it."] : null)" />
+            <MudTextField @bind-Value="mail.From" Label="@L["Sender"]" />
+            <MudTextField @bind-Value="mail.To" Label="@L["Recipients"]" HelperText="@L["Up to five addresses, separated by commas."]" />
+            <MudStack Row="true" Class="mt-4">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Save" Disabled="busy">@L["Save"]</MudButton>
+                <MudButton Variant="Variant.Outlined" OnClick="SendTest" Disabled="busy">@(busy ? L["Sending…"] : L["Send a test email"])</MudButton>
+            </MudStack>
+            <MudText Typo="Typo.caption" Class="mt-2">@L["The test uses the saved settings. Alert emails are written in the language in use when you save."]</MudText>
+        </MudPaper>
+
+    </MudTabPanel>
+</MudTabs>
+
 
 @code {
     List<AlertRow> active = new(), history = new();
