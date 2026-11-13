@@ -6,18 +6,18 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version number, for example 0.1.0 (the release tag will be v0.1.0)'
-        required: true
+        description: 'Version number, for example 0.1.0 (tag v0.1.0). Leave empty to auto-increment the patch number of the latest release.'
+        required: false
         type: string
       prerelease:
         description: 'Mark the release as a pre-release'
         required: false
-        default: true
+        default: false
         type: boolean
       run_tests:
         description: 'Run the unit tests before building'
         required: false
-        default: true
+        default: false
         type: boolean
 
 permissions:
@@ -26,15 +26,31 @@ permissions:
 jobs:
   package:
     runs-on: ubuntu-latest
-    env:
-      VERSION: ${{ inputs.version }}
     steps:
-      - name: Check the version
+      - name: Determine the version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
+          if [ -n "$INPUT_VERSION" ]; then
+            VERSION="$INPUT_VERSION"
+          else
+            LATEST=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 1 --json tagName --jq '.[0].tagName // ""')
+            LATEST=${LATEST#v}
+            if [ -z "$LATEST" ]; then
+              VERSION="0.1.0"
+            else
+              MAJOR=$(echo "$LATEST" | cut -d. -f1); MINOR=$(echo "$LATEST" | cut -d. -f2); PATCH=$(echo "$LATEST" | cut -d. -f3)
+              VERSION="$MAJOR.$MINOR.$((PATCH + 1))"
+            fi
+            echo "No version given: auto-incrementing from $LATEST to $VERSION"
+          fi
           case "$VERSION" in
             [0-9]*.[0-9]*.[0-9]*) ;;
             *) echo "Version must look like 1.2.3 (got '$VERSION')" >&2; exit 1 ;;
           esac
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "### Releasing version $VERSION" >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/checkout@v4
         with:
