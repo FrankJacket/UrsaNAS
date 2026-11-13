@@ -1435,7 +1435,7 @@ public static class French
         ["The package installation failed: {0}"] = "L'installation du paquet a échoué : {0}",
         ["Backing up the current version"] = "Sauvegarde de la version actuelle",
         ["Installing the update"] = "Installation de la mise à jour",
-        ["Installation failed: see the installer log on the server"] = "L'installation a échoué : voir le journal de l'installateur sur le serveur",
+        ["Installation failed: the previous version was restored (see the installer log on the server)"] = "L'installation a échoué : la version précédente a été restaurée (voir le journal de l'installateur sur le serveur)",
         ["Checking the services"] = "Vérification des services",
         ["Restoring the previous version"] = "Retour à la version précédente",
         ["The services did not respond: the previous version was restored"] = "Les services ne répondaient pas : la version précédente a été restaurée",

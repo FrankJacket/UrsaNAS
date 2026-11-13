@@ -17,6 +17,20 @@ write() { # stage message
     "$1" "$VERSION" "$2" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$STATUS"
 }
 
+# Restaure la version précédente (sauvegardée plus bas) et redémarre dessus ; appelé que install.sh ait planté
+# lui-même ou qu'il ait réussi sans que les services finissent par répondre.
+rollback() { # message
+  write running "Restoring the previous version"
+  systemctl stop ursanas-web ursanas-agent 2>/dev/null
+  rm -rf /opt/ursanas/agent /opt/ursanas/web
+  [ -d "$BACKUP/agent" ] && cp -a "$BACKUP/agent" /opt/ursanas/
+  [ -d "$BACKUP/web" ] && cp -a "$BACKUP/web" /opt/ursanas/
+  [ -f "$BACKUP/VERSION" ] && cp -a "$BACKUP/VERSION" /opt/ursanas/
+  systemctl daemon-reload
+  systemctl restart ursanas-agent ursanas-web
+  write rolled_back "$1"
+}
+
 write running "Backing up the current version"
 rm -rf "$BACKUP"
 mkdir -p "$BACKUP"
@@ -26,7 +40,7 @@ mkdir -p "$BACKUP"
 
 write running "Installing the update"
 if ! bash "$SRC/install.sh" >>"$STATUS.log" 2>&1; then
-  write failed "Installation failed: see the installer log on the server"
+  rollback "Installation failed: the previous version was restored (see the installer log on the server)"
   exit 1
 fi
 
@@ -41,13 +55,5 @@ while [ "$i" -lt 30 ]; do
   i=$((i + 1))
 done
 
-write running "Restoring the previous version"
-systemctl stop ursanas-web ursanas-agent 2>/dev/null
-rm -rf /opt/ursanas/agent /opt/ursanas/web
-[ -d "$BACKUP/agent" ] && cp -a "$BACKUP/agent" /opt/ursanas/
-[ -d "$BACKUP/web" ] && cp -a "$BACKUP/web" /opt/ursanas/
-[ -f "$BACKUP/VERSION" ] && cp -a "$BACKUP/VERSION" /opt/ursanas/
-systemctl daemon-reload
-systemctl restart ursanas-agent ursanas-web
-write rolled_back "The services did not respond: the previous version was restored"
+rollback "The services did not respond: the previous version was restored"
 exit 1
