@@ -172,6 +172,9 @@ rm -rf /opt/ursanas/web/*
 systemctl stop ursanas-web ursanas-agent 2>/dev/null || true
 cp -rf "$SRC"/Nas.Agent/. /opt/ursanas/agent/
 cp -rf "$SRC"/Nas.Web/. /opt/ursanas/web/
+# L'archive de la release peut avoir été créée avec un umask qui retire la lecture pour "other" :
+# ursanas-web tourne sous l'utilisateur dédié "ursanas", il doit pouvoir lire chaque fichier (dont libhostfxr.so).
+chmod -R a+rX /opt/ursanas/agent /opt/ursanas/web
 chmod 755 /opt/ursanas/agent/Nas.Agent /opt/ursanas/web/Nas.Web
 [ ! -f "$SRC/VERSION" ] || cp -f "$SRC/VERSION" /opt/ursanas/VERSION
 [ ! -f "$SRC/update-apply.sh" ] || { cp -f "$SRC/update-apply.sh" /opt/ursanas/update-apply.sh; chmod 755 /opt/ursanas/update-apply.sh; }
