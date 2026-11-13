@@ -9,6 +9,7 @@
     <PackageReference Include="MailKit" Version="4.*" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.*" />
     <PackageReference Include="MudBlazor" Version="9.*" />
+    <PackageReference Include="SharpZipLib" Version="1.*" />
     <ProjectReference Include="..\Nas.Contracts\Nas.Contracts.csproj" />
   </ItemGroup>
 </Project>

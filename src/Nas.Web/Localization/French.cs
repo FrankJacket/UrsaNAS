@@ -466,7 +466,7 @@ public static class French
         ["Folder on the disk"] = "Dossier sur le disque",
         ["Several jobs can share one disk, each in its own folder."] = "Plusieurs travaux peuvent partager un disque, chacun dans son dossier.",
         ["When"] = "Quand",
-        ["Time (HH:mm)"] = "Heure (HH:mm)",
+        ["Time"] = "Heure",
         ["Options"] = "Options",
         ["Remove from the copy what was deleted from the share"] = "Retirer de la copie ce qui a été supprimé du partage",
         ["Keep deleted and replaced files (days)"] = "Conserver les fichiers supprimés ou remplacés (jours)",
@@ -1519,5 +1519,14 @@ public static class French
         ["File sharing (Samba)"] = "Partage de fichiers (Samba)",
         ["File sharing (NFS)"] = "Partage de fichiers (NFS)",
         ["Remote access (SSH)"] = "Accès distant (SSH)",
+        ["Configuration backup"] = "Sauvegarde de configuration",
+        ["Downloads a ZIP file with what is useful to reconfigure this NAS after a full reset: shares, local users and groups, network settings, backup job definitions, and the FTP, e-mail alert and update schedule settings."]
+            = "Télécharge un fichier ZIP avec ce qui est utile pour reconfigurer ce NAS après une réinitialisation complète : partages, utilisateurs et groupes locaux, réglages réseau, définitions des tâches de sauvegarde, et réglages FTP, d'alertes courriel et de planification des mises à jour.",
+        ["No password is ever included: user and e-mail passwords must be re-entered after a restore."] = "Aucun mot de passe n'est jamais inclus : les mots de passe des utilisateurs et du courriel devront être ressaisis après une restauration.",
+        ["Protect the ZIP file with a password"] = "Protéger le fichier ZIP par un mot de passe",
+        ["Preparing…"] = "Préparation…",
+        ["Enter a password, or turn protection off."] = "Entrez un mot de passe, ou désactivez la protection.",
+        ["This password is too long."] = "Ce mot de passe est trop long.",
+        ["Time (HH:mm)"] = "Heure (HH:mm)",
     };
 }

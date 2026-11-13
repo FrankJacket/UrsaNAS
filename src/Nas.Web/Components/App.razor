@@ -27,6 +27,22 @@
             t.dispatchEvent(new Event('input', { bubbles: true }));
             return t.value;
         }
+        // Poste bodyJson sur url et déclenche le téléchargement de la réponse sous filename ; renvoie le message d'erreur du serveur, ou null si tout a marché.
+        async function ursanasDownloadPost(url, bodyJson, filename) {
+            try {
+                const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: bodyJson });
+                if (!resp.ok) return await resp.text();
+                const blob = await resp.blob();
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+                return null;
+            } catch (e) { return String(e); }
+        }
     </script>
 </body>
 </html>

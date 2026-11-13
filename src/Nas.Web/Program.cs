@@ -6,6 +6,7 @@ using System.Globalization;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Localization;
 using MudBlazor.Services;
+using Nas.Contracts;
 using Nas.Web;
 using Nas.Web.Alerting;
 using Nas.Web.Auth;
@@ -66,6 +67,7 @@ b.Services.AddScoped<PowerOperations>();
 b.Services.AddScoped<UpdateOperations>();
 b.Services.AddScoped<UpdateScheduler>();
 b.Services.AddHostedService<UpdateMonitor>();
+b.Services.AddScoped<ConfigBackupOperations>();
 b.Services.AddScoped<NasFolderPicker>();
 
 b.Services.AddSingleton<BackupRepo>();
@@ -115,6 +117,16 @@ app.MapGet("/logout", async (HttpContext ctx) =>
     await ctx.SignOutAsync();
     return Results.Redirect("/login");
 }).AllowAnonymous();
+app.MapPost("/downloads/config-backup", async (ExportConfigRequest req, ConfigBackupOperations ops, HttpContext ctx) =>
+{
+    try
+    {
+        var actor = ctx.User.Identity?.Name ?? "unknown";
+        var zip = await ops.ExportAsync(req.Password, actor, ctx.RequestAborted);
+        return Results.Bytes(zip, "application/zip", $"ursanas-config-{DateTime.Now:yyyyMMdd-HHmm}.zip");
+    }
+    catch (AgentException e) { return Results.BadRequest(e.Message); }
+});
 app.MapGet("/vm-console/{name}", (string name, HttpContext ctx, AgentClient agent) => VmConsoleProxy.HandleAsync(name, ctx, agent));
 app.MapGet("/terminal-ws", (HttpContext ctx, IConfiguration cfg, Repo repo) => TerminalProxy.HandleAsync(ctx, cfg, repo));
 app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
