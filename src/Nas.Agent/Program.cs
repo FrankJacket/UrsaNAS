@@ -67,6 +67,7 @@ public partial class Program
         builder.Services.AddSingleton<NetworkChangeService>();
         builder.Services.AddSingleton<OvsService>();
         builder.Services.AddSingleton<PowerService>();
+        builder.Services.AddSingleton<UpdateService>();
         builder.Services.AddSingleton<DiskService>();
         if (builder.Configuration["URSANAS_FAKE"] == "1")
         {
@@ -153,6 +154,14 @@ public partial class Program
         app.MapPost("/network/edit", (NetEditRequest r, NetworkChangeService c, CancellationToken ct) => Guard(async () => { await c.EditAsync(r, ct); return Results.NoContent(); }));
         app.MapPost("/system/shutdown", (PowerService p) => { p.Schedule(false); return Results.NoContent(); });
         app.MapPost("/system/reboot", (PowerService p) => { p.Schedule(true); return Results.NoContent(); });
+        app.MapGet("/system/update", (UpdateService u) => Results.Ok(u.Status()));
+        app.MapPut("/system/update/settings", (SetUpdateSettingsRequest r, UpdateService u) => Guard(() => { u.SetSettings(r); return Task.FromResult(Results.NoContent()); }));
+        app.MapPost("/system/update/check-app", (UpdateService u, CancellationToken ct) => Read(async () => Results.Ok(await u.CheckAppAsync(ct))));
+        app.MapPost("/system/update/check-packages", (UpdateService u, CancellationToken ct) => Read(async () => Results.Ok(await u.CheckPackagesAsync(ct))));
+        app.MapPost("/system/update/install-app", (UpdateService u, CancellationToken ct) => Guard(async () => { await u.InstallAppAsync(ct); return Results.NoContent(); }));
+        app.MapGet("/system/update/install-status", (UpdateService u) => Results.Ok(u.GetInstallStatus()));
+        app.MapPost("/system/update/install-packages", (InstallPackagesRequest r, UpdateService u, CancellationToken ct) =>
+            Guard(async () => { await u.InstallPackagesAsync(r, ct); return Results.NoContent(); }));
         app.MapGet("/services",(ProtocolService p, CancellationToken ct) => Read(async () => Results.Ok(await p.ListServicesAsync(ct))));
         app.MapPut("/services/{name}", (string name, SetServiceRequest r, ProtocolService p, CancellationToken ct) =>
             Guard(async () => { await p.SetServiceAsync(name, r.Enabled, ct); return Results.NoContent(); }));

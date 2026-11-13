@@ -174,6 +174,7 @@ cp -rf "$SRC"/Nas.Agent/. /opt/ursanas/agent/
 cp -rf "$SRC"/Nas.Web/. /opt/ursanas/web/
 chmod 755 /opt/ursanas/agent/Nas.Agent /opt/ursanas/web/Nas.Web
 [ ! -f "$SRC/VERSION" ] || cp -f "$SRC/VERSION" /opt/ursanas/VERSION
+[ ! -f "$SRC/update-apply.sh" ] || { cp -f "$SRC/update-apply.sh" /opt/ursanas/update-apply.sh; chmod 755 /opt/ursanas/update-apply.sh; }
 cp -f "$SRC"/ursanas-agent.service "$SRC"/ursanas-web.service /etc/systemd/system/
 
 systemctl daemon-reload

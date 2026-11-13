@@ -154,7 +154,10 @@ public sealed class AlertMonitor(IServiceScopeFactory scopes, AlertService alert
             IReadOnlyList<RemoteStorage>? remotes = null;
             try { remotes = await agent.GetRemotesAsync(ct); }
             catch (AgentException) { } // illisibles : on ne sait pas, on ne ferme rien
-            return new HealthSnapshot(true, pools, _smart, backups, remotes);
+            UpdateStatus? updates = null;
+            try { updates = await agent.GetUpdateStatusAsync(ct); } // relu depuis le cache de l'agent : pas de nouvel appel à GitHub ou apt ici
+            catch (AgentException) { }
+            return new HealthSnapshot(true, pools, _smart, backups, remotes, updates);
         }
         catch (Exception e) when (e is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
         {

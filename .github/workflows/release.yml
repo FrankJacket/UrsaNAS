@@ -56,9 +56,9 @@ jobs:
           P="ursanas-$VERSION-linux-x64"
           dotnet publish src/Nas.Agent -c Release -r linux-x64 --self-contained -p:PublishSingleFile=true -p:Version=$VERSION -o "out/$P/Nas.Agent"
           dotnet publish src/Nas.Web   -c Release -r linux-x64 --self-contained -p:Version=$VERSION -o "out/$P/Nas.Web"
-          cp deploy/install.sh deploy/ursanas-agent.service deploy/ursanas-web.service "out/$P/"
-          sed -i 's/\r$//' "out/$P"/install.sh "out/$P"/*.service
-          chmod +x "out/$P/install.sh"
+          cp deploy/install.sh deploy/update-apply.sh deploy/ursanas-agent.service deploy/ursanas-web.service "out/$P/"
+          sed -i 's/\r$//' "out/$P"/install.sh "out/$P"/update-apply.sh "out/$P"/*.service
+          chmod +x "out/$P/install.sh" "out/$P/update-apply.sh"
           echo "$VERSION" > "out/$P/VERSION"
           cp Install.md "out/$P/"
           tar -czf "$P.tar.gz" -C out "$P"

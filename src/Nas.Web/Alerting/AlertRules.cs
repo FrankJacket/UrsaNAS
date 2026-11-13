@@ -4,7 +4,8 @@ using Nas.Web.Data;
 namespace Nas.Web.Alerting;
 
 /// <summary>Ce que l'interface a pu observer lors d'un contrôle. <c>null</c> = on n'a pas pu le savoir (agent muet, ZFS absent).</summary>
-public sealed record HealthSnapshot(bool AgentReachable, IReadOnlyList<PoolInfo>? Pools, IReadOnlyList<SmartInfo>? Smart, IReadOnlyList<BackupHealth>? Backups = null, IReadOnlyList<RemoteStorage>? Remotes = null);
+public sealed record HealthSnapshot(bool AgentReachable, IReadOnlyList<PoolInfo>? Pools, IReadOnlyList<SmartInfo>? Smart, IReadOnlyList<BackupHealth>? Backups = null,
+    IReadOnlyList<RemoteStorage>? Remotes = null, UpdateStatus? Updates = null);
 
 /// <summary>Un problème constaté. <c>Code</c> l'identifie de façon stable d'un contrôle à l'autre (ex. <c>pool:tank:health</c>).</summary>
 public sealed record Candidate(string Code, string Severity, string Title, string Detail);
@@ -83,6 +84,14 @@ public static class AlertRules
                     d.Status == "failing" ? Msg.F("Disk {0}: SMART failing", d.Disk) : Msg.F("Disk {0}: SMART needs attention", d.Disk),
                     d.Detail ?? ""));
         }
+
+        if (s.Updates?.App is { Available: true, Latest: not null } app)
+            result.Add(new("update:app", Warning, Msg.F("A new version of UrsaNAS is available: {0}", app.Latest),
+                "Open System settings to install it."));
+        var pkgCount = s.Updates?.Packages?.Items.Count(p => p.Tracked) ?? 0;
+        if (pkgCount > 0)
+            result.Add(new("update:packages", Warning, Msg.F("{0} package update(s) available", pkgCount),
+                "Open System settings to install them."));
         return result;
     }
 

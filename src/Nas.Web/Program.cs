@@ -63,6 +63,9 @@ b.Services.AddScoped<DiskOperations>();
 b.Services.AddScoped<RemoteOperations>();
 b.Services.AddScoped<NetworkOperations>();
 b.Services.AddScoped<PowerOperations>();
+b.Services.AddScoped<UpdateOperations>();
+b.Services.AddScoped<UpdateScheduler>();
+b.Services.AddHostedService<UpdateMonitor>();
 b.Services.AddScoped<NasFolderPicker>();
 
 b.Services.AddSingleton<BackupRepo>();

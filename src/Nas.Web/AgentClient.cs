@@ -218,6 +218,44 @@ public class AgentClient(HttpClient http)
     public async Task PowerAsync(bool reboot, CancellationToken ct = default) =>
         await EnsureOkAsync(await http.PostAsync(reboot ? "system/reboot" : "system/shutdown", null, ct), ct);
 
+    // ---- Mises à jour
+    public async Task<UpdateStatus> GetUpdateStatusAsync(CancellationToken ct = default)
+    {
+        using var r = await http.GetAsync("system/update", ct);
+        await EnsureOkAsync(r, ct);
+        return await r.Content.ReadFromJsonAsync<UpdateStatus>(ct) ?? throw new AgentException(Msg.F("The agent answered {0}.", 204));
+    }
+
+    public async Task SetUpdateSettingsAsync(SetUpdateSettingsRequest req, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PutAsJsonAsync("system/update/settings", req, ct), ct);
+
+    public async Task<AppUpdateInfo> CheckAppUpdateAsync(CancellationToken ct = default)
+    {
+        using var r = await http.PostAsync("system/update/check-app", null, ct);
+        await EnsureOkAsync(r, ct);
+        return await r.Content.ReadFromJsonAsync<AppUpdateInfo>(ct) ?? throw new AgentException(Msg.F("The agent answered {0}.", 204));
+    }
+
+    public async Task<PackageUpdates> CheckPackageUpdatesAsync(CancellationToken ct = default)
+    {
+        using var r = await http.PostAsync("system/update/check-packages", null, ct);
+        await EnsureOkAsync(r, ct);
+        return await r.Content.ReadFromJsonAsync<PackageUpdates>(ct) ?? throw new AgentException(Msg.F("The agent answered {0}.", 204));
+    }
+
+    public async Task InstallAppUpdateAsync(CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PostAsync("system/update/install-app", null, ct), ct);
+
+    public async Task<AppInstallStatus> GetInstallStatusAsync(CancellationToken ct = default)
+    {
+        using var r = await http.GetAsync("system/update/install-status", ct);
+        await EnsureOkAsync(r, ct);
+        return await r.Content.ReadFromJsonAsync<AppInstallStatus>(ct) ?? throw new AgentException(Msg.F("The agent answered {0}.", 204));
+    }
+
+    public async Task InstallPackagesAsync(IReadOnlyList<string> names, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PostAsJsonAsync("system/update/install-packages", new InstallPackagesRequest(names), ct), ct);
+
     public async Task<SystemStats> GetStatsAsync(CancellationToken ct = default)
     {
         using var r = await http.GetAsync("stats", ct);

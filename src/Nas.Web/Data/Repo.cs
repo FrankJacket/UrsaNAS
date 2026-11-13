@@ -265,4 +265,40 @@ public class Repo(Db db)
             await c.ExecuteAsync("INSERT INTO Settings(Name,Value) VALUES(@n,@v) ON CONFLICT(Name) DO UPDATE SET Value=@v", new { n = k, v = val }, tx);
         tx.Commit();
     }
+
+    public async Task<UpdateScheduleSettings> GetUpdateScheduleAsync()
+    {
+        using var c = db.Open();
+        var v = (await c.QueryAsync<(string Name, string Value)>("SELECT Name,Value FROM Settings WHERE Name LIKE 'update.%'"))
+            .ToDictionary(x => x.Name, x => x.Value);
+        var d = UpdateScheduleSettings.Default;
+        DayOfWeek Day(string key, DayOfWeek def) => Enum.TryParse<DayOfWeek>(v.GetValueOrDefault(key), out var dw) ? dw : def;
+        bool Flag(string key, bool def) => v.TryGetValue(key, out var s) ? s == "1" : def;
+        return new UpdateScheduleSettings(
+            Rules.UpdateCheckFrequencies.Contains(v.GetValueOrDefault("update.checkfreq", "")) ? v["update.checkfreq"] : d.CheckFrequency,
+            Day("update.checkday", d.CheckDay),
+            Rules.IsTimeOfDay(v.GetValueOrDefault("update.checktime")) ? v["update.checktime"] : d.CheckTime,
+            Flag("update.autoapp", d.AutoInstallApp),
+            Flag("update.autopkg", d.AutoInstallPackages),
+            Flag("update.autopkgmanual", d.AutoInstallManualPackages),
+            Flag("update.autoreboot", d.AutoReboot),
+            Day("update.autoday", d.AutoInstallDay),
+            Rules.IsTimeOfDay(v.GetValueOrDefault("update.autotime")) ? v["update.autotime"] : d.AutoInstallTime);
+    }
+
+    public async Task SaveUpdateScheduleAsync(UpdateScheduleSettings s)
+    {
+        using var c = db.Open();
+        using var tx = c.BeginTransaction();
+        var pairs = new Dictionary<string, string>
+        {
+            ["update.checkfreq"] = s.CheckFrequency, ["update.checkday"] = s.CheckDay.ToString(), ["update.checktime"] = s.CheckTime,
+            ["update.autoapp"] = s.AutoInstallApp ? "1" : "0", ["update.autopkg"] = s.AutoInstallPackages ? "1" : "0",
+            ["update.autopkgmanual"] = s.AutoInstallManualPackages ? "1" : "0", ["update.autoreboot"] = s.AutoReboot ? "1" : "0",
+            ["update.autoday"] = s.AutoInstallDay.ToString(), ["update.autotime"] = s.AutoInstallTime,
+        };
+        foreach (var (k, val) in pairs)
+            await c.ExecuteAsync("INSERT INTO Settings(Name,Value) VALUES(@n,@v) ON CONFLICT(Name) DO UPDATE SET Value=@v", new { n = k, v = val }, tx);
+        tx.Commit();
+    }
 }

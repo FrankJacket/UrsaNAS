@@ -1,0 +1,398 @@
+@page "/system-settings"
+@implements IDisposable
+@inject AgentClient Agent
+@inject UpdateOperations Ops
+@inject ISnackbar Snack
+@inject IDialogService Dialogs
+
+<MudText Typo="Typo.h4" Class="mb-4">@L["System settings"]</MudText>
+
+<MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" TabPanelsClass="pt-4">
+    <MudTabPanel Text="@L["Updates"]">
+
+@if (error is not null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">@error</MudAlert>
+}
+
+<MudText Typo="Typo.h5" Class="mb-2">UrsaNAS</MudText>
+<MudPaper Class="pa-4 mb-6" Style="max-width:820px">
+    <MudText>@L["Installed version"] : <b>@(app?.Current ?? "…")</b></MudText>
+    @if (app is { Error: not null })
+    {
+        <MudAlert Severity="Severity.Warning" Class="mt-3">@L.Translate(app.Error)</MudAlert>
+    }
+    else if (app is { Available: true })
+    {
+        <MudAlert Severity="Severity.Info" Class="mt-3">
+            @L["A new version is available:"] <b>@app.Latest</b>@(app.Prerelease ? " (" + L["pre-release"] + ")" : "")
+            @if (app.PublishedAt is { } pub) { <span> — @pub.ToLocalTime().ToString("g", Culture)</span> }
+            @if (app.Url is not null) { <MudLink Href="@app.Url" Target="_blank" Class="ml-2">@L["Release notes"]</MudLink> }
+        </MudAlert>
+        @if (!string.IsNullOrWhiteSpace(app.Notes))
+        {
+            <MudText Typo="Typo.caption" Class="d-block mt-2" Style="white-space:pre-wrap;max-height:10rem;overflow:auto">@app.Notes</MudText>
+        }
+    }
+    else if (app is not null)
+    {
+        <MudAlert Severity="Severity.Success" Class="mt-3">@L["UrsaNAS is up to date."]</MudAlert>
+    }
+    @if (app is not null)
+    {
+        <MudText Typo="Typo.caption" Class="d-block mt-2">@L["Checked on"] @app.CheckedAt.ToLocalTime().ToString("g", Culture)</MudText>
+    }
+    @if (install.Stage is "running")
+    {
+        <MudAlert Severity="Severity.Info" Class="mt-2"><MudProgressCircular Indeterminate="true" Size="Size.Small" Class="mr-2" />@L.Translate(install.Message)</MudAlert>
+    }
+    else if (install.Stage is "failed")
+    {
+        <MudAlert Severity="Severity.Error" Class="mt-2">@L.Translate(install.Message)</MudAlert>
+    }
+    else if (install.Stage is "rolled_back")
+    {
+        <MudAlert Severity="Severity.Warning" Class="mt-2">@L.Translate(install.Message)</MudAlert>
+    }
+    else if (install is { Stage: "done", Version: not null } && install.Version == app?.Latest)
+    {
+        <MudAlert Severity="Severity.Success" Class="mt-2">@L.Translate(install.Message)</MudAlert>
+    }
+    <MudStack Row="true" Class="mt-3">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="CheckApp" Disabled="@(busy || checkingApp || installing)">
+            @(checkingApp ? L["Checking…"] : L["Check for updates"])
+        </MudButton>
+        @if (app is { Available: true })
+        {
+            <MudButton Variant="Variant.Filled" Color="Color.Warning" OnClick="InstallApp" Disabled="@(busy || installing)">
+                @(installing ? L["Installing…"] : L["Update now"])
+            </MudButton>
+        }
+    </MudStack>
+
+    <MudDivider Class="my-4" />
+    <MudText Typo="Typo.subtitle1" Class="mb-2">@L["Update source"]</MudText>
+    <MudSelect T="string" @bind-Value="channel" Label="@L["Channel"]" Disabled="busy" Style="max-width:360px">
+        <MudSelectItem Value="@("stable")">@L["Stable releases only"]</MudSelectItem>
+        <MudSelectItem Value="@("prerelease")">@L["Stable releases and pre-releases"]</MudSelectItem>
+    </MudSelect>
+    <MudTextField T="string" @bind-Value="token" Label="@L["GitHub access token (read-only)"]" InputType="InputType.Password" Disabled="busy"
+                  HelperText="@(tokenSet ? L["A token is saved. Leave empty to keep it."] : L["The UrsaNAS releases are private: enter a fine-grained token with read access to the repository contents."])"
+                  Style="max-width:520px" />
+    <MudStack Row="true" Class="mt-3">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="() => Save(false)" Disabled="busy">@L["Save"]</MudButton>
+        @if (tokenSet)
+        {
+            <MudButton Variant="Variant.Outlined" Color="Color.Error" OnClick="() => Save(true)" Disabled="busy">@L["Remove the token"]</MudButton>
+        }
+    </MudStack>
+</MudPaper>
+
+<MudText Typo="Typo.h5" Class="mb-2">@L["System packages"]</MudText>
+<MudPaper Class="pa-4" Style="max-width:820px">
+    @if (pkgs is { Error: not null })
+    {
+        <MudAlert Severity="Severity.Warning" Class="mb-3">@L.Translate(pkgs.Error)</MudAlert>
+    }
+    @if (pkgs is null)
+    {
+        <MudText Typo="Typo.body2">@L["Not checked yet."]</MudText>
+    }
+    else
+    {
+        @if (pkgs.RebootRequired)
+        {
+            <MudAlert Severity="Severity.Info" Class="mb-3">@L["A restart is needed to finish a previous update."]</MudAlert>
+        }
+        <MudSwitch T="bool" @bind-Value="showAll" Label="@L["Show every package"]" Color="Color.Primary" />
+        @if (Shown.Count == 0)
+        {
+            <MudAlert Severity="Severity.Success" Class="mt-2">@L["No package update available."]</MudAlert>
+        }
+        else
+        {
+            <MudTable Items="Shown" Dense="true" Hover="true" Class="mt-2">
+                <HeaderContent><MudTh></MudTh><MudTh>@L["Package"]</MudTh><MudTh>@L["Installed"]</MudTh><MudTh>@L["Available"]</MudTh><MudTh></MudTh></HeaderContent>
+                <RowTemplate>
+                    <MudTd>
+                        <MudCheckBox T="bool" Value="selected.Contains(context.Name)" ValueChanged="@((bool v) => Select(context.Name, v))" Dense="true" Disabled="busy" />
+                    </MudTd>
+                    <MudTd>
+                        <MudTooltip Text="@context.Name">
+                            <b>@Friendly(context.Name)</b>
+                        </MudTooltip>
+                    </MudTd>
+                    <MudTd>@context.Installed</MudTd>
+                    <MudTd>@context.Candidate</MudTd>
+                    <MudTd>
+                        @if (context.ManualOnly)
+                        {
+                            <MudTooltip Text="@L["Updating it restarts an important service or changes the kernel: never done automatically by default."]">
+                                <MudChip T="string" Size="Size.Small" Color="Color.Warning">@L["Manual only"]</MudChip>
+                            </MudTooltip>
+                        }
+                    </MudTd>
+                </RowTemplate>
+            </MudTable>
+            <MudButton Variant="Variant.Filled" Color="Color.Warning" Class="mt-3" OnClick="InstallPackages" Disabled="@(busy || selected.Count == 0)">
+                @L["Update the selected packages"] @(selected.Count > 0 ? $"({selected.Count})" : "")
+            </MudButton>
+        }
+        <MudText Typo="Typo.caption" Class="d-block mt-2">@L["Checked on"] @pkgs.CheckedAt.ToLocalTime().ToString("g", Culture)</MudText>
+    }
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" Class="mt-3" OnClick="CheckPackages" Disabled="@(busy || checkingPkgs)">
+        @(checkingPkgs ? L["Checking…"] : L["Check for updates"])
+    </MudButton>
+</MudPaper>
+
+    </MudTabPanel>
+    <MudTabPanel Text="@L["Scheduling"]">
+
+@if (scheduleError is not null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">@scheduleError</MudAlert>
+}
+
+<MudText Typo="Typo.caption" Class="d-block mb-4">@L["Times below are the server's own clock"]: @TimeZoneInfo.Local.Id (UTC@(ServerUtcOffset()))</MudText>
+
+<MudText Typo="Typo.h5" Class="mb-2">@L["Check for updates"]</MudText>
+<MudPaper Class="pa-4 mb-6" Style="max-width:620px">
+    <MudSelect T="string" @bind-Value="checkFreq" Label="@L["Frequency"]" Disabled="scheduleBusy" Style="max-width:320px">
+        <MudSelectItem Value="@("off")">@L["Disabled"]</MudSelectItem>
+        <MudSelectItem Value="@("daily")">@L["Every day"]</MudSelectItem>
+        <MudSelectItem Value="@("weekly")">@L["Every week"]</MudSelectItem>
+    </MudSelect>
+    @if (checkFreq == "weekly")
+    {
+        <MudSelect T="DayOfWeek" @bind-Value="checkDay" Label="@L["Day"]" Disabled="scheduleBusy" Style="max-width:320px">
+            @foreach (var d in Days) { <MudSelectItem Value="@d">@Culture.DateTimeFormat.GetDayName(d)</MudSelectItem> }
+        </MudSelect>
+    }
+    @if (checkFreq != "off")
+    {
+        <MudTextField @bind-Value="checkTime" Label="@L["Time (HH:mm)"]" Disabled="scheduleBusy" Style="max-width:320px" />
+    }
+</MudPaper>
+
+<MudText Typo="Typo.h5" Class="mb-2">@L["Automatic installation"]</MudText>
+<MudPaper Class="pa-4" Style="max-width:620px">
+    <MudText Typo="Typo.caption" Class="d-block mb-2">@L["Installs what the last check found, once a week."]</MudText>
+    <MudSwitch T="bool" @bind-Value="autoApp" Label="UrsaNAS" Color="Color.Primary" Disabled="scheduleBusy" />
+    <MudSwitch T="bool" @bind-Value="autoPkg" Label="@L["System packages"]" Color="Color.Primary" Disabled="scheduleBusy" />
+    @if (autoPkg)
+    {
+        <MudCheckBox T="bool" @bind-Value="autoPkgManual" Label="@L["Also include packages marked “Manual only”"]" Disabled="scheduleBusy" Class="ml-8" />
+    }
+    @if (autoApp || autoPkg)
+    {
+        <MudStack Row="true" Class="mt-2">
+            <MudSelect T="DayOfWeek" @bind-Value="autoDay" Label="@L["Day"]" Disabled="scheduleBusy" Style="max-width:280px">
+                @foreach (var d in Days) { <MudSelectItem Value="@d">@Culture.DateTimeFormat.GetDayName(d)</MudSelectItem> }
+            </MudSelect>
+            <MudTextField @bind-Value="autoTime" Label="@L["Time (HH:mm)"]" Disabled="scheduleBusy" Style="max-width:280px" />
+        </MudStack>
+        <MudSwitch T="bool" @bind-Value="autoReboot" Label="@L["Restart automatically if needed, at this same time"]" Color="Color.Warning" Class="mt-2" Disabled="scheduleBusy" />
+    }
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" Class="mt-4" OnClick="SaveSchedule" Disabled="scheduleBusy">@L["Save"]</MudButton>
+</MudPaper>
+
+    </MudTabPanel>
+</MudTabs>
+
+@code {
+    AppUpdateInfo? app;
+    PackageUpdates? pkgs;
+    AppInstallStatus install = new("idle", null, null, DateTimeOffset.UtcNow);
+    readonly HashSet<string> selected = [];
+    string channel = "stable", token = "";
+    string? error;
+    bool busy, checkingApp, checkingPkgs, showAll, tokenSet, installing;
+    CancellationTokenSource? pollCts;
+
+    // Planification : des champs à part (pas le contrat, en lecture seule) pour que @bind-Value puisse les modifier.
+    string checkFreq = "off", checkTime = "03:00", autoTime = "04:00";
+    DayOfWeek checkDay = DayOfWeek.Sunday, autoDay = DayOfWeek.Sunday;
+    bool autoApp, autoPkg, autoPkgManual, autoReboot, scheduleBusy;
+    string? scheduleError;
+    static readonly DayOfWeek[] Days = [DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday, DayOfWeek.Thursday, DayOfWeek.Friday, DayOfWeek.Saturday, DayOfWeek.Sunday];
+
+    System.Globalization.CultureInfo Culture => System.Globalization.CultureInfo.GetCultureInfo(L.Lang);
+    List<PackageUpdate> Shown => pkgs?.Items.Where(i => showAll || i.Tracked).ToList() ?? [];
+
+    static string ServerUtcOffset()
+    {
+        var o = TimeZoneInfo.Local.GetUtcOffset(DateTime.Now);
+        return (o < TimeSpan.Zero ? "-" : "+") + o.Duration().ToString(@"hh\:mm");
+    }
+
+    void Select(string name, bool on) { if (on) selected.Add(name); else selected.Remove(name); }
+
+    /// <summary>Nom plus parlant pour un paquet connu ; le vrai nom reste visible au survol. Les paquets non reconnus gardent leur nom technique.</summary>
+    string Friendly(string name) => name switch
+    {
+        "docker.io" or "docker-ce" or "docker-ce-cli" => L["Docker"],
+        "docker-compose" or "docker-compose-v2" or "docker-ce-rootless-extras" => L["Docker Compose"],
+        "containerd" or "containerd.io" or "runc" => L["Container runtime"],
+        "openvswitch-switch" or "openvswitch-common" => L["Open vSwitch"],
+        "ovmf" => L["Virtual machine firmware (OVMF)"],
+        "swtpm" or "swtpm-tools" => L["Virtual machine TPM (swtpm)"],
+        "smartmontools" => L["Disk health monitoring (S.M.A.R.T.)"],
+        "rclone" => L["Remote storage (rclone)"],
+        "ifupdown" => L["Network configuration"],
+        "ca-certificates" => L["Security certificates"],
+        "openssl" => L["Encryption (OpenSSL)"],
+        "acl" => L["File permissions (ACL)"],
+        "cifs-utils" => L["Remote storage (SMB/CIFS)"],
+        "vsftpd" => L["File transfer (FTP)"],
+        "xfsprogs" or "btrfs-progs" or "exfatprogs" => L["Disk formatting tools"],
+        _ when name.StartsWith("linux-image", StringComparison.Ordinal) => L["Linux kernel"],
+        _ when name.StartsWith("linux-headers", StringComparison.Ordinal) => L["Linux kernel headers"],
+        _ when name.StartsWith("linux-modules", StringComparison.Ordinal) || name == "linux-base" => L["Linux kernel modules"],
+        _ when name.StartsWith("zfs", StringComparison.Ordinal) || name.StartsWith("libzfs", StringComparison.Ordinal) || name.StartsWith("libnvpair", StringComparison.Ordinal)
+            || name.StartsWith("libuutil", StringComparison.Ordinal) || name.StartsWith("libzpool", StringComparison.Ordinal) || name.StartsWith("spl", StringComparison.Ordinal)
+            => L["ZFS"],
+        _ when name.StartsWith("libvirt", StringComparison.Ordinal) => L["Virtual machines (libvirt)"],
+        _ when name.StartsWith("qemu", StringComparison.Ordinal) => L["Virtual machines (QEMU)"],
+        _ when name is "samba" or "smbclient" or "libsmbclient" or "winbind" || name.StartsWith("samba-", StringComparison.Ordinal) => L["File sharing (Samba)"],
+        _ when name.StartsWith("nfs-", StringComparison.Ordinal) => L["File sharing (NFS)"],
+        _ when name.StartsWith("openssh", StringComparison.Ordinal) => L["Remote access (SSH)"],
+        _ when name.StartsWith("netplan", StringComparison.Ordinal) => L["Network configuration"],
+        _ => name,
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var s = await Agent.GetUpdateStatusAsync();
+            (channel, tokenSet, app, pkgs) = (s.Settings.Channel, s.Settings.TokenSet, s.App, s.Packages);
+            install = await Agent.GetInstallStatusAsync();
+            if (install.Stage == "running") StartPolling();
+        }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable."]; }
+
+        try
+        {
+            var sch = await Ops.GetScheduleAsync();
+            (checkFreq, checkDay, checkTime, autoApp, autoPkg, autoPkgManual, autoReboot, autoDay, autoTime) =
+                (sch.CheckFrequency, sch.CheckDay, sch.CheckTime, sch.AutoInstallApp, sch.AutoInstallPackages, sch.AutoInstallManualPackages, sch.AutoReboot, sch.AutoInstallDay, sch.AutoInstallTime);
+        }
+        catch (Microsoft.Data.Sqlite.SqliteException e) { scheduleError = e.Message; }
+    }
+
+    async Task SaveSchedule()
+    {
+        scheduleBusy = true; scheduleError = null;
+        try
+        {
+            await Ops.SaveScheduleAsync(new UpdateScheduleSettings(checkFreq, checkDay, checkTime, autoApp, autoPkg, autoPkgManual, autoReboot, autoDay, autoTime));
+            Snack.Add(L["Saved."], Severity.Success);
+        }
+        catch (AgentException e) { scheduleError = L.Translate(e.Message); }
+        scheduleBusy = false;
+    }
+
+    void StartPolling()
+    {
+        installing = true;
+        pollCts?.Cancel();
+        pollCts = new CancellationTokenSource();
+        _ = PollInstallAsync(pollCts.Token);
+    }
+
+    /// <summary>Suit la progression pendant l'installation : le service web lui-même redémarre, la connexion peut donc tomber un instant.</summary>
+    async Task PollInstallAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(3));
+            while (await timer.WaitForNextTickAsync(ct))
+            {
+                try { install = await Agent.GetInstallStatusAsync(ct); }
+                catch (HttpRequestException) { continue; } // l'agent ou l'interface redémarre : on réessaiera au prochain tic
+                await InvokeAsync(StateHasChanged);
+                if (install.Stage is not "running") break;
+            }
+        }
+        catch (OperationCanceledException) { }
+        installing = false;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose() => pollCts?.Cancel();
+
+    async Task Save(bool clearToken)
+    {
+        busy = true; error = null;
+        try
+        {
+            await Ops.SaveSettingsAsync(channel, token, clearToken);
+            token = "";
+            tokenSet = (await Agent.GetUpdateStatusAsync()).Settings.TokenSet;
+            Snack.Add(L["Saved."], Severity.Success);
+        }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable."]; }
+        busy = false;
+    }
+
+    async Task CheckApp()
+    {
+        checkingApp = true; error = null;
+        try { app = await Agent.CheckAppUpdateAsync(); }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable."]; }
+        checkingApp = false;
+    }
+
+    async Task CheckPackages()
+    {
+        checkingPkgs = true; error = null;
+        try { pkgs = await Agent.CheckPackageUpdatesAsync(); selected.Clear(); }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable."]; }
+        checkingPkgs = false;
+    }
+
+    async Task InstallApp()
+    {
+        if (app is not { Available: true, Latest: not null }) return;
+        var ok = await Dialogs.ShowMessageBoxAsync(L["Update UrsaNAS"],
+            L["Install {0} now? The interface will be unreachable for a minute while the services restart.", app.Latest],
+            yesText: L["Update"], cancelText: L["Cancel"]);
+        if (ok != true) return;
+        busy = true; error = null;
+        try
+        {
+            await Ops.InstallAppAsync(app.Latest);
+            install = await Agent.GetInstallStatusAsync();
+            StartPolling();
+        }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable."]; }
+        busy = false;
+    }
+
+    async Task InstallPackages()
+    {
+        var names = selected.ToList();
+        if (names.Count == 0) return;
+        var manual = names.Any(n => Shown.Any(p => p.Name == n && p.ManualOnly));
+        var message = L["Install the selected package updates now?"] + " " + string.Join(", ", names)
+            + (manual ? " " + L["This restarts an important service or changes the kernel."] : "");
+        var ok = await Dialogs.ShowMessageBoxAsync(L["Update packages"], message, yesText: L["Update"], cancelText: L["Cancel"]);
+        if (ok != true) return;
+        busy = true; error = null;
+        try
+        {
+            await Ops.InstallPackagesAsync(names);
+            pkgs = await Agent.CheckPackageUpdatesAsync();
+            selected.Clear();
+            Snack.Add(L["Packages updated."], Severity.Success);
+        }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable."]; }
+        busy = false;
+    }
+}
