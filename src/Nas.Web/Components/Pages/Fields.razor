@@ -11,7 +11,8 @@
     }
     else
     {
-        <UrsaMaskedField Value="@Cfg.Address" ValueChanged="v => Cfg.Address = v ?? string.Empty" Pattern="@Ipv4Pattern" PatternError="@L["Not a valid IPv4 address"]"
+        <UrsaMaskedField Value="@address" ValueChanged="OnAddressChanged" Validator="ValidateAddress"
+                         RegexPattern="@Ipv4RegexPattern" DelimiterCharacters="."
                          Label="@L["IPv4 address"]" Disabled="@(Cfg.Mode != "manual")" Variant="Variant.Outlined" Margin="Margin.Dense" />
     }
     <MudTextField T="string" @bind-Value="Cfg.Netmask" Label="@(Ipv6 ? L["Prefix length"] : L["Subnet mask"])" Disabled="@(Cfg.Mode != "manual")" Variant="Variant.Outlined" Margin="Margin.Dense"
@@ -22,7 +23,8 @@
     }
     else
     {
-        <UrsaMaskedField Value="@Cfg.Gateway" ValueChanged="v => Cfg.Gateway = v ?? string.Empty" Pattern="@Ipv4Pattern" PatternError="@L["Not a valid IPv4 address"]"
+        <UrsaMaskedField Value="@gateway" ValueChanged="OnGatewayChanged" Validator="ValidateGateway"
+                         RegexPattern="@Ipv4RegexPattern" DelimiterCharacters="."
                          Label="@L["Gateway"]" Disabled="@(Cfg.Mode != "manual")" Variant="Variant.Outlined" Margin="Margin.Dense" />
     }
 
@@ -38,9 +40,11 @@
     }
     else
     {
-        <UrsaMaskedField Value="@Cfg.Dns1" ValueChanged="v => Cfg.Dns1 = v ?? string.Empty" Pattern="@Ipv4Pattern" PatternError="@L["Not a valid IPv4 address"]"
+        <UrsaMaskedField Value="@dns1" ValueChanged="OnDns1Changed" Validator="ValidateDns1"
+                         RegexPattern="@Ipv4RegexPattern" DelimiterCharacters="."
                          Label="@L["Preferred DNS server"]" Disabled="@(Cfg.DnsMode != "manual")" Variant="Variant.Outlined" Margin="Margin.Dense" />
-        <UrsaMaskedField Value="@Cfg.Dns2" ValueChanged="v => Cfg.Dns2 = v ?? string.Empty" Pattern="@Ipv4Pattern" PatternError="@L["Not a valid IPv4 address"]"
+        <UrsaMaskedField Value="@dns2" ValueChanged="OnDns2Changed" Validator="ValidateDns2"
+                         RegexPattern="@Ipv4RegexPattern" DelimiterCharacters="."
                          Label="@L["Alternate DNS server"]" Disabled="@(Cfg.DnsMode != "manual")" Variant="Variant.Outlined" Margin="Margin.Dense" />
     }
 </MudStack>
@@ -49,6 +53,49 @@
     [Parameter, EditorRequired] public NetworkEditDialog.Form Cfg { get; set; } = default!;
     [Parameter] public bool Ipv6 { get; set; }
 
+    /// <summary>Le parent (NetworkEditDialog) rappelle ceci pour se redessiner quand un champ devient valide/invalide,
+    /// par exemple pour (dés)activer son bouton Confirmer.</summary>
+    [Parameter] public EventCallback ValidityChanged { get; set; }
+
     // Mêmes octets que NetRules.TryIPv4 côté agent (0-255, zéros non significatifs tolérés) ; le champ reste vide sans erreur.
     const string Ipv4Pattern = @"^((25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(25[0-5]|2[0-4]\d|[01]?\d\d?)$";
+
+    // Même regex que UrsaMaskType.Ipv4 (Ursa.UITools) : accepte aussi les préfixes partiels, pour contraindre
+    // la saisie caractère par caractère (et insérer les "." automatiquement) sans bloquer un octet en cours de frappe.
+    const string Ipv4RegexPattern = @"^(?:25[0-5]|2[0-4][0-9]|[0-1]?[0-9]{0,2})(?:\.(?:25[0-5]|2[0-4][0-9]|[0-1]?[0-9]{0,2})){0,3}(?!\s)$";
+
+    // Reflètent Cfg.Address/Gateway/Dns1/Dns2 : UrsaMaskedField doit être lié à un champ nullable à lui (jamais
+    // ramené à ""), sinon la valeur poussée en retour diffère de celle, invalide, qu'il vient de refuser, et il
+    // se redessine vide sans message — voir UrsaMaskedField.OnParametersSet.
+    string? address, gateway, dns1, dns2;
+    bool addressValid = true, gatewayValid = true, dns1Valid = true, dns2Valid = true;
+
+    /// <summary>Faux si un des champs IPv4 affiche actuellement une erreur.</summary>
+    public bool IsValid => addressValid && gatewayValid && dns1Valid && dns2Valid;
+
+    protected override void OnInitialized()
+    {
+        address = Cfg.Address.Length > 0 ? Cfg.Address : null;
+        gateway = Cfg.Gateway.Length > 0 ? Cfg.Gateway : null;
+        dns1 = Cfg.Dns1.Length > 0 ? Cfg.Dns1 : null;
+        dns2 = Cfg.Dns2.Length > 0 ? Cfg.Dns2 : null;
+    }
+
+    Task OnAddressChanged(string? v) { address = v; Cfg.Address = v ?? ""; return Task.CompletedTask; }
+    Task OnGatewayChanged(string? v) { gateway = v; Cfg.Gateway = v ?? ""; return Task.CompletedTask; }
+    Task OnDns1Changed(string? v) { dns1 = v; Cfg.Dns1 = v ?? ""; return Task.CompletedTask; }
+    Task OnDns2Changed(string? v) { dns2 = v; Cfg.Dns2 = v ?? ""; return Task.CompletedTask; }
+
+    string? ValidateAddress(string text) => Validate(text, v => addressValid = v);
+    string? ValidateGateway(string text) => Validate(text, v => gatewayValid = v);
+    string? ValidateDns1(string text) => Validate(text, v => dns1Valid = v);
+    string? ValidateDns2(string text) => Validate(text, v => dns2Valid = v);
+
+    string? Validate(string text, Action<bool> setValid)
+    {
+        var ok = System.Text.RegularExpressions.Regex.IsMatch(text, Ipv4Pattern);
+        setValid(ok);
+        if (ValidityChanged.HasDelegate) _ = ValidityChanged.InvokeAsync();
+        return ok ? null : L["Not a valid IPv4 address"];
+    }
 }

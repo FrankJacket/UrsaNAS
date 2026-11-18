@@ -24,10 +24,10 @@
             <MudText Typo="Typo.subtitle2" Class="mb-2">@Iface.Name</MudText>
             <MudTabs Elevation="0" Rounded="true" TabPanelsClass="pt-3">
                 <MudTabPanel Text="IPv4">
-                    <Fields Cfg="v4" Ipv6="false" />
+                    <Fields @ref="v4Fields" Cfg="v4" Ipv6="false" ValidityChanged="StateHasChanged" />
                 </MudTabPanel>
                 <MudTabPanel Text="IPv6">
-                    <Fields Cfg="v6" Ipv6="true" />
+                    <Fields @ref="v6Fields" Cfg="v6" Ipv6="true" ValidityChanged="StateHasChanged" />
                 </MudTabPanel>
             </MudTabs>
             <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-3">
@@ -43,7 +43,7 @@
         else
         {
             <MudButton Disabled="busy" OnClick="() => Dialog.Cancel()">@L["Cancel"]</MudButton>
-            <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="busy" OnClick="Apply">@L["Confirm"]</MudButton>
+            <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(busy || !FieldsValid)" OnClick="Apply">@L["Confirm"]</MudButton>
         }
     </DialogActions>
 </MudDialog>
@@ -61,8 +61,11 @@
     }
 
     readonly Form v4 = new(), v6 = new();
+    Fields? v4Fields, v6Fields;
     string? error;
     bool busy, done;
+
+    bool FieldsValid => (v4Fields?.IsValid ?? true) && (v6Fields?.IsValid ?? true);
 
     protected override void OnInitialized()
     {
@@ -86,6 +89,12 @@
     async Task Apply()
     {
         error = null;
+        if (!FieldsValid)
+        {
+            error = L["Fix the highlighted fields before saving."];
+            return;
+        }
+
         busy = true;
         try
         {

@@ -10,57 +10,68 @@
         {
             <MudAlert Severity="Severity.Error" Class="mb-3">@error</MudAlert>
         }
-        <MudTextField @bind-Value="job.Name" Label="@L["Job name"]" Immediate="true" Disabled="busy" AutoFocus="@(job.Id == 0)" />
+        <MudTextField @bind-Value="job.Name" Label="@L["Job name"]" Immediate="true" Disabled="busy" AutoFocus="@(job.Id == 0)" Class="mb-3" />
 
-        <MudText Typo="Typo.subtitle2" Class="mt-4">@L["What to back up"]</MudText>
-        <div class="mt-2">
-            @foreach (var item in selection)
-            {
-                var entry = item;
-                <MudChip T="string" Size="Size.Small" OnClose="() => selection.Remove(entry)">/@Label(entry)</MudChip>
-            }
-            <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.FactCheck" OnClick="Choose" Disabled="busy">@L["Choose what to back up"]</MudButton>
-        </div>
-        <MudText Typo="Typo.caption" Class="d-block">@L["Pick shares, folders and files across all the shares."]</MudText>
-        @if (Existing is { SubFolders: false } && SharesOf().Count > 1)
-        {
-            <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">@L["With several shares, each one is copied into its own sub-folder of the folder on the disk. What was already copied stays where it is; delete it by hand if you do not need it."]</MudAlert>
-        }
-        <MudSwitch T="bool" @bind-Value="job.Snapshot" Label="@L["Copy from a ZFS snapshot"]" Color="Color.Primary" Disabled="@(busy || !HasDataset)" />
-        <MudText Typo="Typo.caption" Class="d-block">@(HasDataset
-            ? L["A snapshot freezes the share during the copy, so files that change (databases, virtual disks) are copied consistently."]
-            : L["Only available for a share stored on a ZFS dataset. Without a snapshot, files that change during the copy may be copied in an inconsistent state."])</MudText>
+        <MudTabs Elevation="0" Rounded="true" TabPanelsClass="pt-3">
+            <MudTabPanel Text="@L["What to back up"]">
+                <div class="mt-2">
+                    @foreach (var item in selection)
+                    {
+                        var entry = item;
+                        <MudChip T="string" Size="Size.Small" OnClose="() => selection.Remove(entry)">/@Label(entry)</MudChip>
+                    }
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.FactCheck" OnClick="Choose" Disabled="busy">@L["Choose what to back up"]</MudButton>
+                </div>
+                <MudText Typo="Typo.caption" Class="d-block">@L["Pick shares, folders and files across all the shares."]</MudText>
+                @if (Existing is { SubFolders: false } && SharesOf().Count > 1)
+                {
+                    <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">@L["With several shares, each one is copied into its own sub-folder of the folder on the disk. What was already copied stays where it is; delete it by hand if you do not need it."]</MudAlert>
+                }
+                <MudSwitch T="bool" @bind-Value="job.Snapshot" Label="@L["Copy from a ZFS snapshot"]" Color="Color.Primary" Disabled="@(busy || !HasDataset)" Class="mt-2" />
+                <MudText Typo="Typo.caption" Class="d-block">@(HasDataset
+                    ? L["A snapshot freezes the share during the copy, so files that change (databases, virtual disks) are copied consistently."]
+                    : L["Only available for a share stored on a ZFS dataset. Without a snapshot, files that change during the copy may be copied in an inconsistent state."])</MudText>
 
-        <MudText Typo="Typo.subtitle2" Class="mt-4">@L["Where to copy"]</MudText>
-        <MudSelect T="string" @bind-Value="job.TargetDir" Label="@L["Backup disk"]" Disabled="busy"
-                   HelperText="@(targets.Count == 0 ? L["No disk mounted under /mnt or /media. Plug the disk and mount it, then reopen this window."] : L["The disk must be mounted on the NAS first."])">
-            @foreach (var t in TargetChoices())
-            {
-                <MudSelectItem T="string" Value="@t.Dir">@Describe(t)</MudSelectItem>
-            }
-        </MudSelect>
-        <MudTextField @bind-Value="job.DestFolder" Label="@L["Folder on the disk"]" Disabled="busy" HelperText="@L["Several jobs can share one disk, each in its own folder."]" />
+                <MudSwitch T="bool" @bind-Value="job.Verify" Label="@L["Verify each copied file (slower)"]" Color="Color.Primary" Disabled="busy" />
+                <MudTextField @bind-Value="excludes" Label="@L["Files and folders to skip"]" Lines="4" Disabled="busy"
+                              HelperText="@L["One per line. * and ? are allowed. A name without a slash matches at any depth."]" />
+            </MudTabPanel>
+            <MudTabPanel Text="@L["Where to copy"]">
+                <MudSelect T="string" @bind-Value="job.TargetDir" Label="@L["Backup disk"]" Disabled="busy"
+                           HelperText="@(targets.Count == 0 ? L["No disk mounted under /mnt or /media. Plug the disk and mount it, then reopen this window."] : L["The disk must be mounted on the NAS first."])">
+                    @foreach (var t in TargetChoices())
+                    {
+                        <MudSelectItem T="string" Value="@t.Dir">@Describe(t)</MudSelectItem>
+                    }
+                </MudSelect>
+                <MudTextField @bind-Value="job.DestFolder" Label="@L["Folder on the disk"]" Disabled="busy" HelperText="@L["Several jobs can share one disk, each in its own folder."]" />
+                <MudSwitch T="bool" @bind-Value="job.WindowsDisk" Label="@L["The disk is formatted NTFS or exFAT"]" Color="Color.Primary" Disabled="busy" />
 
-        <MudText Typo="Typo.subtitle2" Class="mt-4">@L["When"]</MudText>
-        <MudSelect T="int" @bind-Value="job.ScheduleMode" Label="@L["Schedule"]" Disabled="busy">
-            <MudSelectItem T="int" Value="@BackupSchedule.Manual">@L["Manual only"]</MudSelectItem>
-            <MudSelectItem T="int" Value="@BackupSchedule.Daily">@L["Every day"]</MudSelectItem>
-            <MudSelectItem T="int" Value="@BackupSchedule.OnPlug">@L["Whenever the disk is connected"]</MudSelectItem>
-        </MudSelect>
-        @if (job.ScheduleMode == BackupSchedule.Daily)
-        {
-            <MudTextField @bind-Value="job.DailyTime" Label="@L["Time (HH:mm)"]" Disabled="busy" />
-        }
-        <MudSwitch T="bool" @bind-Value="job.Enabled" Label="@L["Enabled"]" Color="Color.Primary" Disabled="busy" />
+            </MudTabPanel>
+            <MudTabPanel Text="@L["Schedule"]">
+                
+                               
+                <MudSelect T="int" @bind-Value="job.ScheduleMode" Label="@L["Schedule"]" Disabled="busy">
+                    <MudSelectItem T="int" Value="@BackupSchedule.Manual">@L["Manual only"]</MudSelectItem>
+                    <MudSelectItem T="int" Value="@BackupSchedule.Daily">@L["Every day"]</MudSelectItem>
+                    <MudSelectItem T="int" Value="@BackupSchedule.OnPlug">@L["Whenever the disk is connected"]</MudSelectItem>
+                </MudSelect>
+                @if (job.ScheduleMode == BackupSchedule.Daily)
+                {
+                    <MudTimePicker Time="@TimeSpan.Parse(job.DailyTime)" TimeChanged="OnDailyTimeChanged"
+                                   Label="@L["Time"]" Disabled="busy" Style="max-width:280px"
+                                   TimeFormat="@Culture.DateTimeFormat.ShortTimePattern" AmPm="@Culture.DateTimeFormat.ShortTimePattern.Contains("tt")" />
+                }
+                <MudSwitch T="bool" @bind-Value="job.Enabled" Label="@L["Enabled"]" Color="Color.Primary" Disabled="busy" Class="mt-2" />
+            </MudTabPanel>
 
-        <MudText Typo="Typo.subtitle2" Class="mt-4">@L["Options"]</MudText>
-        <MudSwitch T="bool" @bind-Value="job.MirrorDeletes" Label="@L["Remove from the copy what was deleted from the share"]" Color="Color.Primary" Disabled="busy" />
-        <MudNumericField T="int" @bind-Value="job.RetentionDays" Label="@L["Keep deleted and replaced files (days)"]" Min="0" Max="@BackupRules.MaxRetentionDays" HideSpinButtons="true" Disabled="busy"
-                         HelperText="@L["They go to a trash folder on the disk. 0 = delete right away."]" />
-        <MudSwitch T="bool" @bind-Value="job.Verify" Label="@L["Verify each copied file (slower)"]" Color="Color.Primary" Disabled="busy" />
-        <MudSwitch T="bool" @bind-Value="job.WindowsDisk" Label="@L["The disk is formatted NTFS or exFAT"]" Color="Color.Primary" Disabled="busy" />
-        <MudTextField @bind-Value="excludes" Label="@L["Files and folders to skip"]" Lines="4" Disabled="busy"
-                      HelperText="@L["One per line. * and ? are allowed. A name without a slash matches at any depth."]" />
+            <MudTabPanel Text="@L["Retention"]">
+                <MudSwitch T="bool" @bind-Value="job.MirrorDeletes" Label="@L["Remove from the copy what was deleted from the share"]" Color="Color.Primary" Disabled="busy" />
+                <MudNumericField T="int" @bind-Value="job.RetentionDays" Label="@L["Keep deleted and replaced files (days)"]" Min="0" Max="@BackupRules.MaxRetentionDays" HideSpinButtons="true" Disabled="busy"
+                                 HelperText="@L["They go to a trash folder on the disk. 0 = delete right away."]" />
+                
+            </MudTabPanel>
+        </MudTabs>
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="() => Dialog.Cancel()" Disabled="busy">@L["Cancel"]</MudButton>
@@ -78,6 +89,10 @@
     string excludes = "";
     string? error;
     bool busy;
+
+    System.Globalization.CultureInfo Culture => System.Globalization.CultureInfo.GetCultureInfo(L.Lang);
+
+    void OnDailyTimeChanged(TimeSpan? v) { if (v is { } t) job.DailyTime = t.ToString(@"hh\:mm"); }
 
     bool HasDataset => SharesOf().Any(s => shares.FirstOrDefault(x => x.Name == s)?.Dataset is not null);
     List<(string Share, string Path)> selection = new();

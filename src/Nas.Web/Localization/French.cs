@@ -159,6 +159,7 @@ public static class French
         ["Enter 1 to 5 recipients."] = "Indique de 1 à 5 destinataires.",
         ["Invalid address: {0}."] = "Adresse invalide : {0}.",
         ["Invalid username or password."] = "Identifiant ou mot de passe invalide.",
+        ["Fix the highlighted fields before saving."] = "Corrige les champs en erreur avant d'enregistrer.",
         ["The UrsaNAS agent is not responding"] = "L'agent UrsaNAS ne répond pas",
         ["The interface can no longer read the NAS state. Check the ursanas-agent service."] = "L'interface ne peut plus lire l'état du NAS. Vérifie le service ursanas-agent.",
         ["The pool still works but is no longer redundant: replace the failed disk as soon as possible."] = "Le pool fonctionne encore mais n'est plus redondant : remplace le disque défaillant au plus vite.",
@@ -468,6 +469,7 @@ public static class French
         ["When"] = "Quand",
         ["Time"] = "Heure",
         ["Options"] = "Options",
+        ["Retention"] = "Conservation",
         ["Remove from the copy what was deleted from the share"] = "Retirer de la copie ce qui a été supprimé du partage",
         ["Keep deleted and replaced files (days)"] = "Conserver les fichiers supprimés ou remplacés (jours)",
         ["They go to a trash folder on the disk. 0 = delete right away."] = "Ils vont dans une corbeille sur le disque. 0 = suppression immédiate.",
@@ -1528,6 +1530,5 @@ public static class French
         ["Preparing…"] = "Préparation…",
         ["Enter a password, or turn protection off."] = "Entrez un mot de passe, ou désactivez la protection.",
         ["This password is too long."] = "Ce mot de passe est trop long.",
-        ["Time (HH:mm)"] = "Heure (HH:mm)",
     };
 }

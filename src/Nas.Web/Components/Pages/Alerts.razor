@@ -57,10 +57,10 @@
             <MudTextField @bind-Value="mail.User" Label="@L["Username (optional)"]" />
             <MudTextField @bind-Value="mail.Password" Label="@L["Password"]" InputType="InputType.Password"
                           HelperText="@(hasPassword ? L["A password is saved; leave empty to keep it."] : null)" />
-            <UrsaMaskedField Value="@mail.From" ValueChanged="v => mail.From = v ?? string.Empty" MaskType="UrsaMaskType.Email" Label="@L["Sender"]" />
-            <MudTextField @bind-Value="mail.To" Label="@L["Recipients"]" HelperText="@L["Up to five addresses, separated by commas."]" />
+            <UrsaMaskedField Value="@from" ValueChanged="OnFromChanged" Validator="ValidateFrom" Label="@L["Sender"]" />
+            <MudTextField @bind-Value="mail.To" Label="@L["Recipients"]" HelperText="@L["Up to five addresses, separated by commas."]" Validation="@(new Func<string, string?>(ValidateRecipients))" />
             <MudStack Row="true" Class="mt-4">
-                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Save" Disabled="busy">@L["Save"]</MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Save" Disabled="@(busy || !fromValid || !toValid)">@L["Save"]</MudButton>
                 <MudButton Variant="Variant.Outlined" OnClick="SendTest" Disabled="busy">@(busy ? L["Sending…"] : L["Send a test email"])</MudButton>
             </MudStack>
             <MudText Typo="Typo.caption" Class="mt-2">@L["The test uses the saved settings. Alert emails are written in the language in use when you save."]</MudText>
@@ -96,6 +96,12 @@
     bool loaded, hasPassword, busy, checking, formLoaded;
     string? formError;
 
+    // Reflètent mail.From/To : UrsaMaskedField doit être lié à un champ nullable à lui (jamais ramené à ""),
+    // sinon la valeur poussée en retour diffère de celle, invalide, qu'il vient de refuser, et il se redessine
+    // vide sans message — voir UrsaMaskedField.OnParametersSet.
+    string? from;
+    bool fromValid = true, toValid = true;
+
     protected override async Task LoadAsync()
     {
         active = await Repo.GetActiveAlertsAsync();
@@ -109,7 +115,36 @@
         var saved = await Repo.GetMailSettingsAsync();
         hasPassword = saved.Password.Length > 0;
         mail = MailForm.Of(saved);
+        from = mail.From.Length > 0 ? mail.From : null;
+        fromValid = toValid = true;
         formLoaded = true;
+    }
+
+    Task OnFromChanged(string? v)
+    {
+        from = v;
+        mail.From = v ?? "";
+        return Task.CompletedTask;
+    }
+
+    string? ValidateFrom(string text)
+    {
+        fromValid = MailRules.IsEmail(text);
+        return fromValid ? null : L["Invalid sender address."];
+    }
+
+    string? ValidateRecipients(string text)
+    {
+        var parts = text.Split([',', ';', ' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length > 5)
+        {
+            toValid = false;
+            return L["Enter 1 to 5 recipients."];
+        }
+
+        var bad = parts.FirstOrDefault(a => !MailRules.IsEmail(a));
+        toValid = bad is null;
+        return bad is null ? null : L["Invalid address: {0}.", bad];
     }
 
     async Task CheckNow()
@@ -126,6 +161,12 @@
     async Task Save()
     {
         formError = null;
+        if (!fromValid || !toValid)
+        {
+            formError = L["Fix the highlighted fields before saving."];
+            return;
+        }
+
         busy = true;
         try
         {
