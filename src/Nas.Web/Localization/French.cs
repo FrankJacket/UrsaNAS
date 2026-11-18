@@ -749,6 +749,7 @@ public static class French
         ["Enter between 1 and {0} DNS servers."] = "Indiquez de 1 à {0} serveurs DNS.",
         ["Invalid DNS server: {0}."] = "Serveur DNS invalide : {0}.",
         ["Invalid IPv4 address."] = "Adresse IPv4 invalide.",
+        ["Not a valid IPv4 address"] = "Adresse IPv4 invalide",
         ["Invalid IPv6 address."] = "Adresse IPv6 invalide.",
         ["Invalid IPv6 prefix length (1 to 128)."] = "Longueur de préfixe IPv6 invalide (1 à 128).",
         ["Invalid gateway."] = "Passerelle invalide.",

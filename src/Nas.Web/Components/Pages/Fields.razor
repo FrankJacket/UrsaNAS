@@ -5,21 +5,50 @@
         <MudRadio T="string" Value="@("auto")">@(Ipv6 ? L["Automatic"] : L["Automatic (DHCP)"])</MudRadio>
         <MudRadio T="string" Value="@("manual")">@L["Manual"]</MudRadio>
     </MudRadioGroup>
-    <MudTextField T="string" @bind-Value="Cfg.Address" Label="@(Ipv6 ? L["IPv6 address"] : L["IPv4 address"])" Disabled="@(Cfg.Mode != "manual")" Variant="Variant.Outlined" Margin="Margin.Dense" />
+    @if (Ipv6)
+    {
+        <MudTextField T="string" @bind-Value="Cfg.Address" Label="@L["IPv6 address"]" Disabled="@(Cfg.Mode != "manual")" Variant="Variant.Outlined" Margin="Margin.Dense" />
+    }
+    else
+    {
+        <UrsaMaskedField Value="@Cfg.Address" ValueChanged="v => Cfg.Address = v ?? string.Empty" Pattern="@Ipv4Pattern" PatternError="@L["Not a valid IPv4 address"]"
+                         Label="@L["IPv4 address"]" Disabled="@(Cfg.Mode != "manual")" Variant="Variant.Outlined" Margin="Margin.Dense" />
+    }
     <MudTextField T="string" @bind-Value="Cfg.Netmask" Label="@(Ipv6 ? L["Prefix length"] : L["Subnet mask"])" Disabled="@(Cfg.Mode != "manual")" Variant="Variant.Outlined" Margin="Margin.Dense"
                   HelperText="@(Ipv6 ? "64" : "255.255.255.0")" />
-    <MudTextField T="string" @bind-Value="Cfg.Gateway" Label="@L["Gateway"]" Disabled="@(Cfg.Mode != "manual")" Variant="Variant.Outlined" Margin="Margin.Dense" />
+    @if (Ipv6)
+    {
+        <MudTextField T="string" @bind-Value="Cfg.Gateway" Label="@L["Gateway"]" Disabled="@(Cfg.Mode != "manual")" Variant="Variant.Outlined" Margin="Margin.Dense" />
+    }
+    else
+    {
+        <UrsaMaskedField Value="@Cfg.Gateway" ValueChanged="v => Cfg.Gateway = v ?? string.Empty" Pattern="@Ipv4Pattern" PatternError="@L["Not a valid IPv4 address"]"
+                         Label="@L["Gateway"]" Disabled="@(Cfg.Mode != "manual")" Variant="Variant.Outlined" Margin="Margin.Dense" />
+    }
 
     <MudText Typo="Typo.subtitle2" Class="mt-2">DNS</MudText>
     <MudRadioGroup T="string" @bind-Value="Cfg.DnsMode">
         <MudRadio T="string" Value="@("auto")">@L["Automatic"]</MudRadio>
         <MudRadio T="string" Value="@("manual")">@L["Manual"]</MudRadio>
     </MudRadioGroup>
-    <MudTextField T="string" @bind-Value="Cfg.Dns1" Label="@L["Preferred DNS server"]" Disabled="@(Cfg.DnsMode != "manual")" Variant="Variant.Outlined" Margin="Margin.Dense" />
-    <MudTextField T="string" @bind-Value="Cfg.Dns2" Label="@L["Alternate DNS server"]" Disabled="@(Cfg.DnsMode != "manual")" Variant="Variant.Outlined" Margin="Margin.Dense" />
+    @if (Ipv6)
+    {
+        <MudTextField T="string" @bind-Value="Cfg.Dns1" Label="@L["Preferred DNS server"]" Disabled="@(Cfg.DnsMode != "manual")" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        <MudTextField T="string" @bind-Value="Cfg.Dns2" Label="@L["Alternate DNS server"]" Disabled="@(Cfg.DnsMode != "manual")" Variant="Variant.Outlined" Margin="Margin.Dense" />
+    }
+    else
+    {
+        <UrsaMaskedField Value="@Cfg.Dns1" ValueChanged="v => Cfg.Dns1 = v ?? string.Empty" Pattern="@Ipv4Pattern" PatternError="@L["Not a valid IPv4 address"]"
+                         Label="@L["Preferred DNS server"]" Disabled="@(Cfg.DnsMode != "manual")" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        <UrsaMaskedField Value="@Cfg.Dns2" ValueChanged="v => Cfg.Dns2 = v ?? string.Empty" Pattern="@Ipv4Pattern" PatternError="@L["Not a valid IPv4 address"]"
+                         Label="@L["Alternate DNS server"]" Disabled="@(Cfg.DnsMode != "manual")" Variant="Variant.Outlined" Margin="Margin.Dense" />
+    }
 </MudStack>
 
 @code {
     [Parameter, EditorRequired] public NetworkEditDialog.Form Cfg { get; set; } = default!;
     [Parameter] public bool Ipv6 { get; set; }
+
+    // Mêmes octets que NetRules.TryIPv4 côté agent (0-255, zéros non significatifs tolérés) ; le champ reste vide sans erreur.
+    const string Ipv4Pattern = @"^((25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(25[0-5]|2[0-4]\d|[01]?\d\d?)$";
 }

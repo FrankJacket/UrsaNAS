@@ -7,4 +7,7 @@
   <Folder Name="/tests/">
     <Project Path="tests/Nas.Agent.Tests/Nas.Agent.Tests.csproj" />
   </Folder>
+  <Folder Name="/external/">
+    <Project Path="external/Ursacopy/src/Ursacopy.Core/Ursacopy.Core.csproj" />
+  </Folder>
 </Solution>
