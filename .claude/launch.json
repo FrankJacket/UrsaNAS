@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "nas-web",
+      "runtimeExecutable": "wsl",
+      "runtimeArgs": ["--", "bash", "-lc", "export PATH=\"$HOME/.dotnet:$PATH\"; export DataDir=/tmp/ursanas-webdata-ursauitools; mkdir -p \"$DataDir\"; cd /mnt/c/Workspaces/FrankJacket/UrsaNAS && dotnet run --project src/Nas.Web --urls http://0.0.0.0:5018"],
+      "port": 5018
+    }
+  ]
+}
