@@ -1,8 +1,6 @@
 @inherits LayoutComponentBase
 @implements IDisposable
 @inject ThemeState Theme
-@inject Nas.Web.Alerting.AlertState Alerts
-@inject DockerAvailability Docker
 @inject IJSRuntime JS
 @inject NavigationManager Nav
 @inject IDialogService Dialogs
@@ -16,8 +14,10 @@
 
 <MudLayout>
     <MudAppBar Elevation="1">
-        <MudIcon Icon="@Icons.Material.Filled.Storage" Class="mr-2" />
-        <MudText Typo="Typo.h6">UrsaNAS</MudText>
+        <MudLink Href="/" Color="Color.Inherit" Underline="Underline.None" Class="d-flex align-center">
+            <MudIcon Icon="@Icons.Material.Filled.Storage" Class="mr-2" />
+            <MudText Typo="Typo.h6">UrsaNAS</MudText>
+        </MudLink>
         <MudSpacer />
         <AuthorizeView>
             @* Tous les comptes de l'interface sont des administrateurs : l'icône n'existe que pour une session ouverte. *@
@@ -45,60 +45,16 @@
             </MudMenu>
         </AuthorizeView>
     </MudAppBar>
-    <MudDrawer Open="true" Elevation="0" Variant="DrawerVariant.Persistent">
-        <MudNavMenu>
-            <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Dashboard">@L["Dashboard"]</MudNavLink>
-            <MudNavGroup Title="@L["Storage"]" Icon="@Icons.Material.Filled.Storage" Expanded="false">
-                <MudNavLink Href="/disks" Icon="@Icons.Material.Filled.Dns">@L["Disks"]</MudNavLink>
-                <MudNavLink Href="/pools" Icon="@Icons.Material.Filled.Layers">@L["ZFS pools"]</MudNavLink>
-                <MudNavLink Href="/datasets" Icon="@Icons.Material.Filled.FolderCopy">@L["Datasets"]</MudNavLink>
-                <MudNavLink Href="/remote-storage" Icon="@Icons.Material.Filled.CloudSync">@L["Remote storage"]</MudNavLink>
-                <MudNavLink Href="/backups" Icon="@Icons.Material.Filled.Backup">@L["Backups"]</MudNavLink>
-            </MudNavGroup>
-            <MudNavGroup Title="@L["Sharing"]" Icon="@Icons.Material.Filled.FolderShared" Expanded="false">
-                <MudNavLink Href="/shares" Icon="@Icons.Material.Filled.Share">@L["Shares"]</MudNavLink>
-                <MudNavLink Href="/services" Icon="@Icons.Material.Filled.SettingsEthernet">@L["Services"]</MudNavLink>
-            </MudNavGroup>
-            <MudNavLink Href="/folders" Icon="@Icons.Material.Filled.Folder">@L["File Manager"]</MudNavLink>
-            <MudNavLink Href="/network" Icon="@Icons.Material.Filled.Router">@L["Network"]</MudNavLink>
-            <MudNavLink Href="/vms" Icon="@Icons.Material.Filled.Computer">@L["Virtual machines"]</MudNavLink>
-            @if (Docker.Ready)
-            {
-                @* Le groupe n'existe que si Docker est installé et que son service répond ; sinon la page /docker explique quoi faire. *@
-                <MudNavGroup Title="Docker" Icon="@Icons.Material.Filled.ViewInAr" Expanded="false">
-                    <MudNavLink Href="/docker/containers" Icon="@Icons.Material.Filled.Inventory2">@L["Containers"]</MudNavLink>
-                    <MudNavLink Href="/docker/images" Icon="@Icons.Material.Filled.Album">@L["Images"]</MudNavLink>
-                    <MudNavLink Href="/docker/stacks" Icon="@Icons.Material.Filled.Layers">@L["Stacks"]</MudNavLink>
-                    <MudNavLink Href="/docker/volumes" Icon="@Icons.Material.Filled.Lan">@L["Volumes and networks"]</MudNavLink>
-                </MudNavGroup>
-            }
-            <MudNavGroup Title="@L["Accounts"]" Icon="@Icons.Material.Filled.ManageAccounts" Expanded="false">
-                <MudNavLink Href="/users" Icon="@Icons.Material.Filled.People">@L["Users"]</MudNavLink>
-                <MudNavLink Href="/groups" Icon="@Icons.Material.Filled.Groups">@L["Groups"]</MudNavLink>
-                <MudNavLink Href="/admins" Icon="@Icons.Material.Filled.AdminPanelSettings">@L["Administrators"]</MudNavLink>
-            </MudNavGroup>
-            <MudNavGroup Title="@L["Monitoring"]" Icon="@Icons.Material.Filled.MonitorHeart" Expanded="false">
-                <MudNavLink Href="/alerts" Icon="@Icons.Material.Filled.NotificationsActive">
-                    @L["Alerts"]
-                    @if (Alerts.Count > 0)
-                    {
-                        <MudChip T="string" Size="Size.Small" Color="@(Alerts.CriticalCount > 0 ? Color.Error : Color.Warning)" Class="ml-2">@Alerts.Count</MudChip>
-                    }
-                </MudNavLink>
-                <MudNavLink Href="/journal" Icon="@Icons.Material.Filled.History">@L["Audit log"]</MudNavLink>
-            </MudNavGroup>
-            <MudNavLink Href="/system-settings" Icon="@Icons.Material.Filled.SystemUpdateAlt">@L["System settings"]</MudNavLink>
-        </MudNavMenu>
-    </MudDrawer>
-    <MudMainContent Class="pt-20 px-4 pb-4">@Body</MudMainContent> @* pt-20 : dégage la barre d'application fixe *@
+    @* Plus de menu latéral : les fonctions sont les icônes du bureau (page d'accueil) ; le bouton « Bureau » de la barre des tâches y revient. *@
+    <MudMainContent Class="pt-20 px-4 pb-16">@Body</MudMainContent> @* pt-20 : dégage la barre d'application fixe ; pb-16 : la barre des tâches *@
+    <DesktopHost />
+    <DesktopTaskbar />
 </MudLayout>
 
 @code {
     protected override void OnInitialized()
     {
         Theme.Changed += OnThemeChanged;
-        Alerts.Changed += OnThemeChanged; // même rafraîchissement : la pastille d'alertes suit le contrôle périodique
-        Docker.Changed += OnThemeChanged; // le groupe Docker apparaît ou disparaît avec l'état du service
     }
     void OnThemeChanged() => InvokeAsync(StateHasChanged);
 
@@ -133,7 +89,5 @@
     public void Dispose()
     {
         Theme.Changed -= OnThemeChanged;
-        Alerts.Changed -= OnThemeChanged;
-        Docker.Changed -= OnThemeChanged;
     }
 }

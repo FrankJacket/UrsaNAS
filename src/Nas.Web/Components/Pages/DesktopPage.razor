@@ -1,0 +1,63 @@
+@page "/"
+@implements IDisposable
+@inject DesktopState Desk
+@inject DockerAvailability Docker
+@inject AlertState Alerts
+@inject NavigationManager Nav
+
+<MudText Typo="Typo.h4" Class="mb-2">@L["Desktop"]</MudText>
+
+@foreach (var group in DesktopState.Apps.Where(a => !a.NeedsDocker || Docker.Ready).GroupBy(a => a.Category))
+{
+    <MudText Typo="Typo.overline" Class="mt-6 mb-1 desk-category">@(group.Key == "Docker" ? "Docker" : L[group.Key])</MudText>
+    <div class="desk-grid">
+        @foreach (var app in group)
+        {
+            var a = app;
+            <button type="button" class="desk-icon" @onclick="() => OpenApp(a)">
+                <MudBadge Content="@AlertCount(a)" Visible="@(AlertCount(a) > 0)" Color="@(Alerts.CriticalCount > 0 ? Color.Error : Color.Warning)" Overlap="true">
+                    <MudIcon Icon="@a.Icon" Style="font-size:3.5rem" />
+                </MudBadge>
+                <span class="desk-label">@L[a.Title]</span>
+            </button>
+        }
+    </div>
+}
+
+<style>
+    .desk-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
+    .desk-icon {
+        display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 10px;
+        min-height: 128px; padding: 16px 8px; border: 0; border-radius: 16px; cursor: pointer;
+        background: transparent; color: var(--mud-palette-text-primary); font: inherit;
+    }
+    .desk-icon:hover, .desk-icon:focus-visible { background: var(--mud-palette-action-default-hover); outline: none; }
+    .desk-icon:active { background: var(--mud-palette-gray-light); }
+    .desk-label { font-size: .95rem; text-align: center; line-height: 1.25; }
+    .desk-category { opacity: .7; }
+</style>
+
+@code {
+    protected override void OnInitialized()
+    {
+        Docker.Changed += OnChanged; // la catégorie Docker apparaît ou disparaît avec l'état du service
+        Alerts.Changed += OnChanged;
+    }
+
+    void OnChanged() => InvokeAsync(StateHasChanged);
+
+    int AlertCount(DesktopApp app) => app.Id == "alerts" ? Alerts.Count : 0;
+
+    // Les fonctions déjà converties s'ouvrent en fenêtre ; les autres restent des pages.
+    void OpenApp(DesktopApp app)
+    {
+        if (app.Component is not null) Desk.Open(app);
+        else Nav.NavigateTo(app.Href);
+    }
+
+    public void Dispose()
+    {
+        Docker.Changed -= OnChanged;
+        Alerts.Changed -= OnChanged;
+    }
+}

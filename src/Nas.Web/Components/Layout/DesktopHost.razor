@@ -1,0 +1,58 @@
+@implements IDisposable
+@inject DesktopState Desktop
+
+@* Les fenêtres vivent dans la mise en page : elles restent ouvertes quand on change de page. *@
+@foreach (var w in Desktop.Windows)
+{
+    var win = w;
+    <UrsaFloatingDialog @key="win.App.Id"
+                        @ref="_dialogs[win.App.Id]"
+                        Visible="true"
+                        VisibleChanged="_ => Close(win.App.Id)"
+                        Title="@L[win.App.Title]"
+                        ShowMinimizeButton="true"
+                        ShowMaximizeButton="true"
+                        Minimized="win.Minimized"
+                        MinimizedChanged="v => Desktop.SetMinimized(win.App.Id, v)"
+                        Maximized="win.Maximized"
+                        MaximizedChanged="v => Desktop.SetMaximized(win.App.Id, v)"
+                        InitialWidth="win.App.Width"
+                        InitialHeight="win.App.Height"
+                        InitialX="120 + win.Slot * 40"
+                        InitialY="100 + win.Slot * 40">
+        <DialogContent>
+            <CascadingValue Name="InWindow" Value="true" IsFixed="true">
+                <DynamicComponent Type="win.App.Component!" />
+            </CascadingValue>
+        </DialogContent>
+    </UrsaFloatingDialog>
+}
+
+@code {
+    readonly Dictionary<string, UrsaFloatingDialog?> _dialogs = [];
+
+    protected override void OnInitialized()
+    {
+        Desktop.Changed += OnChanged;
+        Desktop.FrontRequested += OnFrontRequested;
+    }
+
+    void OnChanged() => InvokeAsync(StateHasChanged);
+
+    void OnFrontRequested(string id) => InvokeAsync(async () =>
+    {
+        if (_dialogs.TryGetValue(id, out var dialog) && dialog is not null) await dialog.BringToFrontAsync();
+    });
+
+    void Close(string id)
+    {
+        _dialogs.Remove(id);
+        Desktop.Close(id);
+    }
+
+    public void Dispose()
+    {
+        Desktop.Changed -= OnChanged;
+        Desktop.FrontRequested -= OnFrontRequested;
+    }
+}

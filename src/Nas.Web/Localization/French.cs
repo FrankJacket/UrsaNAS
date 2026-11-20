@@ -6,6 +6,8 @@ public static class French
     public static readonly IReadOnlyDictionary<string, string> Table = new Dictionary<string, string>(StringComparer.Ordinal)
     {
         ["Sign out"] = "Se déconnecter",
+        ["Desktop"] = "Bureau",
+        ["System"] = "Système",
         ["Light theme"] = "Thème clair",
         ["Dark theme"] = "Thème sombre",
         ["Disks"] = "Disques",

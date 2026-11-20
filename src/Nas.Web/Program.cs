@@ -18,6 +18,7 @@ var b = WebApplication.CreateBuilder(args);
 b.Services.AddRazorComponents().AddInteractiveServerComponents();
 b.Services.AddMudServices();
 b.Services.AddScoped<ThemeState>();
+b.Services.AddScoped<DesktopState>();
 b.Services.AddSingleton<Db>();
 b.Services.AddSingleton<Repo>();
 b.Services.AddScoped<NasOperations>();

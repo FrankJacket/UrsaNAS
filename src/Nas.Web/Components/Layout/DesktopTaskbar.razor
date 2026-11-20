@@ -1,0 +1,53 @@
+@implements IDisposable
+@inject DesktopState Desktop
+@inject AlertState Alerts
+@inject NavigationManager Nav
+
+@* Barre des tâches : retour au bureau, une pastille par fenêtre ouverte, alertes à droite. *@
+<div class="desk-taskbar">
+    <MudTooltip Text="@L["Desktop"]">
+        <MudIconButton Icon="@Icons.Material.Filled.Home" Color="Color.Inherit" OnClick="@(() => Nav.NavigateTo("/"))" />
+    </MudTooltip>
+    @foreach (var w in Desktop.Windows)
+    {
+        var win = w;
+        <MudButton Variant="@(win.Minimized ? Variant.Text : Variant.Outlined)" Color="Color.Inherit" Size="Size.Small"
+                   StartIcon="@win.App.Icon" Class="desk-task" OnClick="@(() => Desktop.Show(win.App.Id))">
+            @L[win.App.Title]
+        </MudButton>
+    }
+    <MudSpacer />
+    @if (Alerts.Count > 0)
+    {
+        <MudChip T="string" Size="Size.Small" Color="@(Alerts.CriticalCount > 0 ? Color.Error : Color.Warning)"
+                 Icon="@Icons.Material.Filled.NotificationsActive" OnClick="@(() => Nav.NavigateTo("/alerts"))">@Alerts.Count</MudChip>
+    }
+</div>
+
+<style>
+    /* Zone laissée libre aux fenêtres : sous la barre d'application (64 px) et au-dessus de la barre des tâches (48 px). */
+    :root { --ursa-dialog-inset-top: 64px; --ursa-dialog-inset-bottom: 48px; }
+    .desk-taskbar {
+        position: fixed; left: 0; right: 0; bottom: 0; height: 48px; padding: 0 8px; gap: 6px;
+        display: flex; align-items: center;
+        background: var(--mud-palette-appbar-background); color: var(--mud-palette-appbar-text);
+        z-index: calc(var(--mud-zindex-appbar) + 50); /* au-dessus des fenêtres, sous les dialogues modaux de MudBlazor */
+    }
+    .desk-task { max-width: 220px; text-transform: none; }
+</style>
+
+@code {
+    protected override void OnInitialized()
+    {
+        Desktop.Changed += OnChanged;
+        Alerts.Changed += OnChanged;
+    }
+
+    void OnChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        Desktop.Changed -= OnChanged;
+        Alerts.Changed -= OnChanged;
+    }
+}

@@ -6,7 +6,10 @@
 @inject IDialogService Dialogs
 @inject ISnackbar Snack
 
-<MudText Typo="Typo.h4" Class="mb-4">@L["Shares"]</MudText>
+@if (!InWindow)
+{
+    <MudText Typo="Typo.h4" Class="mb-4">@L["Shares"]</MudText>
+}
 <MudStack Row="true" Class="mb-4">
     <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.CreateNewFolder" OnClick="Add">@L["Add a share"]</MudButton>
     <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Sync" OnClick="Reapply">@L["Reapply"]</MudButton>
@@ -46,6 +49,9 @@
 </MudTable>
 
 @code {
+    /// <summary>Vrai quand la page est affichée dans une fenêtre du bureau : le titre est alors celui de la fenêtre.</summary>
+    [CascadingParameter(Name = "InWindow")] bool InWindow { get; set; }
+
     List<ShareDef> shares = new();
     Dictionary<string, string> mountpoints = new();
     bool loaded;
