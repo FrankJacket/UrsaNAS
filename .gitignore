@@ -8,3 +8,5 @@ artifacts/
 src/Nas.Web/Data/*.db
 src/Nas.Web/Data/*.db-shm
 src/Nas.Web/Data/*.db-wal
+bin-linux/
+obj-linux/
