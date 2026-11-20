@@ -11,7 +11,7 @@
     <HeadOutlet @rendermode="PageRenderMode" />
 </head>
 <body>
-    <Routes @rendermode="PageRenderMode" InitialTheme="@theme" InitialColor="@color" />
+    <Routes @rendermode="PageRenderMode" InitialTheme="@theme" InitialColor="@color" InitialWallpaper="@wallpaper" />
     <script src="_framework/blazor.web.js"></script>
     <script src="@Assets["_content/MudBlazor/MudBlazor.min.js"]"></script>
     <script>
@@ -22,6 +22,10 @@
         // Mémorise le préréglage de couleurs choisi pour ce navigateur.
         function ursanasSetColor(value) {
             document.cookie = 'ursanas-color=' + value + '; path=/; max-age=31536000; SameSite=Lax';
+        }
+        // Mémorise le fond d'écran choisi pour ce navigateur.
+        function ursanasSetWall(value) {
+            document.cookie = 'ursanas-wall=' + value + '; path=/; max-age=31536000; SameSite=Lax';
         }
         // Insère du texte à la position du curseur d'une zone de texte et renvoie son nouveau contenu.
         function ursanasInsertAtCursor(id, text) {
@@ -62,4 +66,5 @@
 
     string theme => HttpContext?.Request.Cookies["ursanas-theme"] == "dark" ? "dark" : "light";
     string color => HttpContext?.Request.Cookies["ursanas-color"] ?? "indigo";
+    string wallpaper => HttpContext?.Request.Cookies["ursanas-wall"] ?? "default";
 }

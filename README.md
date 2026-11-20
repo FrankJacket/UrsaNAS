@@ -178,6 +178,7 @@ $env:URSANAS_FAKE = '1'
 $env:ASPNETCORE_ENVIRONMENT = 'Development'
 $env:Backup__Roots__0 = 'C:/temp/mnt'        # folder standing in for /mnt
 $env:Backup__RequireMountPoint = 'false'     # accept a plain folder as a disk
+$env:Vm__OvmfDir = 'C:/temp/mnt'             # any existing folder: stands in for the UEFI firmware (OVMF)
 $env:ASPNETCORE_URLS = 'http://localhost:5190'
 dotnet run --project src/Nas.Agent --no-launch-profile
 # in another terminal:
@@ -185,7 +186,7 @@ $env:ASPNETCORE_URLS = 'http://localhost:5199'; $env:Agent__Url = 'http://localh
 dotnet run --project src/Nas.Web --no-launch-profile
 ```
 
-In fake mode, system commands answer "OK" and do nothing. For the list of backup disks to be non-empty, set `Backup__MountInfo` to a file in the `/proc/self/mountinfo` format declaring your fake disk. `Backup__RequireMountPoint=false` alone is enough to test a copy, but it does not make the disk appear in the list.
+In fake mode, three virtual machines are simulated in memory (`debian-12` running, `windows-11` and `alpine-test` shut off, with disks, network cards and snapshots): starting, stopping, editing the hardware, snapshots and creating a machine all work, and everything is forgotten when the agent stops. To also offer bridges in the machine forms, point `Vm__NetDir` to a folder containing `br0/bridge`. Other system commands answer "OK" and do nothing. For the list of backup disks to be non-empty, set `Backup__MountInfo` to a file in the `/proc/self/mountinfo` format declaring your fake disk. `Backup__RequireMountPoint=false` alone is enough to test a copy, but it does not make the disk appear in the list.
 
 In Visual Studio, the `fake` launch profile of both projects does the same (agent on port 5002 with `URSANAS_FAKE=1`, web interface on port 5018 talking to it). Create `C:\temp\mnt`, set `Nas.Agent` and `Nas.Web` as multiple startup projects ("Configure Startup Projects…"), select the `fake` profile for both, then press F5.
 

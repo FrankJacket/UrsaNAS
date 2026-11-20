@@ -12,7 +12,20 @@ public class ThemeState
     /// <summary>Thème MudBlazor du préréglage courant (recalculé seulement quand le préréglage change).</summary>
     public MudBlazor.MudTheme MudTheme { get; private set; } = ThemePreset.Default.ToMudTheme();
 
+    /// <summary>Fond d'écran du bureau : "default" (dégradé du thème), l'identifiant d'un fond fourni, ou "custom" (image envoyée).</summary>
+    public string Wallpaper { get; private set; } = Nas.Web.Wallpaper.DefaultId;
+
     public event Action? Changed;
+
+    /// <summary>L'image envoyée a changé sans que le choix change : redessine le bureau.</summary>
+    public void RefreshWallpaper() => Changed?.Invoke();
+
+    public void SetWallpaper(string id)
+    {
+        if (Wallpaper == id) return;
+        Wallpaper = id;
+        Changed?.Invoke();
+    }
 
     public void Set(bool dark)
     {

@@ -1,10 +1,14 @@
 <Project>
+  <!-- Les dossiers de génération des deux plateformes ne doivent jamais être pris pour des sources, quelle que soit celle qui compile. -->
+  <PropertyGroup>
+    <DefaultItemExcludes>$(DefaultItemExcludes);obj/**;bin/**;obj-linux/**;bin-linux/**</DefaultItemExcludes>
+  </PropertyGroup>
+
   <!-- Sous Linux (WSL), obj/ et bin/ sont séparés de ceux de Windows : Visual Studio et WSL
        peuvent ainsi travailler dans le même dépôt sans écraser project.assets.json ni verrouiller bin/. -->
   <PropertyGroup Condition="'$(OS)' != 'Windows_NT'">
     <BaseIntermediateOutputPath>$(MSBuildProjectDirectory)/obj-linux/</BaseIntermediateOutputPath>
     <MSBuildProjectExtensionsPath>$(BaseIntermediateOutputPath)</MSBuildProjectExtensionsPath>
     <BaseOutputPath>$(MSBuildProjectDirectory)/bin-linux/</BaseOutputPath>
-    <DefaultItemExcludes>$(DefaultItemExcludes);obj/**;bin/**;obj-linux/**;bin-linux/**</DefaultItemExcludes>
   </PropertyGroup>
 </Project>

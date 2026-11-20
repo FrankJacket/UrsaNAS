@@ -3,12 +3,14 @@
 @inject DesktopState Desk
 @inject DockerAvailability Docker
 @inject AlertState Alerts
+@inject ThemeState Theme
+@inject WallpaperStore Walls
 
 <PageTitle>UrsaNAS</PageTitle>
 
 @* Fond d'écran : une couche fixe derrière les icônes. Par défaut un dégradé aux couleurs du thème ; un fond choisi par
    l'utilisateur se branche en définissant --desk-wallpaper (image ou dégradé). Les icônes restent lisibles dessus. *@
-<div class="desk-wallpaper"></div>
+<div class="desk-wallpaper" style="@WallpaperStyle"></div>
 
 <div class="desk-page">
     @foreach (var group in DesktopState.Apps.Where(a => !a.NeedsDocker || Docker.Ready).GroupBy(a => a.Category))
@@ -93,9 +95,16 @@
     {
         Docker.Changed += OnChanged; // l'icône Docker apparaît ou disparaît avec l'état du service
         Alerts.Changed += OnChanged;
+        Theme.Changed += OnChanged; // le fond d'écran change depuis la fenêtre Apparence
     }
 
     void OnChanged() => InvokeAsync(StateHasChanged);
+
+    /// <summary>Valeur de --desk-wallpaper pour le fond choisi ; vide = dégradé par défaut aux couleurs du thème.</summary>
+    string? WallpaperStyle =>
+        Theme.Wallpaper == Wallpaper.CustomId && Walls.Current() is not null ? $"--desk-wallpaper:url(/wallpaper?v={Walls.Version})"
+        : Wallpaper.Find(Theme.Wallpaper) is { } w ? $"--desk-wallpaper:{w.Css}"
+        : null;
 
     int AlertCount(DesktopApp app) => app.Id == "alerts" ? Alerts.Count : 0;
 
@@ -109,5 +118,6 @@
     {
         Docker.Changed -= OnChanged;
         Alerts.Changed -= OnChanged;
+        Theme.Changed -= OnChanged;
     }
 }

@@ -13,6 +13,7 @@ public sealed class FakeCommandRunner : ICommandRunner
     bool _service; // le compte de service n'est pas dans nasusers : il ne figure pas dans la liste des utilisateurs
     readonly Dictionary<string, List<string>> _groups = new() { ["nasusers"] = [], ["nasg-staff"] = ["alice", "bob"] };
     readonly string _shares = Path.Combine(Path.GetTempPath(), "ursanas-fake-shares");
+    readonly FakeVirt _virt = new(); // machines virtuelles simulées (libvirt)
 
     static CommandResult Ok(string output = "") => new(0, output, "");
     static CommandResult Fail(string err = "") => new(1, "", err);
@@ -64,6 +65,12 @@ public sealed class FakeCommandRunner : ICommandRunner
                 if (Directory.Exists(dir)) return Ok("NT_STATUS_OBJECT_NAME_COLLISION making remote directory");
                 Directory.CreateDirectory(dir);
                 return Ok();
+            case "virsh":
+                return _virt.Virsh(a);
+            case "virt-install":
+                return _virt.Install(a);
+            case "qemu-img":
+                return _virt.QemuImg(a);
             case "docker-missing": // Docker:Binary=docker-missing simule une machine sans Docker
                 throw new System.ComponentModel.Win32Exception(2);
             case "docker":

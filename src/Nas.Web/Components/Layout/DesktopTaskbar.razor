@@ -20,7 +20,7 @@
     @if (Alerts.Count > 0)
     {
         <MudChip T="string" Size="Size.Small" Color="@(Alerts.CriticalCount > 0 ? Color.Error : Color.Warning)"
-                 Icon="@Icons.Material.Filled.NotificationsActive" OnClick="@(() => Nav.NavigateTo("/alerts"))">@Alerts.Count</MudChip>
+                 Icon="@Icons.Material.Filled.NotificationsActive" OnClick="OpenAlerts">@Alerts.Count</MudChip>
     }
 </div>
 
@@ -44,6 +44,8 @@
     }
 
     void OnChanged() => InvokeAsync(StateHasChanged);
+
+    void OpenAlerts() => Desktop.Open(DesktopState.Apps.First(a => a.Id == "alerts"));
 
     public void Dispose()
     {

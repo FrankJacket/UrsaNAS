@@ -1,7 +1,9 @@
+@using Microsoft.AspNetCore.Components.Forms
 @page "/appearance"
 @implements IDisposable
 @inject ThemeState Theme
 @inject IJSRuntime JS
+@inject WallpaperStore Walls
 
 @if (!InWindow) { <MudText Typo="Typo.h4" Class="mb-4">@L["Appearance"]</MudText> }
 
@@ -24,6 +26,49 @@
     }
 </div>
 
+
+<MudText Typo="Typo.h6" Class="mt-6 mb-1">@L["Wallpaper"]</MudText>
+<MudText Typo="Typo.body2" Class="mb-4" Style="color:var(--mud-palette-text-secondary)">
+    @L["The wallpaper choice is kept for this browser. An uploaded image is shared by everyone who uses this NAS."]
+</MudText>
+
+<div class="wall-grid">
+    <button type="button" class="wall-card @(Theme.Wallpaper == Wallpaper.DefaultId ? "selected" : null)" @onclick="() => ChooseWall(Wallpaper.DefaultId)">
+        <span class="wall-thumb" style="background:linear-gradient(160deg, color-mix(in srgb, var(--mud-palette-primary) 35%, #0b0b1a), var(--mud-palette-primary))"></span>
+        <span class="pre-name">@L["Theme color"]</span>
+    </button>
+    @foreach (var w in Wallpaper.Builtin)
+    {
+        var wall = w;
+        <button type="button" class="wall-card @(Theme.Wallpaper == wall.Id ? "selected" : null)" @onclick="() => ChooseWall(wall.Id)">
+            <span class="wall-thumb" style="background:@wall.Css"></span>
+            <span class="pre-name">@L[wall.Name]</span>
+        </button>
+    }
+    @if (Walls.Current() is not null)
+    {
+        <button type="button" class="wall-card @(Theme.Wallpaper == Wallpaper.CustomId ? "selected" : null)" @onclick="() => ChooseWall(Wallpaper.CustomId)">
+            <span class="wall-thumb" style="background:url(/wallpaper?v=@Walls.Version) center/cover"></span>
+            <span class="pre-name">@L["My image"]</span>
+        </button>
+    }
+</div>
+
+<MudStack Row="true" Spacing="2" Class="mt-4" AlignItems="AlignItems.Center">
+    <MudFileUpload T="IBrowserFile" Class="mt-0" Accept=".png,.jpg,.jpeg,.webp" FilesChanged="Upload">
+        <CustomContent Context="up">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Image" OnClick="@(() => up.OpenFilePickerAsync())">@L["Upload an image"]</MudButton>
+        </CustomContent>
+        <SelectedTemplate Context="chosen"></SelectedTemplate>
+    </MudFileUpload>
+    @if (Walls.Current() is not null)
+    {
+        <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="RemoveImage">@L["Remove my image"]</MudButton>
+    }
+    @if (error is not null) { <MudText Color="Color.Error" Typo="Typo.body2">@error</MudText> }
+</MudStack>
+<MudText Typo="Typo.caption" Class="mt-2" Style="color:var(--mud-palette-text-secondary)">@L["PNG, JPEG or WebP, 10 MB at most."]</MudText>
+
 <style>
     .pre-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px; }
     .pre-card {
@@ -39,6 +84,15 @@
         box-shadow: 0 4px 10px rgba(0,0,0,.25), inset 0 1px 0 rgba(255,255,255,.4);
     }
     .pre-name { font-size: .95rem; }
+    .wall-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+    .wall-card {
+        display: flex; flex-direction: column; align-items: stretch; gap: 8px; padding: 8px 8px 10px;
+        border: 2px solid transparent; border-radius: 16px; cursor: pointer; font: inherit;
+        background: var(--mud-palette-background-gray); color: var(--mud-palette-text-primary);
+    }
+    .wall-card:hover { background: var(--mud-palette-action-default-hover); }
+    .wall-card.selected { border-color: var(--mud-palette-primary); }
+    .wall-thumb { display: block; height: 84px; border-radius: 10px; box-shadow: inset 0 0 0 1px rgba(255,255,255,.2); }
 </style>
 
 @code {
@@ -52,6 +106,36 @@
     {
         Theme.SetPreset(preset);
         await JS.InvokeVoidAsync("ursanasSetColor", preset.Id);
+    }
+
+    string? error;
+
+    async Task ChooseWall(string id)
+    {
+        Theme.SetWallpaper(id);
+        await JS.InvokeVoidAsync("ursanasSetWall", id);
+    }
+
+    async Task Upload(IBrowserFile? file)
+    {
+        error = null;
+        if (file is null) return;
+        try
+        {
+            await using var s = file.OpenReadStream(WallpaperStore.MaxBytes);
+            if (!await Walls.SaveAsync(s)) { error = L["This file is not a PNG, JPEG or WebP image."]; return; }
+        }
+        catch (IOException) { error = L["The image is too large (10 MB at most)."]; return; }
+        Theme.RefreshWallpaper(); // même choix, nouvelle image : le bureau doit la recharger
+        await ChooseWall(Wallpaper.CustomId);
+    }
+
+    async Task RemoveImage()
+    {
+        Walls.Clear();
+        Theme.RefreshWallpaper();
+        if (Theme.Wallpaper == Wallpaper.CustomId) await ChooseWall(Wallpaper.DefaultId);
+        else StateHasChanged();
     }
 
     public void Dispose() => Theme.Changed -= OnChanged;

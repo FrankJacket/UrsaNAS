@@ -21,6 +21,7 @@ b.Services.AddScoped<ThemeState>();
 b.Services.AddScoped<DesktopState>();
 b.Services.AddSingleton<Db>();
 b.Services.AddSingleton<Repo>();
+b.Services.AddSingleton<WallpaperStore>();
 b.Services.AddScoped<NasOperations>();
 b.Services.AddScoped<Loc>();
 
@@ -105,6 +106,8 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();
 app.MapStaticAssets().AllowAnonymous(); // feuilles de style et scripts : nécessaires à la page de connexion
+app.MapGet("/wallpaper", (WallpaperStore store) => store.Current() is { } c ? Results.File(c.Path, c.ContentType) : Results.NotFound());
+
 app.MapGet("/lang/{code}", (string code, string? returnUrl, HttpContext ctx) =>
 {
     ctx.Response.Cookies.Append(Loc.Cookie, CookieRequestCultureProvider.MakeCookieValue(new RequestCulture(Translator.Normalize(code))),

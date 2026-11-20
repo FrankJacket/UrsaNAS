@@ -10,7 +10,8 @@
         "ASPNETCORE_ENVIRONMENT": "Development",
         "URSANAS_FAKE": "1",
         "Backup__Roots__0": "C:/temp/mnt",
-        "Backup__RequireMountPoint": "false"
+        "Backup__RequireMountPoint": "false",
+        "Vm__OvmfDir": "C:/temp/mnt"
       }
     },
     "http": {
