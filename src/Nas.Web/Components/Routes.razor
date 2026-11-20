@@ -18,5 +18,12 @@
     /// <summary>"dark" ou "light", lu dans le cookie de thème par App.razor.</summary>
     [Parameter] public string InitialTheme { get; set; } = "light";
 
-    protected override void OnInitialized() => Theme.Set(InitialTheme == "dark");
+    /// <summary>Identifiant du préréglage de couleurs, lu dans le cookie par App.razor.</summary>
+    [Parameter] public string InitialColor { get; set; } = "indigo";
+
+    protected override void OnInitialized()
+    {
+        Theme.Set(InitialTheme == "dark");
+        Theme.SetPreset(ThemePreset.Find(InitialColor));
+    }
 }

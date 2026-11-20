@@ -1,0 +1,58 @@
+@page "/appearance"
+@implements IDisposable
+@inject ThemeState Theme
+@inject IJSRuntime JS
+
+@if (!InWindow) { <MudText Typo="Typo.h4" Class="mb-4">@L["Appearance"]</MudText> }
+
+<MudText Typo="Typo.h6" Class="mb-1">@L["Color presets"]</MudText>
+<MudText Typo="Typo.body2" Class="mb-4" Style="color:var(--mud-palette-text-secondary)">
+    @L["The color applies to the title bar, buttons, icons and the default wallpaper. The choice is kept for this browser."]
+</MudText>
+
+<div class="pre-grid">
+    @foreach (var p in ThemePreset.All)
+    {
+        var preset = p;
+        var selected = Theme.Preset == preset;
+        <button type="button" class="pre-card @(selected ? "selected" : null)" aria-pressed="@(selected ? "true" : "false")" @onclick="() => Choose(preset)">
+            <span class="pre-swatch" style="--c:@(Theme.IsDark ? preset.Dark : preset.Light)">
+                @if (selected) { <MudIcon Icon="@Icons.Material.Filled.Check" Style="color:#fff" /> }
+            </span>
+            <span class="pre-name">@L[preset.Name]</span>
+        </button>
+    }
+</div>
+
+<style>
+    .pre-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px; }
+    .pre-card {
+        display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 16px 8px 12px;
+        border: 2px solid transparent; border-radius: 16px; cursor: pointer; font: inherit;
+        background: var(--mud-palette-background-gray); color: var(--mud-palette-text-primary);
+    }
+    .pre-card:hover { background: var(--mud-palette-action-default-hover); }
+    .pre-card.selected { border-color: var(--mud-palette-primary); }
+    .pre-swatch {
+        display: grid; place-items: center; width: 56px; height: 56px; border-radius: 50%;
+        background: linear-gradient(150deg, color-mix(in srgb, var(--c) 70%, #fff), var(--c));
+        box-shadow: 0 4px 10px rgba(0,0,0,.25), inset 0 1px 0 rgba(255,255,255,.4);
+    }
+    .pre-name { font-size: .95rem; }
+</style>
+
+@code {
+    [CascadingParameter(Name = "InWindow")] bool InWindow { get; set; }
+
+    protected override void OnInitialized() => Theme.Changed += OnChanged; // le mode sombre change aussi les pastilles
+    void OnChanged() => InvokeAsync(StateHasChanged);
+
+    // Appliqué tout de suite (c'est l'aperçu) et mémorisé pour ce navigateur.
+    async Task Choose(ThemePreset preset)
+    {
+        Theme.SetPreset(preset);
+        await JS.InvokeVoidAsync("ursanasSetColor", preset.Id);
+    }
+
+    public void Dispose() => Theme.Changed -= OnChanged;
+}

@@ -2,7 +2,7 @@
 @inject ThemeState Theme
 
 @* Fenêtre de console : aucun menu, aucune marge, l'écran de la machine occupe tout. *@
-<MudThemeProvider IsDarkMode="@Theme.IsDark" />
+<MudThemeProvider Theme="@Theme.MudTheme" IsDarkMode="@Theme.IsDark" />
 <MudPopoverProvider />
 <style>
     html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }

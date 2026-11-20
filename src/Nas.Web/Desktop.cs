@@ -36,6 +36,7 @@ public sealed class DesktopState
         new("dashboard", "Dashboard", "System", Icons.Material.Filled.Dashboard, "/dashboard", typeof(Components.Pages.Dashboard), 1100, 760),
         new("network", "Network", "System", Icons.Material.Filled.Router, "/network", typeof(Components.Pages.Network), 1000, 700),
         new("terminal", "Terminal", "System", Icons.Material.Filled.Terminal, "/terminal/window", typeof(Components.Pages.TerminalView), 960, 580, Flush: true),
+        new("appearance", "Appearance", "System", Icons.Material.Filled.Palette, "/appearance", typeof(Components.Pages.Appearance), 760, 520),
         new("system-settings", "System settings", "System", Icons.Material.Filled.SystemUpdateAlt, "/system-settings", typeof(Components.Pages.SystemSettings), 900, 680),
 
         new("disks", "Disks", "Storage", Icons.Material.Filled.Dns, "/disks", typeof(Components.Pages.Disks), 1280, 800),
