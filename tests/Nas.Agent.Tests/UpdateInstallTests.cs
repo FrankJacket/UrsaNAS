@@ -254,6 +254,41 @@ public sealed class UpdateInstallTests : IDisposable
 
         await svc.InstallPackagesAsync(new InstallPackagesRequest(["samba"]), default);
         Assert.Empty(svc.Status().Packages!.Items);
-        Assert.Contains(calls, c => c == "apt-get install -y -qq --only-upgrade samba");
+        Assert.Contains(calls, c => c == "apt-get install -y --only-upgrade samba");
+    }
+
+    /// <summary>Lanceur qui, pour apt-get install, écrit deux lignes puis vérifie qu'elles sont visibles avant la fin.</summary>
+    sealed class StreamingRunner(Func<PackageInstallProgress> peek) : IStreamingCommandRunner
+    {
+        public PackageInstallProgress? During;
+
+        public Task<CommandResult> RunAsync(string fileName, IReadOnlyList<string> args, string? stdin = null, CancellationToken ct = default) =>
+            Task.FromResult(new CommandResult(0, fileName == "apt" ? "Listing...\nsamba/stable 2:4.22.4+dfsg-1 amd64 [upgradable from: 2:4.22.3+dfsg-1]\n" : "", ""));
+
+        public Task<CommandResult> RunAsync(string fileName, IReadOnlyList<string> args, Action<string> onLine, CancellationToken ct = default)
+        {
+            onLine("Unpacking samba ...");
+            onLine("   ");
+            onLine("Setting up samba ...");
+            During = peek();
+            return Task.FromResult(new CommandResult(0, "", ""));
+        }
+    }
+
+    [Fact]
+    public async Task Les_lignes_d_apt_sont_visibles_pendant_l_installation()
+    {
+        UpdateService? svc = null;
+        var runner = new StreamingRunner(() => svc!.GetPackageProgress());
+        var cfg = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Update:VersionFile"] = Path.Combine(_dir, "VERSION") }).Build();
+        svc = new UpdateService(runner, cfg, NullLogger<UpdateService>.Instance, new Handler(_ => Json(OneRelease)));
+        await svc.CheckPackagesAsync(default);
+
+        await svc.InstallPackagesAsync(new InstallPackagesRequest(["samba"]), default);
+
+        Assert.True(runner.During!.Running);
+        Assert.Equal(["samba"], runner.During.Names);
+        Assert.Equal(["Unpacking samba ...", "Setting up samba ..."], runner.During.Lines); // la ligne vide est ignorée
+        Assert.False(svc.GetPackageProgress().Running);
     }
 }

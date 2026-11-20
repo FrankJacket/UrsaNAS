@@ -160,6 +160,7 @@ public partial class Program
         app.MapPost("/system/update/check-packages", (UpdateService u, CancellationToken ct) => Read(async () => Results.Ok(await u.CheckPackagesAsync(ct))));
         app.MapPost("/system/update/install-app", (UpdateService u, CancellationToken ct) => Guard(async () => { await u.InstallAppAsync(ct); return Results.NoContent(); }));
         app.MapGet("/system/update/install-status", (UpdateService u) => Results.Ok(u.GetInstallStatus()));
+        app.MapGet("/system/update/packages-progress", (UpdateService u) => Results.Ok(u.GetPackageProgress()));
         app.MapPost("/system/update/install-packages", (InstallPackagesRequest r, UpdateService u, CancellationToken ct) =>
             Guard(async () => { await u.InstallPackagesAsync(r, ct); return Results.NoContent(); }));
         app.MapGet("/services",(ProtocolService p, CancellationToken ct) => Read(async () => Results.Ok(await p.ListServicesAsync(ct))));

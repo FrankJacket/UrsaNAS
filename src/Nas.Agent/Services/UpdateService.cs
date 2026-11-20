@@ -24,6 +24,7 @@ public sealed partial class UpdateService(ICommandRunner runner, IConfiguration 
     bool _fakeToken;
     AppInstallStatus? _fakeInstall;
     bool _installing;
+    PackageInstallProgress _progress = new(false, [], [], null);
 
     bool Fake => cfg["URSANAS_FAKE"] == "1";
     string SettingsFile => cfg["Update:SettingsFile"] ?? "/var/lib/ursanas/update-settings.json";
@@ -393,17 +394,58 @@ public sealed partial class UpdateService(ICommandRunner runner, IConfiguration 
         var names = r.Names.Distinct().ToList();
         if (names.Count == 0) throw new OperationException(Msg.F("No package was selected."));
         foreach (var n in names) if (!Rules.IsPackageName(n)) throw new OperationException(Msg.F("“{0}” is not a valid package name.", n));
-        if (Fake) return;
+        if (Fake) { await FakeInstallAsync(names, ct); return; }
         await _apt.WaitAsync(ct);
         try
         {
             var known = _pkgs?.Items.Select(i => i.Name).ToHashSet(StringComparer.Ordinal) ?? [];
             var unknown = names.FirstOrDefault(n => !known.Contains(n));
             if (unknown is not null) throw new OperationException(Msg.F("“{0}” was not in the last check: check for updates again.", unknown));
-            var r2 = await runner.RunAsync("apt-get", ["install", "-y", "-qq", "--only-upgrade", .. names], ct: ct);
+            SetProgress(names);
+            string[] args = ["install", "-y", "--only-upgrade", .. names];
+            var r2 = runner is IStreamingCommandRunner streaming
+                ? await streaming.RunAsync("apt-get", args, AddProgressLine, ct)
+                : await runner.RunAsync("apt-get", args, ct: ct);
             if (r2.ExitCode != 0) throw new OperationException(Msg.F("The package installation failed: {0}", FirstLine(r2.StdErr)));
             _pkgs = await QueryPackagesAsync(ct);
         }
-        finally { _apt.Release(); }
+        finally
+        {
+            lock (_lock) _progress = _progress with { Running = false };
+            _apt.Release();
+        }
+    }
+
+    /// <summary>Ce que fait l'installation de paquets en ce moment (pour l'afficher pendant que la demande est en cours).</summary>
+    public PackageInstallProgress GetPackageProgress() { lock (_lock) return _progress; }
+
+    void SetProgress(IReadOnlyList<string> names)
+    {
+        lock (_lock) _progress = new PackageInstallProgress(true, names, [], DateTimeOffset.UtcNow);
+    }
+
+    void AddProgressLine(string line)
+    {
+        line = line.Trim();
+        if (line.Length == 0) return;
+        if (line.Length > 200) line = line[..200];
+        lock (_lock) _progress = _progress with { Lines = [.. _progress.Lines.TakeLast(11), line] };
+    }
+
+    /// <summary>Mode simulé : quelques lignes espacées dans le temps, pour voir l'affichage sans toucher au système.</summary>
+    async Task FakeInstallAsync(List<string> names, CancellationToken ct)
+    {
+        SetProgress(names);
+        try
+        {
+            AddProgressLine("Reading package lists...");
+            foreach (var n in names)
+            {
+                await Task.Delay(1200, ct); AddProgressLine($"Get:1 http://deb.debian.org/debian stable/main amd64 {n} amd64 [1 234 kB]");
+                await Task.Delay(1200, ct); AddProgressLine($"Unpacking {n} ...");
+                await Task.Delay(1200, ct); AddProgressLine($"Setting up {n} ...");
+            }
+        }
+        finally { lock (_lock) _progress = _progress with { Running = false }; }
     }
 }

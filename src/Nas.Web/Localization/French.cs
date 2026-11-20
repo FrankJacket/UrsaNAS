@@ -11,6 +11,8 @@ public static class French
         ["Appearance"] = "Apparence",
         ["Colors"] = "Couleurs",
         ["Default"] = "Par défaut",
+        ["Updating the packages"] = "Mise à jour en cours :",
+        ["This can take several minutes. Do not close this window; the list refreshes by itself when it is done."] = "Cela peut prendre plusieurs minutes. Ne fermez pas cette fenêtre ; la liste se met à jour toute seule à la fin.",
         ["Wallpaper"] = "Fond d'écran",
         ["Your choices are kept for this browser. An uploaded image is shared by everyone who uses this NAS."] = "Vos choix sont mémorisés pour ce navigateur. Une image envoyée est partagée par tous ceux qui utilisent ce NAS.",
         ["Theme color"] = "Couleur du thème",

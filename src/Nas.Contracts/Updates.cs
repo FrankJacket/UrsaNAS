@@ -26,6 +26,9 @@ public sealed record AppInstallStatus(string Stage, string? Version, string? Mes
 
 public sealed record InstallPackagesRequest(IReadOnlyList<string> Names);
 
+/// <summary>Avancement de l'installation de paquets en cours : <c>Lines</c> sont les dernières lignes écrites par apt (les plus récentes à la fin).</summary>
+public sealed record PackageInstallProgress(bool Running, IReadOnlyList<string> Names, IReadOnlyList<string> Lines, DateTimeOffset? StartedAt);
+
 /// <summary>
 /// Un paquet Linux dont une version plus récente est disponible. <c>Tracked</c> : il fait partie de ce qu'UrsaNAS installe ou utilise.
 /// <c>ManualOnly</c> : sa mise à jour redémarre un service important (Docker, libvirt, ZFS) ou touche le noyau ; jamais automatique par défaut.

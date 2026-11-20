@@ -142,8 +142,20 @@
                         </RowTemplate>
                     </MudTable>
                     <MudButton Variant="Variant.Filled" Color="Color.Warning" Class="mt-3" OnClick="InstallPackages" Disabled="@(busy || selected.Count == 0)">
-                        @L["Update the selected packages"] @(selected.Count > 0 ? $"({selected.Count})" : "")
+                        @(installingPkgs ? L["Installing…"] : L["Update the selected packages"] + (selected.Count > 0 ? $" ({selected.Count})" : ""))
                     </MudButton>
+                    @if (installingPkgs)
+                    {
+                        <MudAlert Severity="Severity.Info" Class="mt-3" Icon="@Icons.Material.Filled.SystemUpdateAlt">
+                            <MudText Typo="Typo.body2"><b>@L["Updating the packages"]</b> @pkgNames</MudText>
+                            <MudText Typo="Typo.caption">@L["This can take several minutes. Do not close this window; the list refreshes by itself when it is done."]</MudText>
+                            <MudProgressLinear Indeterminate="true" Color="Color.Info" Class="mt-2" />
+                            @if (pkgLines.Count > 0)
+                            {
+                                <pre class="pkg-log">@string.Join('\n', pkgLines)</pre>
+                            }
+                        </MudAlert>
+                    }
                 }
                 <MudText Typo="Typo.caption" Class="d-block mt-2">@L["Checked on"] @pkgs.CheckedAt.ToLocalTime().ToString("g", Culture)</MudText>
             }
@@ -243,6 +255,11 @@
     </MudTabPanel>
 </MudTabs>
 
+<style>
+    .pkg-log { margin: 8px 0 0; padding: 8px 10px; max-height: 170px; overflow: auto; border-radius: 6px; font: 12px/1.45 ui-monospace, Consolas, monospace;
+        white-space: pre-wrap; word-break: break-all; background: rgba(0,0,0,.18); color: inherit; }
+</style>
+
 @code {
     /// <summary>Vrai quand la page est affichée dans une fenêtre du bureau : le titre est alors celui de la fenêtre.</summary>
     [CascadingParameter(Name = "InWindow")] bool InWindow { get; set; }
@@ -253,7 +270,9 @@
     readonly HashSet<string> selected = [];
     string channel = "stable", token = "";
     string? error;
-    bool busy, checkingApp, checkingPkgs, showAll, tokenSet, installing;
+    bool busy, checkingApp, checkingPkgs, showAll, tokenSet, installing, installingPkgs;
+    string pkgNames = "";
+    List<string> pkgLines = [];
     CancellationTokenSource? pollCts;
 
     // Planification : des champs à part (pas le contrat, en lecture seule) pour que @bind-Value puisse les modifier.
@@ -435,7 +454,11 @@
             + (manual ? " " + L["This restarts an important service or changes the kernel."] : "");
         var ok = await Dialogs.ShowMessageBoxAsync(L["Update packages"], message, yesText: L["Update"], cancelText: L["Cancel"]);
         if (ok != true) return;
-        busy = true; error = null;
+        busy = true; installingPkgs = true; error = null;
+        pkgNames = string.Join(", ", names.Select(Friendly));
+        pkgLines = [];
+        using var progressCts = new CancellationTokenSource();
+        _ = PollPackageProgressAsync(progressCts.Token);
         try
         {
             await Ops.InstallPackagesAsync(names);
@@ -445,7 +468,28 @@
         }
         catch (AgentException e) { error = L.Translate(e.Message); }
         catch (HttpRequestException) { error = L["Agent unreachable."]; }
-        busy = false;
+        progressCts.Cancel();
+        busy = false; installingPkgs = false;
+    }
+
+    /// <summary>Pendant que la demande d'installation est en cours, relit toutes les 2 s les dernières lignes écrites par apt.</summary>
+    async Task PollPackageProgressAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(2));
+            while (await timer.WaitForNextTickAsync(ct))
+            {
+                try
+                {
+                    var p = await Agent.GetPackageProgressAsync(ct);
+                    pkgLines = p.Lines.TakeLast(8).ToList();
+                }
+                catch (Exception e) when (e is AgentException or HttpRequestException) { continue; }
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException) { }
     }
 
     async Task DownloadConfigBackup()

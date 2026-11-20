@@ -11,9 +11,33 @@ public interface ICommandRunner
     Task<CommandResult> RunAsync(string fileName, IReadOnlyList<string> args, string? stdin = null, CancellationToken ct = default);
 }
 
-public sealed class ProcessCommandRunner : ICommandRunner
+/// <summary>Un lanceur qui peut aussi rendre compte, ligne par ligne, de ce que le programme écrit pendant qu'il tourne.</summary>
+public interface IStreamingCommandRunner : ICommandRunner
 {
-    public async Task<CommandResult> RunAsync(string fileName, IReadOnlyList<string> args, string? stdin = null, CancellationToken ct = default)
+    Task<CommandResult> RunAsync(string fileName, IReadOnlyList<string> args, Action<string> onLine, CancellationToken ct = default);
+}
+
+public sealed class ProcessCommandRunner : IStreamingCommandRunner
+{
+    public Task<CommandResult> RunAsync(string fileName, IReadOnlyList<string> args, string? stdin = null, CancellationToken ct = default) =>
+        RunCoreAsync(fileName, args, stdin, null, ct);
+
+    public Task<CommandResult> RunAsync(string fileName, IReadOnlyList<string> args, Action<string> onLine, CancellationToken ct = default) =>
+        RunCoreAsync(fileName, args, null, onLine, ct);
+
+    static async Task<string> ReadAsync(StreamReader reader, Action<string>? onLine, CancellationToken ct)
+    {
+        if (onLine is null) return await reader.ReadToEndAsync(ct);
+        var all = new System.Text.StringBuilder();
+        while (await reader.ReadLineAsync(ct) is { } line)
+        {
+            all.AppendLine(line);
+            onLine(line);
+        }
+        return all.ToString();
+    }
+
+    static async Task<CommandResult> RunCoreAsync(string fileName, IReadOnlyList<string> args, string? stdin, Action<string>? onLine, CancellationToken ct)
     {
         var psi = new ProcessStartInfo(fileName)
         {
@@ -25,8 +49,8 @@ public sealed class ProcessCommandRunner : ICommandRunner
         foreach (var a in args) psi.ArgumentList.Add(a);
 
         using var p = Process.Start(psi) ?? throw new InvalidOperationException(Nas.Contracts.Msg.F("Unable to start {0}.", fileName));
-        var stdout = p.StandardOutput.ReadToEndAsync(ct);
-        var stderr = p.StandardError.ReadToEndAsync(ct);
+        var stdout = ReadAsync(p.StandardOutput, onLine, ct);
+        var stderr = ReadAsync(p.StandardError, onLine, ct);
         if (stdin is not null)
         {
             await p.StandardInput.WriteAsync(stdin.AsMemory(), ct);

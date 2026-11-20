@@ -253,6 +253,13 @@ public class AgentClient(HttpClient http)
         return await r.Content.ReadFromJsonAsync<AppInstallStatus>(ct) ?? throw new AgentException(Msg.F("The agent answered {0}.", 204));
     }
 
+    public async Task<PackageInstallProgress> GetPackageProgressAsync(CancellationToken ct = default)
+    {
+        using var r = await http.GetAsync("system/update/packages-progress", ct);
+        await EnsureOkAsync(r, ct);
+        return await r.Content.ReadFromJsonAsync<PackageInstallProgress>(ct) ?? throw new AgentException(Msg.F("The agent answered {0}.", 204));
+    }
+
     public async Task InstallPackagesAsync(IReadOnlyList<string> names, CancellationToken ct = default) =>
         await EnsureOkAsync(await http.PostAsJsonAsync("system/update/install-packages", new InstallPackagesRequest(names), ct), ct);
 
