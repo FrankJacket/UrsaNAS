@@ -5,13 +5,13 @@
 @inject IDialogService Dialogs
 @inject ISnackbar Snack
 
-<MudText Typo="Typo.h4" Class="mb-4">@L["Groups"]</MudText>
+@if (!InWindow) { <MudText Typo="Typo.h4" Class="mb-4">@L["Groups"]</MudText> }
 @if (error is not null)
 {
     <MudAlert Severity="Severity.Error" Class="mb-4">@error</MudAlert>
 }
 <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.GroupAdd" OnClick="Add" Class="mb-4">@L["Add a group"]</MudButton>
-<MudTable Items="groups" Hover="true" Dense="true" Loading="@(!loaded)">
+<MudTable Items="groups" Class="desk-grow" Hover="true" Dense="true" Loading="@(!loaded)">
     <HeaderContent><MudTh>@L["Name"]</MudTh><MudTh>@L["Members"]</MudTh><MudTh></MudTh></HeaderContent>
     <RowTemplate>
         <MudTd>@context.Name</MudTd>
@@ -25,6 +25,9 @@
 </MudTable>
 
 @code {
+    /// <summary>Vrai quand la page est affichée dans une fenêtre du bureau : le titre est alors celui de la fenêtre.</summary>
+    [CascadingParameter(Name = "InWindow")] bool InWindow { get; set; }
+
     IReadOnlyList<NasGroup> groups = [];
     string? error;
     bool loaded;

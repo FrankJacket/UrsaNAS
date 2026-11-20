@@ -4,8 +4,9 @@
 @inject AgentClient Agent
 @inject NasOperations Ops
 @inject ISnackbar Snack
+@inject DesktopState Desktop
 
-<MudText Typo="Typo.h4" Class="mb-4">@L["Services"]</MudText>
+@if (!InWindow) { <MudText Typo="Typo.h4" Class="mb-4">@L["Services"]</MudText> }
 
 <MudAlert Severity="Severity.Info" Class="mb-4">
     @L["Advanced permissions only apply to SMB. Over NFS and FTP, access is decided by the client list (NFS) or the user list (FTP) of each share, set in the share's options."]
@@ -16,7 +17,7 @@
     <MudAlert Severity="Severity.Error" Class="mb-4">@error</MudAlert>
 }
 
-<MudTable Items="services" Hover="true" Dense="true" Loading="@(!loaded)">
+<MudTable Items="services" Class="desk-grow" Hover="true" Dense="true" Loading="@(!loaded)">
     <HeaderContent><MudTh>@L["Service"]</MudTh><MudTh>@L["Description"]</MudTh><MudTh>Port</MudTh><MudTh>@L["Status"]</MudTh><MudTh></MudTh></HeaderContent>
     <RowTemplate>
         <MudTd><b>@context.Name.ToUpperInvariant()</b></MudTd>
@@ -56,9 +57,15 @@
     <MudText Typo="Typo.caption" Class="d-block mt-4">@L["FTP signs users in with their NAS password. A user created before FTP was available must have their password changed once."]</MudText>
 </MudPaper>
 
-<MudText Typo="Typo.caption" Class="d-block mt-6">@L["Looking for Docker?"] <MudLink Href="/docker">@L["Docker status and installation"]</MudLink></MudText>
+<MudText Typo="Typo.caption" Class="d-block mt-6">@L["Looking for Docker?"] <MudLink OnClick="OpenDocker">@L["Docker status and installation"]</MudLink></MudText>
 
 @code {
+    // Docker est une fenêtre du bureau : le lien l'ouvre au lieu de quitter la page.
+    void OpenDocker() => Desktop.Open(DesktopState.Apps.First(a => a.Id == "docker"));
+
+    /// <summary>Vrai quand la page est affichée dans une fenêtre du bureau : le titre est alors celui de la fenêtre.</summary>
+    [CascadingParameter(Name = "InWindow")] bool InWindow { get; set; }
+
     IReadOnlyList<ServiceInfo> services = [];
     bool loaded, busy, formLoaded, tls;
     int pasvMin = 40000, pasvMax = 40100;

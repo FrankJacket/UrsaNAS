@@ -5,7 +5,7 @@
 @inject IDialogService Dialogs
 @inject ISnackbar Snack
 
-<MudText Typo="Typo.h4" Class="mb-4">@L["ZFS pools"]</MudText>
+@if (!InWindow) { <MudText Typo="Typo.h4" Class="mb-4">@L["ZFS pools"]</MudText> }
 @if (error is not null)
 {
     <MudAlert Severity="Severity.Error" Class="mb-4">@error</MudAlert>
@@ -62,6 +62,9 @@
 }
 
 @code {
+    /// <summary>Vrai quand la page est affichée dans une fenêtre du bureau : le titre est alors celui de la fenêtre.</summary>
+    [CascadingParameter(Name = "InWindow")] bool InWindow { get; set; }
+
     IReadOnlyList<PoolInfo> pools = [];
     IReadOnlyList<DiskInfo> disks = [];
     string? error;

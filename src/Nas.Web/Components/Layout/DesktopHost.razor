@@ -8,6 +8,7 @@
     <UrsaFloatingDialog @key="win.App.Id"
                         @ref="_dialogs[win.App.Id]"
                         Visible="true"
+                        Class="desk-window"
                         VisibleChanged="_ => Close(win.App.Id)"
                         Title="@L[win.App.Title]"
                         ShowMinimizeButton="true"
@@ -22,7 +23,14 @@
                         InitialY="100 + win.Slot * 40">
         <DialogContent>
             <CascadingValue Name="InWindow" Value="true" IsFixed="true">
-                <DynamicComponent Type="win.App.Component!" />
+                @if (win.App.Flush)
+                {
+                    <DynamicComponent Type="win.App.Component!" />
+                }
+                else
+                {
+                    <div class="desk-body"><DynamicComponent Type="win.App.Component!" /></div>
+                }
             </CascadingValue>
         </DialogContent>
     </UrsaFloatingDialog>
@@ -56,3 +64,26 @@
         Desktop.FrontRequested -= OnFrontRequested;
     }
 }
+
+<style>
+    /* Toute fenêtre du bureau : pas de marge intérieure ni de défilement propres ; le contenu gère les siens. */
+    .desk-window .ursa-floating-dialog-content { padding: 0 !important; overflow: hidden !important; display: flex; flex-direction: column; }
+    .desk-window .ursa-floating-dialog-content > * { flex: 1 1 auto; min-height: 0; }
+
+    /* Corps d'une fenêtre : colonne qui défile s'il le faut. L'élément marqué « desk-grow » (tableau, arbre) prend la
+       place restante et défile seul, son en-tête reste visible ; s'il manque de place, c'est le corps qui défile. */
+    .desk-body { box-sizing: border-box; padding: 16px 24px; overflow: auto; display: flex; flex-direction: column; }
+    .desk-body > * { flex: none; }
+    .desk-body > .desk-grow { flex: 1 1 auto; min-height: 220px; }
+
+    .desk-grow.mud-table { display: flex; flex-direction: column; }
+    .desk-grow.mud-table > .mud-table-container { flex: 1 1 auto; min-height: 0; overflow: auto; }
+    /* Onglets : la barre reste en place, le panneau prend le reste ; une grille posée directement dans le panneau le remplit. */
+    .desk-tabs.mud-tabs { display: flex; flex-direction: column; }
+    .desk-tabs > .mud-tabs-panels { flex: 1 1 auto; min-height: 0; overflow: auto; display: flex; flex-direction: column; }
+    .desk-tabs > .mud-tabs-panels > .mud-tab-panel { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+    .desk-tabs > .mud-tabs-panels > .mud-tab-panel > * { flex: none; }
+    .desk-tabs > .mud-tabs-panels > .mud-tab-panel > .desk-grow { flex: 1 1 auto; min-height: 220px; }
+
+    .desk-grow .mud-table-head th { position: sticky; top: 0; z-index: 2; background: var(--mud-palette-surface); }
+</style>

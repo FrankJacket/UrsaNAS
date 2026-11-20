@@ -33,7 +33,7 @@
         background: var(--mud-palette-appbar-background); color: var(--mud-palette-appbar-text);
         z-index: calc(var(--mud-zindex-appbar) + 50); /* au-dessus des fenêtres, sous les dialogues modaux de MudBlazor */
     }
-    .desk-task { max-width: 220px; text-transform: none; }
+    .desk-task { flex: 0 1 180px; min-width: 56px; overflow: hidden; white-space: nowrap; text-transform: none; }
 </style>
 
 @code {

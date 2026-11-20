@@ -6,7 +6,7 @@
 @inject ISnackbar Snack
 @inject IJSRuntime JS
 
-<MudText Typo="Typo.h4" Class="mb-4">@L["Virtual machines"]</MudText>
+@if (!InWindow) { <MudText Typo="Typo.h4" Class="mb-4">@L["Virtual machines"]</MudText> }
 
 @if (error is not null)
 {
@@ -39,12 +39,12 @@ else if (status is not null)
     }
     <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="Create" Class="mb-4">@L["Create a machine"]</MudButton>
 
-    <MudTable Items="machines" Hover="true" Dense="true" Loading="@(!loaded)">
+    <MudTable Items="machines" Class="desk-grow" Hover="true" Dense="true" Loading="@(!loaded)">
         <HeaderContent>
             <MudTh>@L["Name"]</MudTh><MudTh>@L["Status"]</MudTh><MudTh>@L["Processors"]</MudTh><MudTh>@L["Memory"]</MudTh><MudTh>@L["Disk"]</MudTh><MudTh></MudTh>
         </HeaderContent>
         <RowTemplate>
-            <MudTd><MudLink Href="@("/vms/" + Uri.EscapeDataString(context.Name))"><b>@context.Name</b></MudLink></MudTd>
+            <MudTd><MudLink Href="@(VmNav is null ? "/vms/" + Uri.EscapeDataString(context.Name) : null)" OnClick="@(() => VmNav?.ShowDetail(context.Name))"><b>@context.Name</b></MudLink></MudTd>
             <MudTd><MudChip T="string" Size="Size.Small" Color="@StateColor(context.State)">@context.State</MudChip></MudTd>
             <MudTd>@context.Vcpus</MudTd>
             <MudTd>@Fmt.Size(context.MemoryMb * 1024 * 1024, L.Lang)</MudTd>
@@ -52,7 +52,7 @@ else if (status is not null)
             <MudTd Style="text-align:right; white-space:nowrap">
                 @if (context.State == "running")
                 {
-                    <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Monitor" Href="@("/vms/console/" + Uri.EscapeDataString(context.Name))">@L["Console"]</MudButton>
+                    <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Monitor" Href="@(VmNav is null ? "/vms/console/" + Uri.EscapeDataString(context.Name) : null)" OnClick="@(() => VmNav?.ShowConsole(context.Name))">@L["Console"]</MudButton>
                     <MudTooltip Text="@L["Open the console in a new window"]"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.OpenInNew" OnClick="() => OpenWindow(context.Name)" /></MudTooltip>
                     <MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="busy" OnClick='() => Act(context, "shutdown", L["Shutdown requested."])'>@L["Shut down"]</MudButton>
                     <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning" Disabled="busy" OnClick="() => PowerOff(context)">@L["Power off"]</MudButton>
@@ -73,6 +73,12 @@ else
 }
 
 @code {
+    /// <summary>Navigation interne de la fenêtre des machines virtuelles ; absente quand la page est ouverte seule.</summary>
+    [CascadingParameter] VmsNav? VmNav { get; set; }
+
+    /// <summary>Vrai quand la page est affichée dans une fenêtre du bureau : le titre est alors celui de la fenêtre.</summary>
+    [CascadingParameter(Name = "InWindow")] bool InWindow { get; set; }
+
     async Task OpenWindow(string name) =>
         await JS.InvokeVoidAsync("open", "/vms/window/" + Uri.EscapeDataString(name), "vmconsole-" + name, "popup,width=1100,height=780");
 

@@ -5,11 +5,14 @@
 @inject IDialogService Dialogs
 @inject ISnackbar Snack
 
-<MudText Typo="Typo.h4" Class="mb-4">@L["Images"]</MudText>
+@if (!InWindow)
+{
+    <MudText Typo="Typo.h4" Class="mb-4">@L["Images"]</MudText>
+}
 
 @if (error is not null)
 {
-    <MudAlert Severity="Severity.Error" Class="mb-4">@error <MudLink Href="/docker">@L["Docker status"]</MudLink></MudAlert>
+    <MudAlert Severity="Severity.Error" Class="mb-4">@error <MudLink Href="@(DockNav is null ? "/docker" : null)" OnClick="@(() => DockNav?.Go("status"))">@L["Docker status"]</MudLink></MudAlert>
 }
 
 <MudStack Row="true" Class="mb-4">
@@ -17,7 +20,7 @@
     <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.CleaningServices" OnClick="Prune" Disabled="busy">@L["Clean unused images"]</MudButton>
 </MudStack>
 
-<MudTable Items="images" Hover="true" Dense="true" Loading="@(!loaded)">
+<MudTable Items="images" Class="desk-grow" Hover="true" Dense="true" Loading="@(!loaded)">
     <HeaderContent><MudTh>@L["Image"]</MudTh><MudTh>@L["Identifier"]</MudTh><MudTh>@L["Size"]</MudTh><MudTh>@L["Created"]</MudTh><MudTh></MudTh></HeaderContent>
     <RowTemplate>
         <MudTd><b>@Label(context)</b></MudTd>
@@ -32,6 +35,12 @@
 </MudTable>
 
 @code {
+    /// <summary>Navigation interne de la fenêtre Docker ; absente quand la page est ouverte seule.</summary>
+    [CascadingParameter] DockerNav? DockNav { get; set; }
+
+    /// <summary>Vrai quand la page est affichée dans une fenêtre du bureau : le titre est alors celui de la fenêtre.</summary>
+    [CascadingParameter(Name = "InWindow")] bool InWindow { get; set; }
+
     IReadOnlyList<ImageInfo> images = [];
     string? error;
     bool loaded, busy;

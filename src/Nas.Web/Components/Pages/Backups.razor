@@ -6,7 +6,7 @@
 @inject IDialogService Dialogs
 @inject ISnackbar Snack
 
-<MudText Typo="Typo.h4" Class="mb-4">@L["Backups"]</MudText>
+@if (!InWindow) { <MudText Typo="Typo.h4" Class="mb-4">@L["Backups"]</MudText> }
 
 <MudAlert Severity="Severity.Info" Class="mb-4">
     @L["A backup is a readable copy of your files on an external disk, not a restorable image: permissions and ACLs are not kept. Mount the disk on the NAS first (under /mnt or /media), then initialise it once for each job."]
@@ -105,7 +105,7 @@
 </MudGrid>
 
 <MudText Typo="Typo.h5" Class="mt-8 mb-2">@L["History"]</MudText>
-<MudTable Items="history" Hover="true" Dense="true" T="BackupRunRow" OnRowClick="ShowRun" RowStyle="cursor:pointer">
+<MudTable Items="history" Class="desk-grow" Hover="true" Dense="true" T="BackupRunRow" OnRowClick="ShowRun" RowStyle="cursor:pointer">
     <HeaderContent><MudTh>@L["Started"]</MudTh><MudTh>@L["Job"]</MudTh><MudTh>@L["Trigger"]</MudTh><MudTh>@L["Result"]</MudTh><MudTh>@L["Copied"]</MudTh><MudTh>@L["Errors"]</MudTh><MudTh>@L["Duration"]</MudTh></HeaderContent>
     <RowTemplate>
         <MudTd>@Fmt.Dt(context.StartedUtc)</MudTd>
@@ -120,6 +120,9 @@
 </MudTable>
 
 @code {
+    /// <summary>Vrai quand la page est affichée dans une fenêtre du bureau : le titre est alors celui de la fenêtre.</summary>
+    [CascadingParameter(Name = "InWindow")] bool InWindow { get; set; }
+
     List<BackupJobRow> jobs = new();
     Dictionary<int, BackupRunStatus> runs = new();
     Dictionary<int, BackupDiskStatus> disks = new();

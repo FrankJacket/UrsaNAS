@@ -2,7 +2,10 @@
 @inherits AutoRefreshBase
 @inject AgentClient Agent
 
-<MudText Typo="Typo.h4" Class="mb-4">Docker</MudText>
+@if (!InWindow)
+{
+    <MudText Typo="Typo.h4" Class="mb-4">Docker</MudText>
+}
 
 @if (!loaded)
 {
@@ -24,10 +27,10 @@ else if (status is { State: DockerState.Ready })
         </MudAlert>
     }
     <MudStack Row="true" Wrap="Wrap.Wrap" Class="mb-6">
-        <MudButton Href="/docker/containers" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Inventory2">@L["Containers"]</MudButton>
-        <MudButton Href="/docker/images" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Album">@L["Images"]</MudButton>
-        <MudButton Href="/docker/stacks" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Layers">@L["Stacks"]</MudButton>
-        <MudButton Href="/docker/volumes" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Lan">@L["Volumes and networks"]</MudButton>
+        <MudButton Href="@(DockNav is null ? "/docker/containers" : null)" OnClick="@(() => DockNav?.Go("containers"))" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Inventory2">@L["Containers"]</MudButton>
+        <MudButton Href="@(DockNav is null ? "/docker/images" : null)" OnClick="@(() => DockNav?.Go("images"))" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Album">@L["Images"]</MudButton>
+        <MudButton Href="@(DockNav is null ? "/docker/stacks" : null)" OnClick="@(() => DockNav?.Go("stacks"))" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Layers">@L["Stacks"]</MudButton>
+        <MudButton Href="@(DockNav is null ? "/docker/volumes" : null)" OnClick="@(() => DockNav?.Go("volumes"))" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Lan">@L["Volumes and networks"]</MudButton>
     </MudStack>
     <MudAlert Severity="Severity.Info">
         @L["A container that mounts a folder of the NAS reads and writes it with full rights: the permissions (ACLs) of the shares do not apply to Docker."]
@@ -48,6 +51,12 @@ else
 }
 
 @code {
+    /// <summary>Navigation interne de la fenêtre Docker ; absente quand la page est ouverte seule.</summary>
+    [CascadingParameter] DockerNav? DockNav { get; set; }
+
+    /// <summary>Vrai quand la page est affichée dans une fenêtre du bureau : le titre est alors celui de la fenêtre.</summary>
+    [CascadingParameter(Name = "InWindow")] bool InWindow { get; set; }
+
     DockerStatus? status;
     string? error;
     bool loaded;

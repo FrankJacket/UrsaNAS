@@ -3,44 +3,95 @@
 @inject DesktopState Desk
 @inject DockerAvailability Docker
 @inject AlertState Alerts
-@inject NavigationManager Nav
 
-<MudText Typo="Typo.h4" Class="mb-2">@L["Desktop"]</MudText>
+<PageTitle>UrsaNAS</PageTitle>
 
-@foreach (var group in DesktopState.Apps.Where(a => !a.NeedsDocker || Docker.Ready).GroupBy(a => a.Category))
-{
-    <MudText Typo="Typo.overline" Class="mt-6 mb-1 desk-category">@(group.Key == "Docker" ? "Docker" : L[group.Key])</MudText>
-    <div class="desk-grid">
-        @foreach (var app in group)
-        {
-            var a = app;
-            <button type="button" class="desk-icon" @onclick="() => OpenApp(a)">
-                <MudBadge Content="@AlertCount(a)" Visible="@(AlertCount(a) > 0)" Color="@(Alerts.CriticalCount > 0 ? Color.Error : Color.Warning)" Overlap="true">
-                    <MudIcon Icon="@a.Icon" Style="font-size:3.5rem" />
-                </MudBadge>
-                <span class="desk-label">@L[a.Title]</span>
-            </button>
-        }
-    </div>
-}
+@* Fond d'écran : une couche fixe derrière les icônes. Par défaut un dégradé aux couleurs du thème ; un fond choisi par
+   l'utilisateur se branche en définissant --desk-wallpaper (image ou dégradé). Les icônes restent lisibles dessus. *@
+<div class="desk-wallpaper"></div>
+
+<div class="desk-page">
+    @foreach (var group in DesktopState.Apps.Where(a => !a.NeedsDocker || Docker.Ready).GroupBy(a => a.Category))
+    {
+        var apps = group.ToList();
+        <section class="desk-section">
+            <h2 class="desk-category">@L[group.Key]</h2>
+            <div class="desk-grid" style="--cols:@Math.Min(apps.Count, 4)">
+                @foreach (var app in apps)
+                {
+                    var a = app;
+                    var (c1, c2) = Colors(a);
+                    <button type="button" class="desk-icon" @onclick="() => OpenApp(a)">
+                        <MudBadge Content="@AlertCount(a)" Visible="@(AlertCount(a) > 0)" Color="@(Alerts.CriticalCount > 0 ? Color.Error : Color.Warning)" Overlap="true">
+                            <span class="desk-tile" style="--c1:@c1; --c2:@c2"><MudIcon Icon="@a.Icon" Style="font-size:inherit; color:inherit" /></span>
+                        </MudBadge>
+                        <span class="desk-label">@L[a.Title]</span>
+                    </button>
+                }
+            </div>
+        </section>
+    }
+</div>
 
 <style>
-    .desk-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
-    .desk-icon {
-        display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 10px;
-        min-height: 128px; padding: 16px 8px; border: 0; border-radius: 16px; cursor: pointer;
-        background: transparent; color: var(--mud-palette-text-primary); font: inherit;
+    .desk-wallpaper {
+        position: fixed; inset: 0; z-index: -1;
+        background: var(--desk-wallpaper, linear-gradient(160deg, color-mix(in srgb, var(--mud-palette-primary) 35%, #0b0b1a), var(--mud-palette-primary)));
+        background-size: cover; background-position: center;
     }
-    .desk-icon:hover, .desk-icon:focus-visible { background: var(--mud-palette-action-default-hover); outline: none; }
-    .desk-icon:active { background: var(--mud-palette-gray-light); }
-    .desk-label { font-size: .95rem; text-align: center; line-height: 1.25; }
-    .desk-category { opacity: .7; }
+    .desk-page { --tile: 76px; --item: 116px; display: flex; flex-wrap: wrap; align-items: flex-start; gap: 24px; padding: 8px 4px; }
+    @@media (min-width: 1800px) { .desk-page { --tile: 96px; --item: 144px; gap: 32px; } }
+
+    /* Chaque groupe est un panneau translucide : lisible sur n'importe quel fond. */
+    .desk-section {
+        padding: 14px 16px 18px; border-radius: 22px; color: #fff;
+        background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.22);
+        backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    }
+    .desk-category { margin: 0 4px 10px; font-size: .75rem; font-weight: 500; letter-spacing: .1em; text-transform: uppercase; opacity: .9; text-shadow: 0 1px 3px rgba(0,0,0,.5); }
+    .desk-grid { display: grid; grid-template-columns: repeat(var(--cols), var(--item)); gap: 6px; }
+
+    .desk-icon {
+        display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 10px; padding: 10px 4px 8px;
+        border: 0; border-radius: 16px; background: transparent; color: inherit; font: inherit; cursor: pointer;
+    }
+    .desk-icon:hover, .desk-icon:focus-visible { background: rgba(255,255,255,.18); outline: none; }
+    .desk-icon:active .desk-tile { transform: scale(.95); }
+    .desk-tile {
+        display: grid; place-items: center; width: var(--tile); height: var(--tile); border-radius: 22%;
+        font-size: calc(var(--tile) * .56); color: #fff;
+        background: linear-gradient(150deg, var(--c1), var(--c2));
+        box-shadow: 0 6px 14px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.4);
+        transition: transform .12s ease;
+    }
+    .desk-icon:hover .desk-tile { transform: translateY(-2px) scale(1.05); }
+    .desk-label { font-size: .9rem; line-height: 1.2; text-align: center; text-shadow: 0 1px 3px rgba(0,0,0,.65); }
 </style>
 
 @code {
+    // Une teinte par groupe ; quelques fonctions ont la leur.
+    static readonly Dictionary<string, (string, string)> CategoryColors = new()
+    {
+        ["System"] = ("#74a0ff", "#3b5bdb"),
+        ["Storage"] = ("#ffb35c", "#f76707"),
+        ["Sharing"] = ("#4be0b5", "#0ca678"),
+        ["Virtualization"] = ("#b9a3ff", "#7048e8"),
+        ["Accounts"] = ("#ff8fb8", "#d6336c"),
+        ["Monitoring"] = ("#ff9a9a", "#e03131"),
+    };
+
+    static readonly Dictionary<string, (string, string)> AppColors = new()
+    {
+        ["docker"] = ("#4dabf7", "#1971c2"),
+        ["terminal"] = ("#495057", "#16181b"),
+    };
+
+    static (string, string) Colors(DesktopApp app) =>
+        AppColors.TryGetValue(app.Id, out var c) ? c : CategoryColors.GetValueOrDefault(app.Category, ("#adb5bd", "#495057"));
+
     protected override void OnInitialized()
     {
-        Docker.Changed += OnChanged; // la catégorie Docker apparaît ou disparaît avec l'état du service
+        Docker.Changed += OnChanged; // l'icône Docker apparaît ou disparaît avec l'état du service
         Alerts.Changed += OnChanged;
     }
 
@@ -48,11 +99,10 @@
 
     int AlertCount(DesktopApp app) => app.Id == "alerts" ? Alerts.Count : 0;
 
-    // Les fonctions déjà converties s'ouvrent en fenêtre ; les autres restent des pages.
+    // Chaque fonction s'ouvre dans une fenêtre flottante.
     void OpenApp(DesktopApp app)
     {
-        if (app.Component is not null) Desk.Open(app);
-        else Nav.NavigateTo(app.Href);
+        Desk.Open(app);
     }
 
     public void Dispose()

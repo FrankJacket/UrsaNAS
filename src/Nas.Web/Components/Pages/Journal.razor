@@ -2,8 +2,8 @@
 @inherits AutoRefreshBase
 @inject Repo Repo
 
-<MudText Typo="Typo.h4" Class="mb-4">@L["Audit log"]</MudText>
-<MudTable Items="rows" Hover="true" Dense="true" FixedHeader Virtualize Height="calc(100vh - 150px)">
+@if (!InWindow) { <MudText Typo="Typo.h4" Class="mb-4">@L["Audit log"]</MudText> }
+<MudTable Items="rows" Hover="true" Dense="true" FixedHeader Virtualize Class="desk-grow" Height="@(InWindow ? null : "calc(100vh - 150px)")">
     <HeaderContent><MudTh>@L["Date"]</MudTh><MudTh>@L["Author"]</MudTh><MudTh>@L["Action"]</MudTh><MudTh>@L["Detail"]</MudTh></HeaderContent>
     <RowTemplate>
         <MudTd>@Fmt.Dt(context.At)</MudTd>
@@ -15,6 +15,9 @@
 </MudTable>
 
 @code {
+    /// <summary>Vrai quand la page est affichée dans une fenêtre du bureau : le titre est alors celui de la fenêtre.</summary>
+    [CascadingParameter(Name = "InWindow")] bool InWindow { get; set; }
+
     List<AuditRow> rows = new();
     protected override async Task LoadAsync() => rows = await Repo.GetAuditAsync();
 }

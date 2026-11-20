@@ -5,11 +5,14 @@
 @inject IDialogService Dialogs
 @inject ISnackbar Snack
 
-<MudText Typo="Typo.h4" Class="mb-4">@L["Volumes and networks"]</MudText>
+@if (!InWindow)
+{
+    <MudText Typo="Typo.h4" Class="mb-4">@L["Volumes and networks"]</MudText>
+}
 
 @if (error is not null)
 {
-    <MudAlert Severity="Severity.Error" Class="mb-4">@error <MudLink Href="/docker">@L["Docker status"]</MudLink></MudAlert>
+    <MudAlert Severity="Severity.Error" Class="mb-4">@error <MudLink Href="@(DockNav is null ? "/docker" : null)" OnClick="@(() => DockNav?.Go("status"))">@L["Docker status"]</MudLink></MudAlert>
 }
 
 <MudText Typo="Typo.h5" Class="mb-2">@L["Volumes"]</MudText>
@@ -17,7 +20,7 @@
     @L["A Docker volume is stored in Docker's own folder. To use a folder of the NAS instead, give its path when you start the container or in your stack."]
 </MudAlert>
 <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="CreateVolume" Class="mb-4" Disabled="busy">@L["Create a volume"]</MudButton>
-<MudTable Items="volumes" Hover="true" Dense="true" Loading="@(!loaded)" Class="mb-8">
+<MudTable Items="volumes" Hover="true" Dense="true" Loading="@(!loaded)" Class="mb-8 desk-grow">
     <HeaderContent><MudTh>@L["Name"]</MudTh><MudTh>@L["Driver"]</MudTh><MudTh>@L["Mounted on"]</MudTh><MudTh></MudTh></HeaderContent>
     <RowTemplate>
         <MudTd><b>@context.Name</b></MudTd>
@@ -32,7 +35,7 @@
 
 <MudText Typo="Typo.h5" Class="mb-2">@L["Networks"]</MudText>
 <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="CreateNetwork" Class="mb-4" Disabled="busy">@L["Create a network"]</MudButton>
-<MudTable Items="networks" Hover="true" Dense="true" Loading="@(!loaded)">
+<MudTable Items="networks" Hover="true" Dense="true" Loading="@(!loaded)" Class="desk-grow">
     <HeaderContent><MudTh>@L["Name"]</MudTh><MudTh>@L["Driver"]</MudTh><MudTh>@L["Scope"]</MudTh><MudTh></MudTh></HeaderContent>
     <RowTemplate>
         <MudTd><b>@context.Name</b></MudTd>
@@ -49,6 +52,12 @@
 </MudTable>
 
 @code {
+    /// <summary>Navigation interne de la fenêtre Docker ; absente quand la page est ouverte seule.</summary>
+    [CascadingParameter] DockerNav? DockNav { get; set; }
+
+    /// <summary>Vrai quand la page est affichée dans une fenêtre du bureau : le titre est alors celui de la fenêtre.</summary>
+    [CascadingParameter(Name = "InWindow")] bool InWindow { get; set; }
+
     static readonly HashSet<string> Builtin = ["bridge", "host", "none"];
     static readonly DialogOptions Small = new() { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true, BackdropClick = false };
 

@@ -7,7 +7,7 @@
 @inject IJSRuntime JS
 
 <MudStack Row="true" AlignItems="AlignItems.Center" Wrap="Wrap.Wrap" Class="mb-3">
-    <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" Href="/vms" />
+    <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" Href="@(VmNav is null ? "/vms" : null)" OnClick="@(() => VmNav?.ShowList())" />
     <MudText Typo="Typo.h4">@Name</MudText>
     @if (cfg is not null) { <MudChip T="string" Size="Size.Small" Color="@(Running ? Color.Success : Color.Default)">@cfg.State</MudChip> }
     <MudSpacer />
@@ -15,7 +15,7 @@
     {
         @if (Running)
         {
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Monitor" Href="@("/vms/console/" + Uri.EscapeDataString(Name))">@L["Console"]</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Monitor" Href="@(VmNav is null ? "/vms/console/" + Uri.EscapeDataString(Name) : null)" OnClick="@(() => VmNav?.ShowConsole(Name))">@L["Console"]</MudButton>
             <MudTooltip Text="@L["Open the console in a new window"]"><MudIconButton Icon="@Icons.Material.Filled.OpenInNew" OnClick="OpenWindow" /></MudTooltip>
             <MudButton Variant="Variant.Outlined" Disabled="busy" OnClick='() => Power("shutdown", L["Shutdown requested."])'>@L["Shut down"]</MudButton>
             <MudButton Variant="Variant.Outlined" Color="Color.Warning" Disabled="busy" OnClick="PowerOff">@L["Power off"]</MudButton>
@@ -194,6 +194,9 @@ else if (error is null)
 }
 
 @code {
+    /// <summary>Navigation interne de la fenêtre des machines virtuelles ; absente quand la page est ouverte seule.</summary>
+    [CascadingParameter] VmsNav? VmNav { get; set; }
+
     async Task OpenWindow() =>
         await JS.InvokeVoidAsync("open", "/vms/window/" + Uri.EscapeDataString(Name), "vmconsole-" + Name, "popup,width=1100,height=780");
 

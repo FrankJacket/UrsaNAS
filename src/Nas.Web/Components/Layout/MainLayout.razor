@@ -2,6 +2,7 @@
 @implements IDisposable
 @inject ThemeState Theme
 @inject IJSRuntime JS
+@inject DesktopState Desktop
 @inject NavigationManager Nav
 @inject IDialogService Dialogs
 @inject ISnackbar Snack
@@ -58,8 +59,8 @@
     }
     void OnThemeChanged() => InvokeAsync(StateHasChanged);
 
-    // Le terminal s'ouvre dans sa propre fenêtre, comme la console d'une machine virtuelle.
-    async Task OpenTerminal() => await JS.InvokeVoidAsync("open", "/terminal/window", "ursanas-terminal", "popup,width=1000,height=640");
+    // Le terminal s'ouvre dans une fenêtre flottante du bureau (la page /terminal/window reste disponible seule).
+    void OpenTerminal() => Desktop.Open(DesktopState.Apps.First(a => a.Id == "terminal"));
 
     // Rechargement complet : /logout est une vraie réponse HTTP qui supprime le cookie, pas une page du routeur.
     void Logout() => Nav.NavigateTo("/logout", forceLoad: true);

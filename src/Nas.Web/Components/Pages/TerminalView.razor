@@ -1,0 +1,55 @@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+
+@* Terminal sur la machine : un shell root. Réservé aux administrateurs ; l'ouverture est inscrite au journal.
+   Le composant remplit son conteneur : fenêtre flottante du bureau ou page /terminal/window. *@
+<div style="position:relative; display:flex; flex-direction:column; height:100%; min-height:0; background:#000">
+    <div style="padding:4px 12px; font-size:12px; background:#7a1f1f; color:#fff">@L["Root shell on the NAS: everything you type runs with full rights. This session is recorded in the audit log."]</div>
+    <div @ref="screen" style="flex:1; min-height:0; padding:6px"></div>
+    @if (state == "failed")
+    {
+        <MudAlert Severity="Severity.Error" Style="position:absolute; top:32px; left:8px; right:8px; z-index:10">@L["The terminal could not connect."]</MudAlert>
+    }
+    else if (state == "closed")
+    {
+        <MudAlert Severity="Severity.Info" Style="position:absolute; top:32px; left:8px; right:8px; z-index:10">
+            @L["The terminal is closed."] <MudButton Size="Size.Small" Variant="Variant.Filled" OnClick="ConnectAsync">@L["Open a new session"]</MudButton>
+        </MudAlert>
+    }
+</div>
+
+@code {
+    ElementReference screen;
+    IJSObjectReference? module;
+    string state = "connecting";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender) await ConnectAsync();
+    }
+
+    // Ouvre une session ; le bouton « Ouvrir une nouvelle session » la rappelle sans recharger la page.
+    async Task ConnectAsync()
+    {
+        state = "connecting";
+        StateHasChanged();
+        try
+        {
+            module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./terminal.js");
+            var uri = new Uri(Nav.BaseUri);
+            var url = (uri.Scheme == "https" ? "wss://" : "ws://") + uri.Authority + "/terminal-ws";
+            state = await module.InvokeAsync<string>("connect", screen, url);
+        }
+        catch (JSException) { state = "failed"; }
+        catch (JSDisconnectedException) { return; }
+        StateHasChanged();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (module is null) return;
+        try { await module.InvokeVoidAsync("disconnect"); await module.DisposeAsync(); }
+        catch (Exception e) when (e is JSDisconnectedException or JSException or OperationCanceledException) { }
+    }
+}

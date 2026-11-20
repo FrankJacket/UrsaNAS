@@ -5,7 +5,7 @@
 @inject IDialogService Dialogs
 @inject ISnackbar Snack
 
-<MudText Typo="Typo.h4" Class="mb-4">@L["Remote storage"]</MudText>
+@if (!InWindow) { <MudText Typo="Typo.h4" Class="mb-4">@L["Remote storage"]</MudText> }
 @if (error is not null)
 {
     <MudAlert Severity="Severity.Error" Class="mb-4">@error</MudAlert>
@@ -17,7 +17,7 @@ else if (loaded && types.Count == 0)
 <MudStack Row="true" Class="mb-4">
     <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="Add" Disabled="@(types.Count == 0)">@L["Add a connection"]</MudButton>
 </MudStack>
-<MudTable Items="remotes" Hover="true" Dense="true" Loading="@(!loaded)">
+<MudTable Items="remotes" Class="desk-grow" Hover="true" Dense="true" Loading="@(!loaded)">
     <HeaderContent><MudTh>@L["Name"]</MudTh><MudTh>@L["Type"]</MudTh><MudTh>@L["Server"]</MudTh><MudTh>@L["Folder"]</MudTh><MudTh>@L["Status"]</MudTh><MudTh>@L["Space"]</MudTh><MudTh></MudTh></HeaderContent>
     <RowTemplate>
         <MudTd>@context.Name</MudTd>
@@ -49,6 +49,9 @@ else if (loaded && types.Count == 0)
 </MudTable>
 
 @code {
+    /// <summary>Vrai quand la page est affichée dans une fenêtre du bureau : le titre est alors celui de la fenêtre.</summary>
+    [CascadingParameter(Name = "InWindow")] bool InWindow { get; set; }
+
     List<RemoteStorage> remotes = new();
     IReadOnlyList<string> types = [];
     bool signIn, dropboxSignIn;

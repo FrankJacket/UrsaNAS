@@ -1,0 +1,25 @@
+@* Fenêtre « Machines virtuelles » : la liste, le détail d'une machine et sa console s'y succèdent sans quitter la fenêtre. *@
+<CascadingValue Value="nav" IsFixed="true">
+    <div class="desk-body" style="height:100%">
+        @if (view == "detail")
+        {
+            <DynamicComponent @key="@("detail:" + name)" Type="typeof(VmDetail)" Parameters="@(new Dictionary<string, object> { ["Name"] = name! })" />
+        }
+        else if (view == "console")
+        {
+            <DynamicComponent @key="@("console:" + name)" Type="typeof(VmConsole)" Parameters="@(new Dictionary<string, object> { ["Name"] = name! })" />
+        }
+        else
+        {
+            <DynamicComponent @key="@("list")" Type="typeof(Vms)" />
+        }
+    </div>
+</CascadingValue>
+
+@code {
+    string view = "list";
+    string? name;
+    VmsNav nav = default!;
+
+    protected override void OnInitialized() => nav = new VmsNav((v, n) => { view = v; name = n; StateHasChanged(); });
+}

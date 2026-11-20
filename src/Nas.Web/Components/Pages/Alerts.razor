@@ -5,7 +5,7 @@
 @inject AlertMonitor Monitor
 @inject ISnackbar Snack
 
-<MudText Typo="Typo.h4" Class="mb-4">@L["Alerts"]</MudText>
+@if (!InWindow) { <MudText Typo="Typo.h4" Class="mb-4">@L["Alerts"]</MudText> }
 
 <MudStack Row="true" Class="mb-4" AlignItems="AlignItems.Center">
     <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="CheckNow" Disabled="checking">@(checking ? L["Checking…"] : L["Check now"])</MudButton>
@@ -24,9 +24,9 @@
     </MudAlert>
 }
 
-<MudTabs>
+<MudTabs Class="desk-grow desk-tabs">
     <MudTabPanel Text="@L["History"]">
-        <MudTable Items="history" Hover="true" Dense="true">
+        <MudTable Items="history" Hover="true" Dense="true" Class="desk-grow">
             <HeaderContent><MudTh>@L["Opened"]</MudTh><MudTh>@L["Severity"]</MudTh><MudTh>@L["Alert"]</MudTh><MudTh>@L["Resolved"]</MudTh></HeaderContent>
             <RowTemplate>
                 <MudTd>@Fmt.Dt(context.RaisedAt)</MudTd>
@@ -71,6 +71,9 @@
 
 
 @code {
+    /// <summary>Vrai quand la page est affichée dans une fenêtre du bureau : le titre est alors celui de la fenêtre.</summary>
+    [CascadingParameter(Name = "InWindow")] bool InWindow { get; set; }
+
     List<AlertRow> active = new(), history = new();
     /// <summary>Copie modifiable des réglages (MailSettings est un enregistrement immuable).</summary>
     sealed class MailForm

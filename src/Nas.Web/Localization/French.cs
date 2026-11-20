@@ -7,6 +7,7 @@ public static class French
     {
         ["Sign out"] = "Se déconnecter",
         ["Desktop"] = "Bureau",
+        ["Virtualization"] = "Virtualisation",
         ["System"] = "Système",
         ["Light theme"] = "Thème clair",
         ["Dark theme"] = "Thème sombre",

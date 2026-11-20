@@ -1,0 +1,59 @@
+@* Fenêtre Docker : barre latérale à gauche, la section choisie à droite. Les sections sont les pages /docker/…,
+   affichées sans leur titre (celui de la fenêtre suffit). *@
+<CascadingValue Value="nav" IsFixed="true">
+<div class="dockwin">
+    <nav class="dockwin-nav" aria-label="Docker">
+        @foreach (var s in Sections)
+        {
+            var section = s;
+            <button type="button" class="dockwin-item @(section.Id == current ? "active" : null)" title="@L[section.Title]" @onclick="() => current = section.Id">
+                <MudIcon Icon="@section.Icon" />
+                <span class="dockwin-label">@L[section.Title]</span>
+            </button>
+        }
+    </nav>
+    <div class="desk-body dockwin-body">
+        @* @key : changer de section recrée la page, donc son rafraîchissement automatique repart proprement. *@
+        <DynamicComponent @key="current" Type="Sections.First(s => s.Id == current).Page" />
+    </div>
+</div>
+
+</CascadingValue>
+
+<style>
+    .dockwin { display: flex; height: 100%; min-height: 0; }
+    .dockwin-nav {
+        flex: none; width: 210px; padding: 8px; display: flex; flex-direction: column; gap: 2px;
+        border-right: 1px solid var(--mud-palette-lines-default); overflow-y: auto;
+    }
+    .dockwin-item {
+        display: flex; align-items: center; justify-content: flex-start; gap: 12px; padding: 10px 12px; border: 0; border-radius: var(--mud-default-borderradius);
+        background: transparent; color: var(--mud-palette-text-primary); font: inherit; text-align: left; cursor: pointer;
+    }
+    .dockwin-item:hover { background: var(--mud-palette-action-default-hover); }
+    .dockwin-item.active { background: var(--mud-palette-primary-hover); color: var(--mud-palette-primary); font-weight: 500; }
+    .dockwin-body { flex: 1 1 auto; min-width: 0; }
+    /* Fenêtre étroite : la barre latérale ne garde que les icônes. */
+    @@container ursa-dialog (max-width: 640px) {
+        .dockwin-nav { width: 56px; }
+        .dockwin-label { display: none; }
+    }
+</style>
+
+@code {
+    record Section(string Id, string Title, string Icon, Type Page);
+
+    static readonly Section[] Sections =
+    [
+        new("containers", "Containers", Icons.Material.Filled.Inventory2, typeof(DockerContainers)),
+        new("images", "Images", Icons.Material.Filled.Album, typeof(DockerImages)),
+        new("stacks", "Stacks", Icons.Material.Filled.Layers, typeof(DockerStacks)),
+        new("volumes", "Volumes and networks", Icons.Material.Filled.Lan, typeof(DockerVolumes)),
+        new("status", "Docker status", Icons.Material.Filled.Info, typeof(DockerHome)),
+    ];
+
+    string current = "containers";
+    DockerNav nav = default!;
+
+    protected override void OnInitialized() => nav = new DockerNav(section => { current = section; StateHasChanged(); });
+}
