@@ -7,11 +7,7 @@
 
 @if (!InWindow) { <MudText Typo="Typo.h4" Class="mb-4">@L["Appearance"]</MudText> }
 
-<MudText Typo="Typo.h6" Class="mb-1">@L["Color presets"]</MudText>
-<MudText Typo="Typo.body2" Class="mb-4" Style="color:var(--mud-palette-text-secondary)">
-    @L["The color applies to the title bar, buttons, icons and the default wallpaper. The choice is kept for this browser."]
-</MudText>
-
+<MudText Typo="Typo.h6" Class="mb-3">@L["Colors"]</MudText>
 <div class="pre-grid">
     @foreach (var p in ThemePreset.All)
     {
@@ -26,12 +22,7 @@
     }
 </div>
 
-
-<MudText Typo="Typo.h6" Class="mt-6 mb-1">@L["Wallpaper"]</MudText>
-<MudText Typo="Typo.body2" Class="mb-4" Style="color:var(--mud-palette-text-secondary)">
-    @L["The wallpaper choice is kept for this browser. An uploaded image is shared by everyone who uses this NAS."]
-</MudText>
-
+<MudText Typo="Typo.h6" Class="mt-6 mb-3">@L["Wallpaper"]</MudText>
 <div class="wall-grid">
     <button type="button" class="wall-card @(Theme.Wallpaper == Wallpaper.DefaultId ? "selected" : null)" @onclick="() => ChooseWall(Wallpaper.DefaultId)">
         <span class="wall-thumb" style="background:linear-gradient(160deg, color-mix(in srgb, var(--mud-palette-primary) 35%, #0b0b1a), var(--mud-palette-primary))"></span>
@@ -57,20 +48,23 @@
 <MudStack Row="true" Spacing="2" Class="mt-4" AlignItems="AlignItems.Center">
     <MudFileUpload T="IBrowserFile" Class="mt-0" Accept=".png,.jpg,.jpeg,.webp" FilesChanged="Upload">
         <CustomContent Context="up">
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Image" OnClick="@(() => up.OpenFilePickerAsync())">@L["Upload an image"]</MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Image" OnClick="@(() => up.OpenFilePickerAsync())">@L["Upload an image"]</MudButton>
         </CustomContent>
         <SelectedTemplate Context="chosen"></SelectedTemplate>
     </MudFileUpload>
     @if (Walls.Current() is not null)
     {
-        <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="RemoveImage">@L["Remove my image"]</MudButton>
+        <MudButton Variant="Variant.Text" Color="Color.Error" OnClick="RemoveImage">@L["Remove my image"]</MudButton>
     }
-    @if (error is not null) { <MudText Color="Color.Error" Typo="Typo.body2">@error</MudText> }
 </MudStack>
-<MudText Typo="Typo.caption" Class="mt-2" Style="color:var(--mud-palette-text-secondary)">@L["PNG, JPEG or WebP, 10 MB at most."]</MudText>
+@if (error is not null) { <MudText Color="Color.Error" Typo="Typo.body2" Class="mt-2">@error</MudText> }
+
+<MudText Typo="Typo.caption" Class="mt-6 d-block" Style="color:var(--mud-palette-text-secondary)">
+    @L["Your choices are kept for this browser. An uploaded image is shared by everyone who uses this NAS."]
+</MudText>
 
 <style>
-    .pre-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px; }
+    .pre-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 12px; }
     .pre-card {
         display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 16px 8px 12px;
         border: 2px solid transparent; border-radius: 16px; cursor: pointer; font: inherit;

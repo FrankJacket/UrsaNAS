@@ -69,6 +69,8 @@
     /* Toute fenêtre du bureau : pas de marge intérieure ni de défilement propres ; le contenu gère les siens. */
     .desk-window .ursa-floating-dialog-content { padding: 0 !important; overflow: hidden !important; display: flex; flex-direction: column; }
     .desk-window .ursa-floating-dialog-content > * { flex: 1 1 auto; min-height: 0; }
+    /* Barre de titre des fenêtres : teintée de la couleur du thème. */
+    .desk-window .ursa-floating-dialog-header { background: color-mix(in srgb, var(--mud-palette-primary) 22%, var(--mud-palette-surface)); }
 
     /* Corps d'une fenêtre : colonne qui défile s'il le faut. L'élément marqué « desk-grow » (tableau, arbre) prend la
        place restante et défile seul, son en-tête reste visible ; s'il manque de place, c'est le corps qui défile. */

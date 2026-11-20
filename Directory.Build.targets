@@ -1,0 +1,8 @@
+<Project>
+  <!-- Les dossiers de génération des deux plateformes ne doivent jamais être pris pour des sources, quelle que soit celle qui compile.
+       Ce fichier-ci (et non Directory.Build.props) s'applique aussi au sous-module external/Ursacopy, qui a son propre
+       Directory.Build.props masquant celui de la racine : les propriétés sont toutes évaluées avant les fichiers à inclure. -->
+  <PropertyGroup>
+    <DefaultItemExcludes>$(DefaultItemExcludes);obj/**;bin/**;obj-linux/**;bin-linux/**</DefaultItemExcludes>
+  </PropertyGroup>
+</Project>

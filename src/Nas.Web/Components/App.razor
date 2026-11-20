@@ -65,6 +65,6 @@
             ? null : RenderMode.InteractiveServer;
 
     string theme => HttpContext?.Request.Cookies["ursanas-theme"] == "dark" ? "dark" : "light";
-    string color => HttpContext?.Request.Cookies["ursanas-color"] ?? "indigo";
+    string color => HttpContext?.Request.Cookies["ursanas-color"] ?? "default";
     string wallpaper => HttpContext?.Request.Cookies["ursanas-wall"] ?? "default";
 }
