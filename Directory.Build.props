@@ -1,4 +1,11 @@
 <Project>
+  <!-- Numéro de version des compilations de développement (deploy.ps1, Visual Studio) : il doit être plus ancien que toute
+       release, pour que la page « Mises à jour » propose la dernière. Le numéro d'une release est imposé à la
+       publication (-p:Version=x.y.z) ; sans cette ligne .NET attribue 1.0.0, jugé plus récent que 0.x. -->
+  <PropertyGroup>
+    <Version Condition="'$(Version)' == ''">0.0.0-dev</Version>
+  </PropertyGroup>
+
   <!-- Sous Linux (WSL), obj/ et bin/ sont séparés de ceux de Windows : Visual Studio et WSL
        peuvent ainsi travailler dans le même dépôt sans écraser project.assets.json ni verrouiller bin/.
        (L'exclusion de ces dossiers des sources est dans Directory.Build.targets.) -->

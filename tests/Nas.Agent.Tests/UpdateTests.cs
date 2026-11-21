@@ -69,6 +69,7 @@ public sealed class UpdateTests : IDisposable
     [InlineData("1.2.0", false)]
     [InlineData("1.2.1", false)]
     [InlineData("1.1.9", true)]
+    [InlineData("0.0.0-dev", true)] // compilation de développement : toute release est plus récente
     public void Pas_de_mise_a_jour_si_la_version_installee_est_aussi_recente(string current, bool available) =>
         Assert.Equal(available, UpdateService.Pick(current, false, Releases).Available);
 
