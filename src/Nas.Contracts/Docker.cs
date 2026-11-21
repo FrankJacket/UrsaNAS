@@ -17,7 +17,19 @@ public sealed record ImageInfo(string Id, string Repository, string Tag, long Si
 
 public sealed record DockerVolume(string Name, string Driver, string Mountpoint);
 
-public sealed record DockerNetwork(string Id, string Name, string Driver, string Scope);
+/// <summary>
+/// Réseau Docker. Les champs après <c>Scope</c> viennent de « docker network inspect » : sous-réseaux et passerelles (séparés par « , »
+/// s'il y en a plusieurs), plage d'adresses, IPv6, noms des conteneurs connectés, interface parente et mode (macvlan / ipvlan).
+/// </summary>
+public sealed record DockerNetwork(string Id, string Name, string Driver, string Scope, string? Subnet = null, string? Gateway = null,
+    string? IpRange = null, bool Ipv6 = false, IReadOnlyList<string>? Containers = null, string? Parent = null, string? Mode = null);
+
+/// <summary><c>Driver</c> : bridge, macvlan ou ipvlan. <c>Parent</c> (macvlan, ipvlan) : interface du NAS où brancher le réseau. <c>Mode</c> : voir <see cref="Rules.NetworkModes"/>.</summary>
+public sealed record CreateNetworkRequest(string Name, string Driver = "bridge", string? Subnet = null, string? Gateway = null,
+    string? IpRange = null, bool Ipv6 = false, string? Parent = null, string? Mode = null);
+
+/// <summary><c>Action</c> : start, stop ou restart (le service systemd « docker »).</summary>
+public sealed record DockerServiceRequest(string Action);
 
 /// <summary>Une stack Compose enregistrée sur le NAS ; <c>Running</c>/<c>Total</c> comptent ses conteneurs.</summary>
 public sealed record StackInfo(string Name, int Running, int Total);
@@ -102,6 +114,45 @@ public static partial class Rules
         string.IsNullOrEmpty(name) || !DockerNameRegex().IsMatch(name)
             ? Msg.F("Invalid name: 1 to 64 characters (letters, digits, _ . and -), starting with a letter or a digit.")
             : null;
+
+    public static readonly IReadOnlyList<string> NetworkDrivers = ["bridge", "macvlan", "ipvlan"];
+
+    /// <summary>Modes permis par pilote ; le premier est celui de Docker par défaut.</summary>
+    public static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> NetworkModes = new Dictionary<string, IReadOnlyList<string>>
+    {
+        ["macvlan"] = ["bridge", "private", "vepa", "passthru"],
+        ["ipvlan"] = ["l2", "l3"],
+    };
+
+    // Nom d'interface Linux (15 caractères au plus ; « eth0.10 » pour un VLAN) ; ne commence jamais par « - ».
+    [GeneratedRegex(@"^[A-Za-z0-9][A-Za-z0-9_.@-]{0,14}$")]
+    private static partial Regex InterfaceRegex();
+
+    static bool IsCidr(string s, bool allowV6) =>
+        System.Net.IPNetwork.TryParse(s, out var n) && s.Contains('/')
+        && (n.BaseAddress.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork || (allowV6 && n.BaseAddress.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6));
+
+    /// <summary>Contrôle la création d'un réseau : pilote, interface parente et mode, sous-réseau / passerelle / plage en notation CIDR ou IP.</summary>
+    public static string? ValidateCreateNetwork(CreateNetworkRequest r)
+    {
+        if (ValidateDockerName(r.Name) is { } e0) return e0;
+        if (!NetworkDrivers.Contains(r.Driver)) return Msg.F("Unknown network driver.");
+        if (r.Driver != "bridge")
+        {
+            if (string.IsNullOrEmpty(r.Parent) || !InterfaceRegex().IsMatch(r.Parent)) return Msg.F("Choose the network interface the network is attached to.");
+            if (!NetworkModes[r.Driver].Contains(r.Mode ?? "")) return Msg.F("Unknown network mode.");
+        }
+        else if (!string.IsNullOrEmpty(r.Parent) || !string.IsNullOrEmpty(r.Mode)) return Msg.F("A bridge network has no interface or mode.");
+        var subnet = r.Subnet?.Trim();
+        var gateway = r.Gateway?.Trim();
+        var range = r.IpRange?.Trim();
+        if (!string.IsNullOrEmpty(subnet) && !IsCidr(subnet, true)) return Msg.F("Invalid subnet “{0}”: expected 172.20.0.0/16.", subnet);
+        if (!string.IsNullOrEmpty(gateway) && !System.Net.IPAddress.TryParse(gateway, out _)) return Msg.F("Invalid gateway “{0}”.", gateway);
+        if (!string.IsNullOrEmpty(range) && !IsCidr(range, true)) return Msg.F("Invalid IP range “{0}”: expected 172.20.10.0/24.", range);
+        if ((!string.IsNullOrEmpty(gateway) || !string.IsNullOrEmpty(range)) && string.IsNullOrEmpty(subnet)) return Msg.F("A gateway or an IP range needs a subnet.");
+        if (r.Driver != "bridge" && string.IsNullOrEmpty(subnet)) return Msg.F("A macvlan or ipvlan network needs a subnet.");
+        return null;
+    }
 
     public static string? ValidateStackName(string? name) =>
         string.IsNullOrEmpty(name) || !StackNameRegex().IsMatch(name)

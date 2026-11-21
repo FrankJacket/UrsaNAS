@@ -228,8 +228,10 @@ public partial class Program
         app.MapDelete("/docker/volumes", (string name, DockerService d, CancellationToken ct) =>
             Read(async () => { await d.RemoveVolumeAsync(name, ct); return Results.NoContent(); }));
         app.MapGet("/docker/networks", (DockerService d, CancellationToken ct) => Read(async () => Results.Ok(await d.NetworksAsync(ct))));
-        app.MapPost("/docker/networks", (DockerNameRequest r, DockerService d, CancellationToken ct) =>
-            Read(async () => { await d.CreateNetworkAsync(r.Name, ct); return Results.NoContent(); }));
+        app.MapPost("/docker/networks", (CreateNetworkRequest r, DockerService d, CancellationToken ct) =>
+            Read(async () => { await d.CreateNetworkAsync(r, ct); return Results.NoContent(); }));
+        app.MapPost("/docker/service", (DockerServiceRequest r, DockerService d, CancellationToken ct) =>
+            Read(async () => { await d.ServiceAsync(r.Action, ct); return Results.NoContent(); }));
         app.MapDelete("/docker/networks", (string name, DockerService d, CancellationToken ct) =>
             Read(async () => { await d.RemoveNetworkAsync(name, ct); return Results.NoContent(); }));
         app.MapGet("/docker/stacks", (DockerService d, CancellationToken ct) => Read(async () => Results.Ok(await d.StacksAsync(ct))));

@@ -75,6 +75,8 @@ public sealed class FakeCommandRunner : ICommandRunner
                 throw new System.ComponentModel.Win32Exception(2);
             case "docker":
                 return FakeDocker(a);
+            case "systemctl":
+                return FakeSystemctl(a);
             default:
                 return Ok(); // chgrp, chmod, smbpasswd, smbcontrol, smbcacls, testparm…
         }
@@ -89,12 +91,29 @@ public sealed class FakeCommandRunner : ICommandRunner
     ];
     readonly List<string> _images = ["jellyfin/jellyfin:latest", "alpine:3.20", "nginx:latest"];
     readonly List<string> _volumes = ["jellyfin-config"];
-    readonly List<string> _networks = ["bridge", "host", "none"];
+    sealed record FakeNet(string Name, string Driver, string? Subnet = null, string? Gateway = null, string? Range = null, bool Ipv6 = false, string? Parent = null, string? Mode = null)
+    {
+        public string Short => Math.Abs(Name.GetHashCode()).ToString("x8");
+    }
+    readonly List<FakeNet> _networks =
+    [
+        new("bridge", "bridge", "172.17.0.0/16", "172.17.0.1"), new("host", "host"), new("none", "null"),
+        new("media", "bridge", "172.20.0.0/16", "172.20.0.1"),
+    ];
+    bool _dockerDown; // « systemctl stop docker » : le démon ne répond plus
 
     static string Json(object o) => System.Text.Json.JsonSerializer.Serialize(o);
 
+    CommandResult FakeSystemctl(IReadOnlyList<string> a)
+    {
+        if (!a.Contains("docker.service")) return Ok();
+        _dockerDown = a[0] == "stop";
+        return Ok();
+    }
+
     CommandResult FakeDocker(IReadOnlyList<string> a)
     {
+        if (_dockerDown) return Fail("Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?");
         switch (a[0])
         {
             case "version": return Ok("27.3.1\n");
@@ -177,9 +196,24 @@ public sealed class FakeCommandRunner : ICommandRunner
             case "volume" when a[1] == "create": _volumes.Add(a[2]); return Ok(a[2]);
             case "volume" when a[1] == "rm": _volumes.Remove(a[2]); return Ok(a[2]);
             case "network" when a[1] == "ls":
-                return Ok(string.Concat(_networks.Select(n => Json(new { ID = Math.Abs(n.GetHashCode()).ToString("x8"), Name = n, Driver = n is "host" or "none" ? n : "bridge", Scope = "local" }) + "\n")));
-            case "network" when a[1] == "create": _networks.Add(a[2]); return Ok(a[2]);
-            case "network" when a[1] == "rm": _networks.Remove(a[2]); return Ok(a[2]);
+                return Ok(string.Concat(_networks.Select(n => Json(new { ID = n.Short, n.Name, n.Driver, Scope = "local" }) + "\n")));
+            case "network" when a[1] == "inspect":
+                return Ok(Json(_networks.Where(n => a.Skip(2).Contains(n.Short)).Select(n => new
+                {
+                    Id = n.Short.PadRight(64, '0'), n.Name, n.Driver,
+                    EnableIPv6 = n.Ipv6,
+                    IPAM = new { Config = n.Subnet is null ? [] : new[] { new Dictionary<string, string> { ["Subnet"] = n.Subnet, ["Gateway"] = n.Gateway ?? "", ["IPRange"] = n.Range ?? "" }.Where(p => p.Value.Length > 0).ToDictionary(p => p.Key, p => p.Value) } },
+                    Options = new[] { ("parent", n.Parent), (n.Driver + "_mode", n.Mode) }.Where(p => p.Item2 is not null).ToDictionary(p => p.Item1, p => p.Item2),
+                    Containers = n.Name == "bridge" ? new Dictionary<string, object> { ["a1b2c3d4e5f6"] = new { Name = "jellyfin" } } : new Dictionary<string, object>(),
+                }).ToList()) + "\n");
+            case "network" when a[1] == "create":
+                string? Opt(string flag) => a.ToList().IndexOf(flag) is var ix and >= 0 ? a[ix + 1] : null;
+                var po = a.Select((x, ix) => (x, ix)).Where(t => t.x == "-o").Select(t => a[t.ix + 1].Split('=', 2)).ToDictionary(p => p[0], p => p[1]);
+                if (_networks.Any(n => n.Name == a[^1])) return Fail($"Error response from daemon: network with name {a[^1]} already exists");
+                _networks.Add(new(a[^1], Opt("--driver") ?? "bridge", Opt("--subnet"), Opt("--gateway"), Opt("--ip-range"), a.Contains("--ipv6"),
+                    po.GetValueOrDefault("parent"), po.GetValueOrDefault("macvlan_mode") ?? po.GetValueOrDefault("ipvlan_mode")));
+                return Ok(a[^1]);
+            case "network" when a[1] == "rm": _networks.RemoveAll(n => n.Name == a[2]); return Ok(a[2]);
             default: return Ok();
         }
     }

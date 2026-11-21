@@ -1,0 +1,118 @@
+@* Création d'un réseau Docker : pilote (bridge, macvlan, ipvlan), interface parente et mode pour macvlan / ipvlan, adressage, IPv6. *@
+@inject AgentClient Agent
+@inject DockerOperations Ops
+
+<MudDialog>
+    <DialogContent>
+        @if (error is not null)
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-3">@error</MudAlert>
+        }
+        <MudTextField @bind-Value="name" Label="@L["Network name"]" Required="true" Immediate="true" Disabled="busy" AutoFocus="true" Class="mb-3" />
+
+        <MudText Typo="Typo.subtitle2">@L["Network driver"]</MudText>
+        <MudRadioGroup T="string" @bind-Value="driver" Disabled="busy" Class="mb-2">
+            <MudRadio T="string" Value="@("bridge")" Dense="true">Bridge</MudRadio>
+            <MudRadio T="string" Value="@("macvlan")" Dense="true">Macvlan</MudRadio>
+            <MudRadio T="string" Value="@("ipvlan")" Dense="true">IPvlan</MudRadio>
+        </MudRadioGroup>
+
+        @if (driver != "bridge")
+        {
+            <MudGrid Spacing="2">
+                <MudItem xs="12" sm="6">
+                    <MudSelect T="string" @bind-Value="parent" Label="@L["Network interface"]" Required="true" Disabled="busy" Dense="true"
+                               HelperText="@(interfaces.Count == 0 ? L["No network interface found."] : null)">
+                        @foreach (var i in interfaces)
+                        {
+                            <MudSelectItem T="string" Value="@i">@i</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudSelect T="string" @bind-Value="mode" Label="@L["Network mode"]" Required="true" Disabled="busy" Dense="true">
+                        @foreach (var m in Rules.NetworkModes[driver])
+                        {
+                            <MudSelectItem T="string" Value="@m">@ModeLabel(m)</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+            </MudGrid>
+        }
+
+        <MudGrid Spacing="2" Class="mt-1">
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="subnet" Label="@L["Subnet"]" Placeholder="172.20.0.0/16" Required="@(driver != "bridge")" Immediate="true" Disabled="busy" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="gateway" Label="@L["Gateway"]" Placeholder="172.20.0.1" Immediate="true" Disabled="busy" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="ipRange" Label="@L["IP range"]" Placeholder="172.20.10.0/24" Immediate="true" Disabled="busy" />
+            </MudItem>
+        </MudGrid>
+        <MudCheckBox T="bool" @bind-Value="ipv6" Label="@L["Enable IPv6"]" Disabled="busy" Class="mt-2" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => Dialog.Cancel()" Disabled="busy">@L["Cancel"]</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save" Disabled="@(busy || name.Trim().Length == 0)">@(busy ? L["In progress…"] : L["Create"])</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance Dialog { get; set; } = default!;
+
+    string name = "", subnet = "", gateway = "", ipRange = "";
+    string parent = "", mode = "";
+    bool ipv6, busy;
+    string? error;
+    List<string> interfaces = [];
+
+    string _driver = "bridge";
+    string driver
+    {
+        get => _driver;
+        set
+        {
+            if (_driver == value) return;
+            _driver = value;
+            mode = value == "bridge" ? "" : Rules.NetworkModes[value][0]; // chaque pilote a ses propres modes
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            // Les cartes physiques et logiques où un réseau macvlan / ipvlan peut se brancher (pas les interfaces virtuelles de Docker ou des machines).
+            var snap = await Agent.GetNetworkAsync();
+            interfaces = snap.Interfaces.Where(i => i.Kind is "ethernet" or "wifi" or "bond" or "vlan" or "bridge" or "ovs").Select(i => i.Name).ToList();
+            parent = interfaces.FirstOrDefault() ?? "";
+        }
+        catch (Exception e) when (e is AgentException or HttpRequestException) { } // la liste reste vide : le message l'indique
+    }
+
+    static string ModeLabel(string m) => m switch
+    {
+        "vepa" => "VEPA", "passthru" => "Passthru", "l2" => "L2", "l3" => "L3", _ => char.ToUpper(m[0]) + m[1..],
+    };
+
+    async Task Save()
+    {
+        error = null;
+        busy = true;
+        var request = new CreateNetworkRequest(name.Trim(), driver, Blank(subnet), Blank(gateway), Blank(ipRange), ipv6,
+            driver == "bridge" ? null : parent, driver == "bridge" ? null : mode);
+        try
+        {
+            await Ops.CreateNetworkAsync(request);
+            Dialog.Close(DialogResult.Ok(true));
+            return;
+        }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable."]; }
+        busy = false;
+    }
+
+    static string? Blank(string s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+}

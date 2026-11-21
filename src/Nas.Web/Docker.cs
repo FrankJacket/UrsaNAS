@@ -114,11 +114,23 @@ public class DockerOperations(AgentClient agent, Repo repo, AuthenticationStateP
         await repo.AuditAsync(await ActorAsync(), "Docker volume deleted", name);
     }
 
-    public async Task CreateNetworkAsync(string name)
+    public async Task CreateNetworkAsync(CreateNetworkRequest r)
     {
-        if (Rules.ValidateDockerName(name) is { } e) throw new AgentException(e);
-        await agent.CreateDockerNetworkAsync(name);
-        await repo.AuditAsync(await ActorAsync(), "Docker network created", name);
+        if (Rules.ValidateCreateNetwork(r) is { } e) throw new AgentException(e);
+        await agent.CreateDockerNetworkAsync(r);
+        await repo.AuditAsync(await ActorAsync(), "Docker network created", $"{r.Name} ({r.Driver})");
+    }
+
+    static readonly Dictionary<string, string> ServiceAudit = new()
+    {
+        ["start"] = "Docker service started", ["stop"] = "Docker service stopped", ["restart"] = "Docker service restarted",
+    };
+
+    /// <summary>Démarre, arrête ou redémarre le service Docker (<paramref name="action"/> : start, stop, restart).</summary>
+    public async Task ServiceAsync(string action)
+    {
+        await agent.DockerServiceAsync(action);
+        await repo.AuditAsync(await ActorAsync(), ServiceAudit[action], null);
     }
 
     public async Task RemoveNetworkAsync(string name)

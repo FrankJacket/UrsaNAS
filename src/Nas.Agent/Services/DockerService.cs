@@ -70,6 +70,38 @@ public static class DockerParser
 
     public static IReadOnlyList<DockerNetwork> ParseNetworks(string text) =>
         Lines(text).Select(e => new DockerNetwork(S(e, "ID"), S(e, "Name"), S(e, "Driver"), S(e, "Scope"))).ToList();
+
+    /// <summary>Ajoute à chaque réseau les détails de « docker network inspect » (un tableau JSON) ; un réseau absent de la réponse reste tel quel.</summary>
+    public static IReadOnlyList<DockerNetwork> MergeNetworkDetails(IReadOnlyList<DockerNetwork> list, string inspectJson)
+    {
+        using var doc = JsonDocument.Parse(inspectJson);
+        if (doc.RootElement.ValueKind != JsonValueKind.Array) return list;
+        var byId = doc.RootElement.EnumerateArray().Where(e => e.ValueKind == JsonValueKind.Object)
+            .Select(e => (Id: e.TryGetProperty("Id", out var i) ? i.GetString() ?? "" : "", Element: e)).Where(x => x.Id.Length > 0).ToList();
+        return list.Select(n =>
+        {
+            var found = byId.Where(x => x.Id.StartsWith(n.Id, StringComparison.Ordinal)).Select(x => x.Element).FirstOrDefault();
+            if (found.ValueKind != JsonValueKind.Object) return n;
+            var configs = found.TryGetProperty("IPAM", out var ipam) && ipam.ValueKind == JsonValueKind.Object
+                && ipam.TryGetProperty("Config", out var cfg) && cfg.ValueKind == JsonValueKind.Array ? cfg.EnumerateArray().ToList() : [];
+            string? Join(string key) => NullIfEmpty(string.Join(", ", configs.Select(c => Str(c, key)).Where(s => s.Length > 0)));
+            var options = found.TryGetProperty("Options", out var o) && o.ValueKind == JsonValueKind.Object ? o : default;
+            string Opt(string key) => options.ValueKind == JsonValueKind.Object ? Str(options, key) : "";
+            var containers = found.TryGetProperty("Containers", out var cs) && cs.ValueKind == JsonValueKind.Object
+                ? cs.EnumerateObject().Select(p => Str(p.Value, "Name")).Where(s => s.Length > 0).Order(StringComparer.OrdinalIgnoreCase).ToList() : [];
+            var mode = Opt("macvlan_mode") is { Length: > 0 } m ? m : Opt("ipvlan_mode");
+            var ipv6 = found.TryGetProperty("EnableIPv6", out var v6) && v6.ValueKind == JsonValueKind.True
+                || found.TryGetProperty("EnableIPv6", out var v6b) && v6b.ValueKind == JsonValueKind.String && v6b.GetString() == "true";
+            return n with
+            {
+                Subnet = Join("Subnet"), Gateway = Join("Gateway"), IpRange = Join("IPRange"), Ipv6 = ipv6,
+                Containers = containers, Parent = NullIfEmpty(Opt("parent")), Mode = NullIfEmpty(mode),
+            };
+        }).ToList();
+    }
+
+    static string Str(JsonElement e, string key) => e.ValueKind == JsonValueKind.Object && e.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
+    static string? NullIfEmpty(string s) => s.Length == 0 ? null : s;
 }
 
 /// <summary>
@@ -312,13 +344,58 @@ public sealed class DockerService(ICommandRunner run, IConfiguration cfg)
         return Mutate(async () => await Ok(["volume", "rm", name], "Deleting the volume", ct));
     }
 
-    public async Task<IReadOnlyList<DockerNetwork>> NetworksAsync(CancellationToken ct = default) =>
-        DockerParser.ParseNetworks(await Ok(["network", "ls", "--format", "{{json .}}"], "Listing networks", ct));
-
-    public Task CreateNetworkAsync(string name, CancellationToken ct = default)
+    /// <summary>Les réseaux avec leurs détails ; si « inspect » échoue, la liste simple suffit.</summary>
+    public async Task<IReadOnlyList<DockerNetwork>> NetworksAsync(CancellationToken ct = default)
     {
-        if (Rules.ValidateDockerName(name) is { } e) throw new OperationException(e);
-        return Mutate(async () => await Ok(["network", "create", name], "Creating the network", ct));
+        var list = DockerParser.ParseNetworks(await Ok(["network", "ls", "--format", "{{json .}}"], "Listing networks", ct));
+        if (list.Count == 0) return list;
+        try { return DockerParser.MergeNetworkDetails(list, await Ok(["network", "inspect", .. list.Select(n => n.Id)], "Inspecting networks", ct)); }
+        catch (OperationException) { return list; }
+    }
+
+    /// <summary>Arguments de « docker network create » ; rien de ce que l'utilisateur écrit ne peut passer pour une option (tout est validé avant).</summary>
+    public static IReadOnlyList<string> NetworkCreateArgs(CreateNetworkRequest r)
+    {
+        var args = new List<string> { "network", "create", "--driver", r.Driver };
+        void Add(string flag, string? v) { if (!string.IsNullOrWhiteSpace(v)) { args.Add(flag); args.Add(v.Trim()); } }
+        Add("--subnet", r.Subnet);
+        Add("--gateway", r.Gateway);
+        Add("--ip-range", r.IpRange);
+        if (r.Ipv6) args.Add("--ipv6");
+        if (r.Driver != "bridge")
+        {
+            args.Add("-o"); args.Add($"parent={r.Parent}");
+            args.Add("-o"); args.Add($"{r.Driver}_mode={r.Mode}");
+        }
+        args.Add(r.Name);
+        return args;
+    }
+
+    public Task CreateNetworkAsync(CreateNetworkRequest r, CancellationToken ct = default)
+    {
+        if (Rules.ValidateCreateNetwork(r) is { } e) throw new OperationException(e);
+        return Mutate(async () => await Ok(NetworkCreateArgs(r), "Creating the network", ct));
+    }
+
+    /// <summary>Démarre, arrête ou redémarre le service Docker. L'arrêt coupe aussi l'activation par socket, sinon la prochaine commande relancerait le service.</summary>
+    public Task ServiceAsync(string action, CancellationToken ct = default)
+    {
+        IReadOnlyList<string> args = action switch
+        {
+            "start" => ["start", "docker.service"],
+            "stop" => ["stop", "docker.socket", "docker.service"],
+            "restart" => ["restart", "docker.service"],
+            _ => throw new OperationException(Msg.F("Unknown action.")),
+        };
+        return Mutate(async () =>
+        {
+            CommandResult r;
+            try { r = await run.RunAsync("systemctl", args, ct: ct); }
+            catch (Win32Exception) { throw new OperationException(Msg.F("systemctl is not available.")); }
+            if (r.ExitCode == 0) return;
+            var msg = (string.IsNullOrWhiteSpace(r.StdErr) ? r.StdOut : r.StdErr).Trim();
+            throw new OperationException(Msg.F("{0} failed: {1}", "Changing the Docker service", msg));
+        });
     }
 
     public Task RemoveNetworkAsync(string name, CancellationToken ct = default)

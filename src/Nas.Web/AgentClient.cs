@@ -422,8 +422,11 @@ public class AgentClient(HttpClient http)
     public async Task RemoveDockerVolumeAsync(string name, CancellationToken ct = default) =>
         await EnsureOkAsync(await http.DeleteAsync($"docker/volumes?name={Uri.EscapeDataString(name)}", ct), ct);
 
-    public async Task CreateDockerNetworkAsync(string name, CancellationToken ct = default) =>
-        await EnsureOkAsync(await http.PostAsJsonAsync("docker/networks", new DockerNameRequest(name), ct), ct);
+    public async Task CreateDockerNetworkAsync(CreateNetworkRequest req, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PostAsJsonAsync("docker/networks", req, ct), ct);
+
+    public async Task DockerServiceAsync(string action, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PostAsJsonAsync("docker/service", new DockerServiceRequest(action), ct), ct);
 
     public async Task RemoveDockerNetworkAsync(string name, CancellationToken ct = default) =>
         await EnsureOkAsync(await http.DeleteAsync($"docker/networks?name={Uri.EscapeDataString(name)}", ct), ct);

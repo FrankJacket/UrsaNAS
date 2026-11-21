@@ -1,6 +1,9 @@
 @page "/docker"
 @inherits AutoRefreshBase
 @inject AgentClient Agent
+@inject DockerOperations Ops
+@inject IDialogService Dialogs
+@inject ISnackbar Snack
 
 @if (!InWindow)
 {
@@ -20,6 +23,10 @@ else if (status is { State: DockerState.Ready })
     <MudAlert Severity="Severity.Success" Class="mb-4">
         @L["Docker is running."] @L["Engine {0}", status.Version ?? "?"]@(status.ComposeVersion is null ? "" : " · Compose " + status.ComposeVersion)
     </MudAlert>
+    <MudStack Row="true" Wrap="Wrap.Wrap" Class="mb-4">
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.RestartAlt" OnClick="Restart" Disabled="busy">@L["Restart the service"]</MudButton>
+        <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.StopCircle" OnClick="Stop" Disabled="busy">@L["Stop the service"]</MudButton>
+    </MudStack>
     @if (status.ComposeVersion is null)
     {
         <MudAlert Severity="Severity.Warning" Class="mb-4">
@@ -38,8 +45,8 @@ else if (status is { State: DockerState.Ready })
 }
 else if (status is { State: DockerState.Stopped })
 {
-    <MudAlert Severity="Severity.Warning" Class="mb-4">@L["Docker is installed but its service is not running. Start it on the NAS with:"]</MudAlert>
-    <MudPaper Class="pa-4 mb-4"><code>sudo systemctl enable --now docker</code></MudPaper>
+    <MudAlert Severity="Severity.Warning" Class="mb-4">@L["Docker is installed but its service is not running."]</MudAlert>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="Start" Disabled="busy" Class="mb-4">@L["Start the service"]</MudButton>
     <MudText>@L["This page checks again every few seconds: the Docker menu appears as soon as the service answers."]</MudText>
 }
 else
@@ -59,7 +66,28 @@ else
 
     DockerStatus? status;
     string? error;
-    bool loaded;
+    bool loaded, busy;
+
+    async Task Run(string action, string success)
+    {
+        busy = true;
+        try { await Ops.ServiceAsync(action); Snack.Add(success, Severity.Success); }
+        catch (AgentException e) { Snack.Add(L.Translate(e.Message), Severity.Error); }
+        catch (HttpRequestException) { Snack.Add(L["Agent unreachable."], Severity.Error); }
+        busy = false;
+        await LoadAsync();
+    }
+
+    Task Start() => Run("start", L["Docker service started."]);
+    Task Restart() => Run("restart", L["Docker service restarted."]);
+
+    async Task Stop()
+    {
+        var ok = await Dialogs.ShowMessageBoxAsync(L["Stop the Docker service?"],
+            L["The containers that are running stop with it, and every Docker page stays unavailable until the service is started again."],
+            yesText: L["Stop the service"], cancelText: L["Cancel"]);
+        if (ok == true) await Run("stop", L["Docker service stopped."]);
+    }
 
     protected override TimeSpan Interval => TimeSpan.FromSeconds(5);
 
