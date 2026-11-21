@@ -14,24 +14,8 @@
                       HelperText="@L["Lowercase letters, digits, _ and -."]" AutoFocus="@(Existing is null)" />
         <MudTextField @bind-Value="content" Label="compose.yml" Lines="18" Immediate="true" DebounceInterval="600" OnDebounceIntervalElapsed="Validate" Disabled="busy" Class="mt-3 compose-text"
                       UserAttributes='@(new Dictionary<string, object> { ["id"] = "stack-text", ["spellcheck"] = "false" })' />
-        @if (checking)
-        {
-            <MudText Typo="Typo.caption" Class="d-block mt-2">@L["Checking the file…"]</MudText>
-        }
-        else if (check is { Error: not null })
-        {
-            <MudAlert Severity="Severity.Error" Dense="true" Class="mt-2" Style="white-space:pre-wrap">@L["The compose file is invalid: {0}", check.Error]</MudAlert>
-        }
-        else if (check is { Checked: true })
-        {
-            <MudAlert Severity="Severity.Success" Dense="true" Class="mt-2">@L["The compose file is valid."]</MudAlert>
-            @if (check.MissingImages.Count > 0)
-            {
-                <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">
-                    @L["Not on this NAS yet, downloaded when the stack starts (it fails if the name is wrong):"] @string.Join(", ", check.MissingImages)
-                </MudAlert>
-            }
-        }
+        @* Un seul bandeau : seuls sa severite et son texte changent (le resultat precedent reste, attenue, pendant une nouvelle validation). *@
+        <MudAlert Severity="@CheckSeverity" Dense="true" Class="@("mt-2 compose-check" + (checking ? " checking" : ""))" Style="white-space:pre-wrap">@CheckText</MudAlert>
         <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.CreateNewFolder" OnClick="InsertFolder" Disabled="busy" Class="mt-2">@L["Insert a NAS folder path"]</MudButton>
         <MudText Typo="Typo.caption" Class="d-block mt-1">@L["The path is inserted where the cursor is. Docker gives containers full access to it, whatever the share permissions."]</MudText>
     </DialogContent>
@@ -44,6 +28,8 @@
 
 <style>
     .compose-text textarea { font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+    .compose-check { transition: opacity .15s; }
+    .compose-check.checking { opacity: .55; }
 </style>
 
 @code {
@@ -58,8 +44,26 @@
     StackValidation? check;
     int checkId; // seule la dernière validation compte : une réponse tardive ne remplace pas la plus récente
 
-    /// <summary>Enregistrer est impossible tant qu'une validation tourne ou que le fichier est invalide.</summary>
-    bool CanSave => !checking && check is not { Error: not null };
+    /// <summary>Enregistrer est impossible tant que le dernier résultat est une erreur. Les boutons ne clignotent pas pendant une validation : le serveur revalide à l'enregistrement.</summary>
+    bool CanSave => check is not { Error: not null };
+
+    Severity CheckSeverity => check switch
+    {
+        null => Severity.Info,
+        { Error: not null } => Severity.Error,
+        { Checked: false } => Severity.Info,
+        { MissingImages.Count: > 0 } => Severity.Warning,
+        _ => Severity.Success,
+    };
+
+    string CheckText => check switch
+    {
+        null => L["Checking the file…"],
+        { Error: not null } => L["The compose file is invalid: {0}", check.Error],
+        { Checked: false } => L["The file is not checked: Docker or Compose is not available."],
+        { MissingImages.Count: > 0 } => L["The compose file is valid."] + " " + L["Not on this NAS yet, downloaded when the stack starts (it fails if the name is wrong):"] + " " + string.Join(", ", check.MissingImages),
+        _ => L["The compose file is valid."],
+    };
 
     protected override async Task OnInitializedAsync()
     {

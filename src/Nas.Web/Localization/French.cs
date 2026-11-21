@@ -1330,6 +1330,7 @@ public static class French
         ["Docker volume created"] = "Volume Docker créé",
         ["Docker volume deleted"] = "Volume Docker supprimé",
         ["Docker network created"] = "Réseau Docker créé",
+        ["The file is not checked: Docker or Compose is not available."] = "Le fichier n'est pas vérifié : Docker ou Compose n'est pas disponible.",
         ["Checking the file…"] = "Vérification du fichier…",
         ["The compose file is valid."] = "Le fichier compose est valide.",
         ["Not on this NAS yet, downloaded when the stack starts (it fails if the name is wrong):"] = "Pas encore sur ce NAS, téléchargée au démarrage de la stack (échec si le nom est faux) :",
