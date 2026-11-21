@@ -12,6 +12,8 @@ Click **Edit** on a connection to change its address, or **Settings** at the top
 
 When you type an address, gateway or DNS server, each field only accepts a valid IPv4 address (four numbers separated by dots) and flags an entry that isn't one, so a typo can't be saved by mistake.
 
+Changing a connection from this page works when the NAS manages its network with **netplan** (the usual way on Ubuntu Server) or **ifupdown** (the usual way on Debian). With any other tool (NetworkManager, for example), the page only shows the connections and you change them from the system itself.
+
 ## Advanced options
 
 Two more advanced features are available for larger or more demanding setups, and are entirely optional:

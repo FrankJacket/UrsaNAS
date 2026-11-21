@@ -10,3 +10,6 @@ src/Nas.Web/Data/*.db-shm
 src/Nas.Web/Data/*.db-wal
 bin-linux/
 obj-linux/
+
+# Réglages locaux de Claude Code (chemins et autorisations propres à cette machine)
+.claude/
