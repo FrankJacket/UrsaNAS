@@ -10,7 +10,8 @@
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.*" />
     <PackageReference Include="MudBlazor" Version="9.*" />
     <PackageReference Include="SharpZipLib" Version="1.*" />
-    <PackageReference Include="Ursa.UITools" Version="0.1.5" />
     <ProjectReference Include="..\Nas.Contracts\Nas.Contracts.csproj" />
+    <!-- Composants Ursa (sous-module Git) : extensions de MudBlazor. -->
+    <ProjectReference Include="..\..\external\UrsaUITools\src\Ursa.UITools\Ursa.UITools.csproj" />
   </ItemGroup>
 </Project>

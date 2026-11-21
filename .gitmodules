@@ -1,3 +1,6 @@
 [submodule "external/Ursacopy"]
 	path = external/Ursacopy
 	url = https://github.com/FrankJacket/Ursacopy.git
+[submodule "external/UrsaUITools"]
+	path = external/UrsaUITools
+	url = https://github.com/FrankJacket/UrsaUITools.git

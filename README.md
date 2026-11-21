@@ -135,6 +135,7 @@ Browser ──HTTP :8080──▶ Nas.Web ──unix socket──▶ Nas.Agent (
 | `src/Nas.Web` | Interface and database. Never touches the system: it asks the agent for everything. Also runs the backup scheduler and the alerts. |
 | `src/Nas.Contracts` | Shared types and validation rules (share names, ACLs, NFS, FTP, backups). |
 | `external/Ursacopy` | Git submodule: the copy engine. |
+| `external/UrsaUITools` | Git submodule: [Ursa.UITools](https://github.com/FrankJacket/UrsaUITools), the interface components that extend MudBlazor. |
 | `tests/` | Unit tests (xUnit), including a check that every interface text has a French translation. |
 | `deploy/` | Deployment script, install script, systemd services. |
 
