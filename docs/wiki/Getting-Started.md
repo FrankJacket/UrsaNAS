@@ -16,7 +16,7 @@ Once it's installed, it takes a few minutes to finish. At the end, it prints the
 
 1. Open the address the installer printed in a web browser, on a device connected to the same network.
 2. The first time, you'll be asked to **create the first administrator** account: choose a username and a strong password. This account can do anything on the NAS, so keep the password safe.
-3. You're in. The **Dashboard** is the first thing you see.
+3. You're in. The first thing you see is the **[desktop](The-Desktop)**, with an icon for every feature. Click an icon to open it in a window; open **Dashboard** for a quick health check of the machine.
 
 ## What to do next
 
@@ -26,7 +26,7 @@ A sensible order for setting things up:
 2. **[Sharing Files](Sharing-Files)** — create a share for your folders so other devices can reach them.
 3. **[Accounts](Accounts)** — create a user account for each person who will connect to a share.
 
-From there, explore the rest as you need it: [Backups](Backups), [Remote Storage](Remote-Storage), [Virtual Machines](Virtual-Machines), [Docker Apps](Docker-Apps).
+From there, explore the rest as you need it: [Backups](Backups), [Remote Storage](Remote-Storage), [Virtual Machines](Virtual-Machines), [Docker Apps](Docker-Apps). You can also make UrsaNAS look the way you like in [Appearance](Appearance).
 
 ## A note on safety
 

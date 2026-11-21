@@ -4,6 +4,10 @@
 - [Getting Started](Getting-Started)
 - [Installing UrsaNAS](Installing-UrsaNAS)
 
+**Using UrsaNAS**
+- [The Desktop](The-Desktop)
+- [Appearance](Appearance)
+
 **Files**
 - [Storage](Storage)
 - [Sharing Files](Sharing-Files)

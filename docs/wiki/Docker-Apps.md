@@ -2,7 +2,7 @@
 
 Docker lets you run small, ready-made applications on the NAS — things like a photo gallery, a media server, or a download manager — without installing anything by hand. Each application runs in its own self-contained **container**, separate from the rest of the system.
 
-This section only appears once Docker is installed and running; otherwise the page tells you what to do.
+The **Docker** icon on the [desktop](The-Desktop) only appears once Docker is installed and running. Its window has a menu down the left side with four sections — **Containers**, **Images**, **Stacks** and **Volumes and networks** — and the section you pick is shown on the right. If the window is made narrow, the menu shrinks to icons only.
 
 ## Key ideas, kept simple
 

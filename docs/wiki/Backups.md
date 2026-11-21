@@ -5,7 +5,11 @@ A backup job copies chosen folders to an external disk on a schedule, so you sti
 ## Setting up a backup disk
 
 1. Plug an external disk into the NAS.
-2. Click **New backup job**, give it a name, and choose what to copy (a whole share, or just part of it) and where to copy it to.
+2. Click **New backup job** and give it a name. The job's settings are split into four tabs:
+   - **What to back up** — pick shares, folders or individual files, across all your shares. Here you can also turn on copying from a ZFS snapshot (so files that change during the copy are copied consistently), verifying each copied file, and list files or folders to skip.
+   - **Where to copy** — the backup disk and the folder on it.
+   - **Schedule** — when the job runs (see **Running it** below).
+   - **Retention** — how long deleted and replaced files are kept (see the end of this page).
 3. The card for your new job will show the disk as **"Disk not initialised"**. Click **Initialise the disk** — this marks the disk as the one this job backs up to, so UrsaNAS can recognise it later. It doesn't erase anything already on it.
 
 ## Running it

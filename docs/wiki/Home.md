@@ -10,10 +10,12 @@ New to UrsaNAS? Read **[Getting Started](Getting-Started)** first: it covers ins
 
 ## What's where
 
-The interface is organised into a few areas, listed here in the order you'll usually use them:
+Everything is reached from the **[desktop](The-Desktop)**: one icon per feature, and each feature opens in its own window. The features are organised into a few areas, listed here in the order you'll usually use them:
 
 | Area | What it's for |
 |---|---|
+| **[The Desktop](The-Desktop)** | How the desktop, its windows, the taskbar and the top bar work. |
+| **[Appearance](Appearance)** | Choosing colours, light or dark theme, and a wallpaper. |
 | **[Storage](Storage)** | Preparing the disks that hold your files, and organising them into pools and folders. |
 | **[Sharing Files](Sharing-Files)** | Making a folder available to your other devices over the network. |
 | **[File Manager](File-Manager)** | Browsing, moving and organising your files from the browser itself. |
@@ -28,10 +30,10 @@ The interface is organised into a few areas, listed here in the order you'll usu
 
 If something isn't working as expected, see **[Troubleshooting](Troubleshooting)**.
 
-## The first screen: Dashboard
+## The first screen: the desktop
 
-The **Dashboard** is the first page you see after signing in. It gives you an at-a-glance health check of the machine itself: how long it's been running, how hot the processor is, how much memory and storage space is used. You don't need to act on anything here unless a number looks unusually high — it's just a quick way to confirm the NAS is healthy.
+After signing in you land on the **[desktop](The-Desktop)**. To get a quick look at the machine, open the **Dashboard** icon. It gives you an at-a-glance health check of the machine itself: how long it's been running, how hot the processor is, how much memory and storage space is used. You don't need to act on anything here unless a number looks unusually high — it's just a quick way to confirm the NAS is healthy.
 
 ## Restarting or shutting down
 
-The power button in the top-right corner of every page lets you **Restart** or **Shut down** the NAS. Use shutdown before unplugging the machine or moving it.
+The power button in the top-right corner of the screen lets you **Restart** or **Shut down** the NAS. Use shutdown before unplugging the machine or moving it.

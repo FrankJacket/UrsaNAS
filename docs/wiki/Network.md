@@ -10,6 +10,8 @@ Click a connection to expand it and see its details: IP address, speed, and whet
 
 Click **Edit** on a connection to change its address, or **Settings** at the top of the page for options that apply to the NAS as a whole. Most people never need to change anything here — the NAS works out of the box on a typical home network with automatic addressing.
 
+When you type an address, gateway or DNS server, each field only accepts a valid IPv4 address (four numbers separated by dots) and flags an entry that isn't one, so a typo can't be saved by mistake.
+
 ## Advanced options
 
 Two more advanced features are available for larger or more demanding setups, and are entirely optional:

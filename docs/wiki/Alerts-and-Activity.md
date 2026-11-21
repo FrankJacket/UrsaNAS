@@ -6,6 +6,8 @@ UrsaNAS keeps an eye on itself in the background and lets you know when somethin
 
 UrsaNAS regularly checks the health of your storage pools and disks. If something looks wrong — a pool that's degraded, a disk that's failing — it's raised as an **alert** on this page, marked **Warning** or **Critical**. An alert clears itself once the problem is resolved; past alerts stay visible under **History**.
 
+While at least one alert is active, an indicator with the number of alerts appears at the bottom right of the screen, in the taskbar (orange for warnings, red for critical alerts), and the **Alerts** icon on the [desktop](The-Desktop) shows the same number. Click either to open the **Alerts** window.
+
 Click **Check now** at any time for an immediate check instead of waiting for the next automatic one.
 
 ### Getting alerts by email
@@ -14,4 +16,4 @@ Open the **Email notifications** tab to have an email sent to you automatically 
 
 ## Audit log
 
-The **Audit log** (under Monitoring) is a plain history of actions taken on the NAS — shares created, settings changed, updates installed, and so on, each with who did it and when. Use it to answer "what changed, and when?" if something looks different from how you left it.
+The **Audit log** (in the **Monitoring** group of the desktop) is a plain history of actions taken on the NAS — shares created, settings changed, updates installed, and so on, each with who did it and when. Use it to answer "what changed, and when?" if something looks different from how you left it.

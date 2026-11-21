@@ -10,6 +10,10 @@ This page will tell you if something needs to be enabled first — for example, 
 
 Click **Create a machine**, give it processors, memory and disk space, and point it at an installation image (an `.iso` file) for the operating system you want to install. The new machine starts up from that image, just like a brand-new physical computer would — you install its operating system the normal way, through its own console.
 
+## One window for everything
+
+The **Virtual machines** window shows the list of your machines. Open a machine to see its details, and open its console, all without leaving the window: a back button takes you to the previous screen. A machine's details are split into tabs — **Summary**, **Hardware**, **Options** and **Snapshots** — and a long tab scrolls inside the window while the tabs stay in place.
+
 ## Using a machine
 
 - **Console** opens a screen for the machine, so you can see and interact with it as if you were sitting in front of it.

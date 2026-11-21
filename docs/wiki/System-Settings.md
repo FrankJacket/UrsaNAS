@@ -6,6 +6,10 @@ This page is about keeping UrsaNAS itself healthy and up to date — not your fi
 
 Click **Check for updates** to see if a newer version of UrsaNAS is available, and a separate check for updates to the underlying system software. If one is found, **Update now** installs it — the interface becomes briefly unreachable while the services restart, which is normal.
 
+### Installing system updates
+
+Tick the system packages you want, then click **Update the selected packages**. While they install, a blue panel shows what is happening: the names of the packages being updated, a moving progress bar, and the latest lines the system prints as it downloads and installs each one. Some updates take several minutes, so you can leave the window open and watch; the list refreshes by itself when it's done.
+
 Some system updates are marked **"Manual only"**: these restart an important service or change the core of the system, so they're never installed automatically, only when you choose to.
 
 ## Scheduling
