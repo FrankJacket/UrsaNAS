@@ -13,10 +13,10 @@ dotnet publish "$root/src/Nas.Agent" -c Release -r linux-x64 --self-contained -p
 if ($LASTEXITCODE) { throw 'publish Nas.Agent a échoué' }
 dotnet publish "$root/src/Nas.Web" -c Release -r linux-x64 --self-contained -o "$out/Nas.Web" | Out-Null
 if ($LASTEXITCODE) { throw 'publish Nas.Web a échoué' }
-Copy-Item "$root/deploy/ursanas-agent.service", "$root/deploy/ursanas-web.service", "$root/deploy/install.sh" $out
+Copy-Item "$root/deploy/ursanas-agent.service", "$root/deploy/ursanas-web.service", "$root/deploy/install.sh", "$root/deploy/update-apply.sh" $out
 
 $tar = Join-Path $out 'ursanas.tar'
-tar -cf $tar -C $out Nas.Agent Nas.Web ursanas-agent.service ursanas-web.service install.sh
+tar -cf $tar -C $out Nas.Agent Nas.Web ursanas-agent.service ursanas-web.service install.sh update-apply.sh
 if ($LASTEXITCODE) { throw 'tar a échoué' }
 
 scp -q $tar "${Target}:ursanas.tar"
@@ -25,5 +25,5 @@ if ($LASTEXITCODE) { throw 'scp a échoué' }
 # Les avertissements de install.sh arrivent sur stderr : sous PowerShell 5.1 ils feraient échouer le script ; seul le code de sortie compte.
 $ErrorActionPreference = 'Continue'
 # Dossier d'extraction dans le répertoire personnel (rien n'est supprimé en dehors de lui).
-ssh $Target 'D=$HOME/ursanas-deploy; mkdir -p $D; tar -mxf $HOME/ursanas.tar -C $D; sed -i "s/\r$//" $D/install.sh; sudo sh $D/install.sh $D'
+ssh $Target 'D=$HOME/ursanas-deploy; mkdir -p $D; tar -mxf $HOME/ursanas.tar -C $D; sed -i "s/\r$//" $D/install.sh $D/update-apply.sh; sudo sh $D/install.sh $D'
 if ($LASTEXITCODE) { throw "l'installation a échoué" }
