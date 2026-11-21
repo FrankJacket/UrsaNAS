@@ -471,6 +471,45 @@ public sealed class DockerService(ICommandRunner run, IConfiguration cfg)
         return new StackContent(name, File.ReadAllText(file));
     }
 
+    /// <summary>
+    /// Valide un compose.yml sans rien enregistrer ni démarrer (« docker compose config ») : syntaxe, clés inconnues, types, services et réseaux
+    /// référencés, variables. Ne bloque jamais l'édition si Docker ou Compose manquent (<c>Checked</c> = false : l'enregistrement le dira).
+    /// Les images absentes du NAS sont signalées en avertissement : elles seront téléchargées au démarrage (ou n'existent pas).
+    /// </summary>
+    public async Task<StackValidation> ValidateStackAsync(string? name, string content, CancellationToken ct = default)
+    {
+        if (Rules.ValidateStackContent(content) is { } e) return new(true, e, []);
+        if (!string.IsNullOrEmpty(name) && Rules.ValidateStackName(name) is { } en) throw new OperationException(en);
+        var status = await StatusAsync(ct);
+        if (status.State != DockerState.Ready || status.ComposeVersion is null) return new(false, null, []);
+
+        var project = string.IsNullOrEmpty(name) ? "validation" : name;
+        var stackDir = Path.Combine(StacksDir, project);
+        var tmpDir = Path.Combine(Path.GetTempPath(), "ursanas-compose-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        try
+        {
+            var tmp = Path.Combine(tmpDir, "compose.yml");
+            await File.WriteAllTextAsync(tmp, content, ct);
+            // Les chemins relatifs du fichier (env_file…) se lisent depuis le dossier de la stack, comme à l'exécution.
+            var baseArgs = new List<string> { "compose", "-p", project, "--project-directory", Directory.Exists(stackDir) ? stackDir : tmpDir, "-f", tmp };
+            var r = await run.RunAsync(Bin, [.. baseArgs, "config", "-q"], ct: ct);
+            if (r.ExitCode != 0) return new(true, (string.IsNullOrWhiteSpace(r.StdErr) ? r.StdOut : r.StdErr).Trim().Replace(tmp, "compose.yml"), []);
+
+            var warnings = new List<string>();
+            var images = await run.RunAsync(Bin, [.. baseArgs, "config", "--images"], ct: ct);
+            if (images.ExitCode == 0)
+                foreach (var image in images.StdOut.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct().Take(20))
+                {
+                    if (Rules.ValidateImageRef(image) is not null) continue; // jamais une valeur douteuse en argument de commande
+                    var local = await run.RunAsync(Bin, ["image", "inspect", "--format", "{{.Id}}", image], ct: ct);
+                    if (local.ExitCode != 0) warnings.Add(image);
+                }
+            return new(true, null, warnings);
+        }
+        finally { try { Directory.Delete(tmpDir, recursive: true); } catch (IOException) { } }
+    }
+
     /// <summary>Enregistre le fichier après l'avoir fait valider par « docker compose config » : un fichier invalide n'écrase jamais l'ancien.</summary>
     public Task SaveStackAsync(string name, string content, CancellationToken ct = default)
     {

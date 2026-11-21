@@ -149,3 +149,59 @@ public class DockerContainerNetworkTests
         Assert.Null(r[2].Networks);                  // absent de la réponse : inchangé
     }
 }
+
+public class StackValidationTests
+{
+    static DockerService Svc(FakeRunner r) => new(r, new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Docker:StacksDir"] = Path.Combine(Path.GetTempPath(), "ursanas-none-" + Guid.NewGuid().ToString("N")) }).Build());
+
+    static FakeRunner Docker(Func<FakeRunner.Call, CommandResult> compose) => new()
+    {
+        Handler = c => c.Args[0] switch
+        {
+            "version" => new CommandResult(0, "27.0\n", ""),
+            "compose" when c.Args[1] == "version" => new CommandResult(0, "2.29\n", ""),
+            "compose" => compose(c),
+            _ => c.Args[0] == "image" && c.Args[1] == "inspect" ? new CommandResult(1, "", "No such image") : new CommandResult(0, "", ""),
+        },
+    };
+
+    [Fact]
+    public async Task Un_fichier_valide_est_accepte_et_les_images_absentes_sont_signalees()
+    {
+        var r = Docker(c => c.Args.Contains("--images") ? new CommandResult(0, "nginx:latest\nghcr.io/x/y:1\n--rm\n", "") : new CommandResult(0, "", ""));
+        var v = await Svc(r).ValidateStackAsync("blog", "services:\n  app:\n    image: nginx:latest\n");
+        Assert.True(v.Checked);
+        Assert.Null(v.Error);
+        Assert.Equal(["nginx:latest", "ghcr.io/x/y:1"], v.MissingImages); // « --rm » n'est jamais passé à docker
+        Assert.DoesNotContain(r.Calls, c => c.Args.Contains("--rm"));
+    }
+
+    [Fact]
+    public async Task Un_fichier_invalide_renvoie_le_message_de_compose_sans_le_chemin_temporaire()
+    {
+        var r = Docker(c => new CommandResult(1, "", $"validating {c.Args[Array.IndexOf(c.Args, "-f") + 1]}: services.app Additional property imagee is not allowed"));
+        var v = await Svc(r).ValidateStackAsync(null, "services:\n  app:\n    imagee: x\n");
+        Assert.Contains("imagee is not allowed", v.Error);
+        Assert.Contains("validating compose.yml:", v.Error);
+        Assert.DoesNotContain("ursanas-compose-", v.Error);
+        Assert.DoesNotContain(r.Calls, c => c.Args.Contains("--images")); // inutile quand le fichier est refusé
+    }
+
+    [Fact]
+    public async Task Sans_Docker_ou_sans_Compose_rien_n_est_verifie_et_rien_n_est_bloque()
+    {
+        var down = new FakeRunner { Handler = _ => new CommandResult(1, "", "Cannot connect") };
+        var v = await Svc(down).ValidateStackAsync("a", "services:\n  app:\n    image: x\n");
+        Assert.False(v.Checked);
+        Assert.Null(v.Error);
+    }
+
+    [Fact]
+    public async Task Un_fichier_vide_ou_un_nom_invalide_est_refuse_avant_docker()
+    {
+        var r = Docker(_ => new CommandResult(0, "", ""));
+        Assert.NotNull((await Svc(r).ValidateStackAsync("a", "  ")).Error);
+        await Assert.ThrowsAsync<OperationException>(() => Svc(r).ValidateStackAsync("-x", "services: {}"));
+        Assert.Empty(r.Calls);
+    }
+}

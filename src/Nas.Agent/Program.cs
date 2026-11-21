@@ -236,7 +236,9 @@ public partial class Program
             Read(async () => { await d.RemoveNetworkAsync(name, ct); return Results.NoContent(); }));
         app.MapGet("/docker/stacks", (DockerService d, CancellationToken ct) => Read(async () => Results.Ok(await d.StacksAsync(ct))));
         app.MapGet("/docker/stacks/{name}", (string name, DockerService d) => Read(() => Task.FromResult(Results.Ok(d.ReadStack(name)))));
-        app.MapPut("/docker/stacks/{name}", (string name, SaveStackRequest r, DockerService d, CancellationToken ct) =>
+        app.MapPost("/docker/stacks/validate", (ValidateStackRequest r, DockerService d, CancellationToken ct) =>
+            Read(async () => Results.Ok(await d.ValidateStackAsync(r.Name, r.Content, ct))));
+        app.MapPut("/docker/stacks/{name}",(string name, SaveStackRequest r, DockerService d, CancellationToken ct) =>
             Read(async () => { await d.SaveStackAsync(name, r.Content, ct); return Results.NoContent(); }));
         app.MapPost("/docker/stacks/{name}/{action}", (string name, string action, DockerService d, CancellationToken ct) =>
             Read(async () => { await d.StackActionAsync(name, action, ct); return Results.NoContent(); }));

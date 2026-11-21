@@ -121,6 +121,18 @@ public sealed class FakeCommandRunner : ICommandRunner
             case "compose":
                 var project = a[2];
                 var verb = a.Skip(3).First(x => x is "up" or "down" or "pull" or "config");
+                if (verb == "config" && a.ToList().IndexOf("-f") is var fi and >= 0 && File.Exists(a[fi + 1]))
+                {
+                    // Contrôle minimal du fichier simulé : un vrai « docker compose config » en fait beaucoup plus.
+                    var text = File.ReadAllText(a[fi + 1]);
+                    if (!System.Text.RegularExpressions.Regex.IsMatch(text, @"^services:\s*$", System.Text.RegularExpressions.RegexOptions.Multiline))
+                        return Fail($"{a[fi + 1]}: services must be a mapping");
+                    var unknown = System.Text.RegularExpressions.Regex.Match(text, @"^\s{4}(?!(?:image|ports|restart|environment|volumes|command|networks|container_name|depends_on|entrypoint):)(\w+):", System.Text.RegularExpressions.RegexOptions.Multiline);
+                    if (unknown.Success) return Fail($"validating {a[fi + 1]}: services.app Additional property {unknown.Groups[1].Value} is not allowed");
+                    if (a.Contains("--images"))
+                        return Ok(string.Concat(System.Text.RegularExpressions.Regex.Matches(text, @"image:\s*(\S+)").Select(m => m.Groups[1].Value + "\n")));
+                    return Ok();
+                }
                 if (verb == "up" && !_containers.Any(c => c.Project == project))
                     foreach (var svc in new[] { "web", "db" })
                         _containers.Add(new(Guid.NewGuid().ToString("N")[..12], $"{project}-{svc}-1", svc == "web" ? "nginx:latest" : "postgres:16", "running", "", project));
@@ -191,6 +203,9 @@ public sealed class FakeCommandRunner : ICommandRunner
                     Mounts = ic.Ports.Length == 0 ? [] : new[] { new { Type = "bind", Source = "/srv/media", Destination = "/media", RW = true } },
                     NetworkSettings = new { Networks = new Dictionary<string, object> { [ic.Net] = new { IPAddress = ic.State == "running" ? "172.17.0.2" : "", Gateway = "172.17.0.1", MacAddress = "" } } },
                 }) + "\n");
+            case "image" when a[1] == "inspect" && a.Contains("--format"): // « l'image est-elle sur le NAS ? »
+                var wanted = a[^1].Contains(':') ? a[^1] : a[^1] + ":latest";
+                return _images.Contains(wanted) ? Ok("sha256:fake\n") : Fail($"Error response from daemon: No such image: {a[^1]}");
             case "image" when a[1] == "inspect":
                 return Ok(Json(new { Config = new { Env = new[] { "PATH=/usr/bin" } } }) + "\n");
             case "image" when a[1] == "ls":

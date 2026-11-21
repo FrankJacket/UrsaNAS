@@ -12,15 +12,33 @@
         }
         <MudTextField @bind-Value="name" Label="@L["Stack name"]" Immediate="true" Disabled="@(busy || Existing is not null)"
                       HelperText="@L["Lowercase letters, digits, _ and -."]" AutoFocus="@(Existing is null)" />
-        <MudTextField @bind-Value="content" Label="compose.yml" Lines="18" Immediate="true" Disabled="busy" Class="mt-3 compose-text"
+        <MudTextField @bind-Value="content" Label="compose.yml" Lines="18" Immediate="true" DebounceInterval="600" OnDebounceIntervalElapsed="Validate" Disabled="busy" Class="mt-3 compose-text"
                       UserAttributes='@(new Dictionary<string, object> { ["id"] = "stack-text", ["spellcheck"] = "false" })' />
+        @if (checking)
+        {
+            <MudText Typo="Typo.caption" Class="d-block mt-2">@L["Checking the file…"]</MudText>
+        }
+        else if (check is { Error: not null })
+        {
+            <MudAlert Severity="Severity.Error" Dense="true" Class="mt-2" Style="white-space:pre-wrap">@L["The compose file is invalid: {0}", check.Error]</MudAlert>
+        }
+        else if (check is { Checked: true })
+        {
+            <MudAlert Severity="Severity.Success" Dense="true" Class="mt-2">@L["The compose file is valid."]</MudAlert>
+            @if (check.MissingImages.Count > 0)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">
+                    @L["Not on this NAS yet, downloaded when the stack starts (it fails if the name is wrong):"] @string.Join(", ", check.MissingImages)
+                </MudAlert>
+            }
+        }
         <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.CreateNewFolder" OnClick="InsertFolder" Disabled="busy" Class="mt-2">@L["Insert a NAS folder path"]</MudButton>
         <MudText Typo="Typo.caption" Class="d-block mt-1">@L["The path is inserted where the cursor is. Docker gives containers full access to it, whatever the share permissions."]</MudText>
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="() => Dialog.Cancel()" Disabled="busy">@L["Cancel"]</MudButton>
-        <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="() => Save(false)" Disabled="busy">@L["Save"]</MudButton>
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="() => Save(true)" Disabled="busy">@(busy ? L["In progress…"] : L["Save and start"])</MudButton>
+        <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="() => Save(false)" Disabled="@(busy || !CanSave)">@L["Save"]</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="() => Save(true)" Disabled="@(busy || !CanSave)">@(busy ? L["In progress…"] : L["Save and start"])</MudButton>
     </DialogActions>
 </MudDialog>
 
@@ -36,15 +54,34 @@
 
     string name = "", content = Template;
     string? error;
-    bool busy;
+    bool busy, checking;
+    StackValidation? check;
+    int checkId; // seule la dernière validation compte : une réponse tardive ne remplace pas la plus récente
+
+    /// <summary>Enregistrer est impossible tant qu'une validation tourne ou que le fichier est invalide.</summary>
+    bool CanSave => !checking && check is not { Error: not null };
 
     protected override async Task OnInitializedAsync()
     {
-        if (Existing is null) return;
+        if (Existing is null) { await Validate(); return; }
         name = Existing;
         try { content = (await Agent.GetStackAsync(Existing)).Content; }
         catch (AgentException e) { error = L.Translate(e.Message); }
         catch (HttpRequestException) { error = L["Agent unreachable."]; }
+        await Validate();
+    }
+
+    async Task Validate()
+    {
+        var id = ++checkId;
+        checking = true;
+        StackValidation? result = null;
+        try { result = await Agent.ValidateStackAsync(Existing, content); }
+        catch (AgentException e) { result = new(true, L.Translate(e.Message), []); }
+        catch (HttpRequestException) { } // agent injoignable : on ne bloque pas, l'enregistrement le signalera
+        if (id != checkId) return;
+        check = result;
+        checking = false;
     }
 
     async Task InsertFolder()
@@ -53,6 +90,7 @@
         {
             if (await Picker.PickAsync() is { } path)
                 content = await JS.InvokeAsync<string?>("ursanasInsertAtCursor", "stack-text", path) ?? content + path;
+            await Validate();
         }
         catch (AgentException e) { error = L.Translate(e.Message); }
         catch (HttpRequestException) { error = L["Agent unreachable."]; }

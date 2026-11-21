@@ -59,6 +59,15 @@ public sealed record ContainerSettings(RunContainerRequest Settings, bool Runnin
 public sealed record PullImageRequest(string Image);
 public sealed record DockerNameRequest(string Name);
 public sealed record SaveStackRequest(string Content);
+
+/// <summary><c>Name</c> : la stack éditée (vide pour une nouvelle) ; sert à lire les chemins relatifs du fichier depuis son dossier.</summary>
+public sealed record ValidateStackRequest(string? Name, string Content);
+
+/// <summary>
+/// <c>Checked</c> : false si Docker ou Compose ne sont pas disponibles (rien n'a été vérifié, l'édition n'est pas bloquée). <c>Error</c> : null si le
+/// fichier est valide. <c>MissingImages</c> : images absentes du NAS, téléchargées au démarrage.
+/// </summary>
+public sealed record StackValidation(bool Checked, string? Error, IReadOnlyList<string> MissingImages);
 public sealed record ShareRoot(string Share, string Path);
 
 public static partial class Rules
