@@ -9,17 +9,16 @@ public class UpdateOperations(AgentClient agent, Repo repo, AuthenticationStateP
 {
     async Task<string> ActorAsync() => (await auth.GetAuthenticationStateAsync()).User.Identity?.Name ?? "unknown";
 
-    public async Task SaveSettingsAsync(string channel, string? token, bool clearToken)
+    public async Task SaveSettingsAsync(string channel)
     {
         var actor = await ActorAsync();
-        var tokenValue = clearToken ? "" : string.IsNullOrWhiteSpace(token) ? null : token.Trim();
-        try { await agent.SetUpdateSettingsAsync(new SetUpdateSettingsRequest(channel, tokenValue)); }
+        try { await agent.SetUpdateSettingsAsync(new SetUpdateSettingsRequest(channel)); }
         catch (AgentException ex)
         {
             await repo.AuditAsync(actor, "Update settings rejected", ex.Message);
             throw;
         }
-        await repo.AuditAsync(actor, "Update settings changed", $"channel {channel}" + (clearToken ? ", access token removed" : tokenValue is null ? "" : ", access token replaced"));
+        await repo.AuditAsync(actor, "Update settings changed", $"channel {channel}");
     }
 
     public async Task InstallAppAsync(string version)

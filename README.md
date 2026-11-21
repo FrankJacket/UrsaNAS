@@ -145,7 +145,7 @@ Principle: **the agent is the only part with root rights**, and it validates eve
 
 ### Install on a new machine
 
-See [Install.md](Install.md): download the release package, extract it, run `sudo ./install.sh`. The package is built by the manual GitHub workflow *Release package* (Actions tab, Run workflow).
+See [Install.md](Install.md): download the release package, extract it, run `sudo ./install.sh`. The packages are the [releases](https://github.com/FrankJacket/UrsaNAS/releases) of this repository.
 
 ### Deploy from Windows (development)
 

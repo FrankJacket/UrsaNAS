@@ -1,4 +1,4 @@
-using System.Formats.Tar;
+﻿using System.Formats.Tar;
 using System.IO.Compression;
 using System.Net.Http.Headers;
 using System.Reflection;
@@ -10,8 +10,8 @@ using Nas.Contracts;
 namespace Nas.Agent.Services;
 
 /// <summary>
-/// Recherche de mises à jour : la version d'UrsaNAS (releases GitHub du dépôt privé, lues avec un jeton en lecture seule) et les paquets Linux (apt).
-/// Cette étape ne fait que lire : rien n'est installé. Le jeton est gardé dans un fichier lisible par root seulement et n'est jamais renvoyé.
+/// Recherche de mises à jour : la version d'UrsaNAS (releases GitHub du dépôt public) et les paquets Linux (apt).
+/// Cette étape ne fait que lire : rien n'est installé.
 /// </summary>
 public sealed partial class UpdateService(ICommandRunner runner, IConfiguration cfg, ILogger<UpdateService> log, HttpMessageHandler? handler = null)
 {
@@ -21,14 +21,12 @@ public sealed partial class UpdateService(ICommandRunner runner, IConfiguration 
     AppUpdateInfo? _app;
     PackageUpdates? _pkgs;
     string? _fakeChannel;
-    bool _fakeToken;
     AppInstallStatus? _fakeInstall;
     bool _installing;
     PackageInstallProgress _progress = new(false, [], [], null);
 
     bool Fake => cfg["URSANAS_FAKE"] == "1";
     string SettingsFile => cfg["Update:SettingsFile"] ?? "/var/lib/ursanas/update-settings.json";
-    string TokenFile => cfg["Update:TokenFile"] ?? "/var/lib/ursanas/update-token";
     string VersionFile => cfg["Update:VersionFile"] ?? "/opt/ursanas/VERSION";
     string RebootFile => cfg["Update:RebootRequiredFile"] ?? "/var/run/reboot-required";
     string Repo => cfg["Update:Repository"] ?? "FrankJacket/UrsaNAS";
@@ -48,50 +46,23 @@ public sealed partial class UpdateService(ICommandRunner runner, IConfiguration 
 
     public UpdateSettings GetSettings()
     {
-        if (Fake) return new UpdateSettings(_fakeChannel ?? "stable", _fakeToken);
+        if (Fake) return new UpdateSettings(_fakeChannel ?? "stable");
         var channel = "stable";
         try
         {
             if (File.Exists(SettingsFile) && JsonSerializer.Deserialize<Stored>(File.ReadAllText(SettingsFile)) is { } s && Rules.UpdateChannels.Contains(s.Channel)) channel = s.Channel;
         }
         catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException) { log.LogWarning(e, "Update settings unreadable"); }
-        return new UpdateSettings(channel, ReadToken() is not null);
-    }
-
-    string? ReadToken()
-    {
-        try { return File.Exists(TokenFile) && File.ReadAllText(TokenFile).Trim() is { Length: > 0 } t ? t : null; }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return null; }
+        return new UpdateSettings(channel);
     }
 
     public void SetSettings(SetUpdateSettingsRequest r)
     {
         if (!Rules.UpdateChannels.Contains(r.Channel)) throw new OperationException(Msg.F("Unknown update channel “{0}”.", r.Channel));
-        var token = r.Token?.Trim();
-        if (!string.IsNullOrEmpty(token) && !Rules.IsGitHubToken(token)) throw new OperationException(Msg.F("That does not look like a GitHub access token."));
-        if (Fake)
-        {
-            _fakeChannel = r.Channel;
-            if (token is not null) _fakeToken = token.Length > 0;
-            return;
-        }
+        if (Fake) { _fakeChannel = r.Channel; return; }
         var dir = Path.GetDirectoryName(SettingsFile);
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
         File.WriteAllText(SettingsFile, JsonSerializer.Serialize(new Stored(r.Channel)));
-        if (token is null) return;
-        if (token.Length == 0) { if (File.Exists(TokenFile)) File.Delete(TokenFile); return; }
-        WritePrivate(TokenFile, token);
-    }
-
-    static void WritePrivate(string path, string text)
-    {
-        var dir = Path.GetDirectoryName(path);
-        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-        var tmp = path + ".tmp";
-        File.WriteAllText(tmp, "");
-        if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(tmp, UnixFileMode.UserRead | UnixFileMode.UserWrite); // avant d'y mettre le jeton
-        File.WriteAllText(tmp, text);
-        File.Move(tmp, path, true);
     }
 
     /// <summary>Version installée : le fichier VERSION posé par install.sh, sinon celle du programme.</summary>
@@ -125,20 +96,13 @@ public sealed partial class UpdateService(ICommandRunner runner, IConfiguration 
     async Task<AppUpdateInfo> QueryReleasesAsync(string current, CancellationToken ct)
     {
         var settings = GetSettings();
-        var token = ReadToken();
         AppUpdateInfo Fail(string msg) => new(current, null, false, null, null, false, null, DateTimeOffset.UtcNow, msg);
         try
         {
             using var req = new HttpRequestMessage(HttpMethod.Get, $"{ApiBase}/repos/{Repo}/releases?per_page=30");
             req.Headers.UserAgent.Add(new ProductInfoHeaderValue("UrsaNAS", "1"));
             req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
-            if (token is not null) req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
             using var r = await _http.SendAsync(req, ct);
-            if (r.StatusCode is System.Net.HttpStatusCode.Unauthorized) return Fail(Msg.F("GitHub refused the access token: check that it is valid and has not expired."));
-            if (r.StatusCode is System.Net.HttpStatusCode.NotFound or System.Net.HttpStatusCode.Forbidden)
-                return Fail(token is null
-                    ? Msg.F("The UrsaNAS releases are private: enter a GitHub access token (read-only) to check for updates.")
-                    : Msg.F("GitHub does not let this token read the UrsaNAS releases (it needs read access to the repository contents)."));
             if (!r.IsSuccessStatusCode) return Fail(Msg.F("GitHub answered {0}.", (int)r.StatusCode));
             return Pick(current, settings.Channel == "prerelease", await r.Content.ReadAsStringAsync(ct));
         }
@@ -211,7 +175,7 @@ public sealed partial class UpdateService(ICommandRunner runner, IConfiguration 
             if (!File.Exists(ApplyScript))
                 throw new OperationException(Msg.F("The update helper script is missing ({0}): reinstall UrsaNAS once by hand to add it.", ApplyScript));
             WriteInstallStatus("running", app.Latest, Msg.F("Downloading {0}", app.Latest));
-            var workDir = await DownloadAndExtractAsync(app.Tag, app.Latest, ReadToken(), ct);
+            var workDir = await DownloadAndExtractAsync(app.Tag, app.Latest, ct);
             WriteInstallStatus("running", app.Latest, Msg.F("Applying the update"));
             var unit = $"ursanas-update-{DateTimeOffset.UtcNow:yyyyMMddHHmmss}";
             var r = await runner.RunAsync("systemd-run", ["--unit=" + unit, "--collect", "--", "/bin/bash", ApplyScript, workDir, StatusFile], ct: ct);
@@ -242,19 +206,18 @@ public sealed partial class UpdateService(ICommandRunner runner, IConfiguration 
         File.WriteAllText(StatusFile, JsonSerializer.Serialize(new AppInstallStatus(stage, version, message, DateTimeOffset.UtcNow)));
     }
 
-    async Task<JsonElement> FetchReleaseAsync(string tag, string? token, CancellationToken ct)
+    async Task<JsonElement> FetchReleaseAsync(string tag, CancellationToken ct)
     {
         using var req = new HttpRequestMessage(HttpMethod.Get, $"{ApiBase}/repos/{Repo}/releases/tags/{Uri.EscapeDataString(tag)}");
         req.Headers.UserAgent.Add(new ProductInfoHeaderValue("UrsaNAS", "1"));
         req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
-        if (token is not null) req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         using var r = await _http.SendAsync(req, ct);
         if (!r.IsSuccessStatusCode) throw new OperationException(Msg.F("GitHub answered {0} for release {1}.", (int)r.StatusCode, tag));
         using var doc = JsonDocument.Parse(await r.Content.ReadAsStringAsync(ct));
         return doc.RootElement.Clone();
     }
 
-    async Task<byte[]> DownloadAssetAsync(JsonElement release, string assetName, string? token, CancellationToken ct)
+    async Task<byte[]> DownloadAssetAsync(JsonElement release, string assetName, CancellationToken ct)
     {
         if (release.TryGetProperty("assets", out var assets))
             foreach (var a in assets.EnumerateArray())
@@ -263,7 +226,6 @@ public sealed partial class UpdateService(ICommandRunner runner, IConfiguration 
                     using var req = new HttpRequestMessage(HttpMethod.Get, url);
                     req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/octet-stream"));
                     req.Headers.UserAgent.Add(new ProductInfoHeaderValue("UrsaNAS", "1"));
-                    if (token is not null) req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
                     using var r = await _http.SendAsync(req, ct);
                     if (!r.IsSuccessStatusCode) throw new OperationException(Msg.F("GitHub answered {0} for {1}.", (int)r.StatusCode, assetName));
                     return await r.Content.ReadAsByteArrayAsync(ct);
@@ -271,10 +233,10 @@ public sealed partial class UpdateService(ICommandRunner runner, IConfiguration 
         throw new OperationException(Msg.F("Release asset “{0}” was not found.", assetName));
     }
 
-    async Task<string> DownloadAndExtractAsync(string tag, string version, string? token, CancellationToken ct)
+    async Task<string> DownloadAndExtractAsync(string tag, string version, CancellationToken ct)
     {
         JsonElement release;
-        try { release = await FetchReleaseAsync(tag, token, ct); }
+        try { release = await FetchReleaseAsync(tag, ct); }
         catch (Exception e) when (e is HttpRequestException or TaskCanceledException or JsonException)
         {
             throw new OperationException(Msg.F("Could not reach GitHub: check the Internet connection of this machine."));
@@ -283,8 +245,8 @@ public sealed partial class UpdateService(ICommandRunner runner, IConfiguration 
         byte[] tar, sha;
         try
         {
-            tar = await DownloadAssetAsync(release, $"{baseName}.tar.gz", token, ct);
-            sha = await DownloadAssetAsync(release, $"{baseName}.tar.gz.sha256", token, ct);
+            tar = await DownloadAssetAsync(release, $"{baseName}.tar.gz", ct);
+            sha = await DownloadAssetAsync(release, $"{baseName}.tar.gz.sha256", ct);
         }
         catch (Exception e) when (e is HttpRequestException or TaskCanceledException)
         {

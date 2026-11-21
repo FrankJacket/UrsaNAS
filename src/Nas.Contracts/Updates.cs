@@ -4,12 +4,10 @@ namespace Nas.Contracts;
 
 /// <summary>
 /// Réglages de la recherche de mises à jour. <c>Channel</c> vaut <c>stable</c> ou <c>prerelease</c> (les préversions comptent aussi).
-/// <c>TokenSet</c> : un jeton GitHub est enregistré ; sa valeur ne quitte jamais l'agent.
 /// </summary>
-public sealed record UpdateSettings(string Channel, bool TokenSet);
+public sealed record UpdateSettings(string Channel);
 
-/// <summary><c>Token</c> : null = inchangé, vide = retirer le jeton enregistré.</summary>
-public sealed record SetUpdateSettingsRequest(string Channel, string? Token);
+public sealed record SetUpdateSettingsRequest(string Channel);
 
 /// <summary>
 /// Résultat de la recherche d'une nouvelle version d'UrsaNAS. <c>Error</c> non nul : la recherche a échoué (les autres champs sont alors à ignorer, sauf <c>Current</c>).
@@ -61,12 +59,6 @@ public static partial class Rules
     /// <summary>Heure « HH:mm » (ou « H:mm »), comme saisie dans un champ de texte.</summary>
     public static bool IsTimeOfDay(string? t) =>
         t is not null && TimeSpan.TryParse(t, System.Globalization.CultureInfo.InvariantCulture, out var ts) && ts >= TimeSpan.Zero && ts < TimeSpan.FromDays(1);
-
-    /// <summary>Jeton GitHub (ghp_…, github_pat_…) : lettres, chiffres et soulignés seulement ; il finit dans un en-tête HTTP.</summary>
-    public static bool IsGitHubToken(string? t) => t is { Length: >= 20 and <= 255 } && TokenRegex().IsMatch(t);
-
-    [GeneratedRegex(@"\A[A-Za-z0-9_]+\z")]
-    private static partial Regex TokenRegex();
 
     /// <summary>Nom de paquet Debian/Ubuntu valide (lettres minuscules, chiffres, « + », « . », « - »).</summary>
     public static bool IsPackageName(string? n) => n is { Length: >= 1 and <= 128 } && PackageNameRegex().IsMatch(n);

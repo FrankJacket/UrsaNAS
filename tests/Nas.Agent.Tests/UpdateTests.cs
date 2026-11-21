@@ -31,7 +31,6 @@ public sealed class UpdateTests : IDisposable
         var cfg = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["Update:SettingsFile"] = Path.Combine(_dir, "settings.json"),
-            ["Update:TokenFile"] = Path.Combine(_dir, "token"),
             ["Update:VersionFile"] = Path.Combine(_dir, "VERSION"),
             ["Update:RebootRequiredFile"] = Path.Combine(_dir, "reboot-required"),
         }).Build();
@@ -82,56 +81,42 @@ public sealed class UpdateTests : IDisposable
         Assert.True(UpdateService.Pick("1.2.0-rc1", false, Releases).Available);
 
     [Fact]
-    public async Task La_recherche_envoie_le_jeton_et_choisit_la_version()
+    public async Task La_recherche_choisit_la_version_sans_aucune_identification()
     {
         var h = new Handler(HttpStatusCode.OK, Releases);
         var svc = Make(handler: h);
-        svc.SetSettings(new SetUpdateSettingsRequest("stable", "github_pat_ABCDEFGHIJKLMNOPQRSTUV"));
         var info = await svc.CheckAppAsync(default);
         Assert.Null(info.Error);
         Assert.Equal("1.2.0", info.Latest);
-        Assert.Equal("Bearer", h.Request!.Headers.Authorization!.Scheme);
-        Assert.Equal("github_pat_ABCDEFGHIJKLMNOPQRSTUV", h.Request.Headers.Authorization.Parameter);
+        Assert.Null(h.Request!.Headers.Authorization); // dépôt public : aucun jeton n'est envoyé
         Assert.Equal(info, svc.Status().App);
     }
 
     [Fact]
-    public async Task Sans_jeton_un_depot_prive_donne_un_message_clair()
+    public async Task Une_reponse_d_erreur_de_GitHub_est_signalee()
     {
         var svc = Make(handler: new Handler(HttpStatusCode.NotFound, "{}"));
         var info = await svc.CheckAppAsync(default);
-        Assert.Contains("private", info.Error);
+        Assert.Contains("404", info.Error);
         Assert.Equal("1.0.0", info.Current);
     }
 
     [Fact]
-    public async Task Un_jeton_refuse_est_signale()
-    {
-        var svc = Make(handler: new Handler(HttpStatusCode.Unauthorized, "{}"));
-        svc.SetSettings(new SetUpdateSettingsRequest("stable", "ghp_ABCDEFGHIJKLMNOPQRSTUVWX"));
-        Assert.Contains("refused", (await svc.CheckAppAsync(default)).Error);
-    }
-
-    [Fact]
-    public void Le_jeton_est_garde_a_part_et_jamais_renvoye()
+    public void Le_canal_choisi_est_garde()
     {
         var svc = Make();
-        Assert.Equal(new UpdateSettings("stable", false), svc.GetSettings());
-        svc.SetSettings(new SetUpdateSettingsRequest("prerelease", "ghp_ABCDEFGHIJKLMNOPQRSTUVWX"));
-        Assert.Equal(new UpdateSettings("prerelease", true), svc.GetSettings());
-        Assert.DoesNotContain("ghp_", File.ReadAllText(Path.Combine(_dir, "settings.json")));
-        svc.SetSettings(new SetUpdateSettingsRequest("stable", null)); // null : le jeton reste
-        Assert.Equal(new UpdateSettings("stable", true), svc.GetSettings());
-        svc.SetSettings(new SetUpdateSettingsRequest("stable", ""));
-        Assert.Equal(new UpdateSettings("stable", false), svc.GetSettings());
+        Assert.Equal(new UpdateSettings("stable"), svc.GetSettings());
+        svc.SetSettings(new SetUpdateSettingsRequest("prerelease"));
+        Assert.Equal(new UpdateSettings("prerelease"), svc.GetSettings());
+        svc.SetSettings(new SetUpdateSettingsRequest("stable"));
+        Assert.Equal(new UpdateSettings("stable"), svc.GetSettings());
     }
 
     [Theory]
-    [InlineData("nightly", null)]
-    [InlineData("stable", "abc")]
-    [InlineData("stable", "ghp_ABCDEFGHIJKLMNOPQRSTUVWX\r\nX-Evil: 1")]
-    public void Des_reglages_invalides_sont_refuses(string channel, string? token) =>
-        Assert.Throws<OperationException>(() => Make().SetSettings(new SetUpdateSettingsRequest(channel, token)));
+    [InlineData("nightly")]
+    [InlineData("")]
+    public void Un_canal_inconnu_est_refuse(string channel) =>
+        Assert.Throws<OperationException>(() => Make().SetSettings(new SetUpdateSettingsRequest(channel)));
 
     [Fact]
     public void La_liste_des_paquets_est_lue_quelle_que_soit_la_langue()

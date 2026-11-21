@@ -84,7 +84,7 @@ public class UpdateAlertRuleTests
     [Fact]
     public void Une_mise_a_jour_disponible_declenche_une_alerte()
     {
-        var status = new UpdateStatus(new UpdateSettings("stable", false), new AppUpdateInfo("1.0.0", "1.1.0", true, null, null, false, null, DateTimeOffset.UtcNow, null), null);
+        var status = new UpdateStatus(new UpdateSettings("stable"), new AppUpdateInfo("1.0.0", "1.1.0", true, null, null, false, null, DateTimeOffset.UtcNow, null), null);
         var alert = Assert.Single(AlertRules.Evaluate(new HealthSnapshot(true, [], [], Updates: status)));
         Assert.Equal(("update:app", AlertRules.Warning), (alert.Code, alert.Severity));
     }
@@ -93,7 +93,7 @@ public class UpdateAlertRuleTests
     public void Des_paquets_suivis_disponibles_declenchent_une_alerte_mais_pas_les_non_suivis()
     {
         var pkgs = new PackageUpdates([new("samba", "1", "2", true, false), new("tzdata", "1", "2", false, false)], false, DateTimeOffset.UtcNow, null);
-        var status = new UpdateStatus(new UpdateSettings("stable", false), null, pkgs);
+        var status = new UpdateStatus(new UpdateSettings("stable"), null, pkgs);
         var alert = Assert.Single(AlertRules.Evaluate(new HealthSnapshot(true, [], [], Updates: status)));
         Assert.Equal("update:packages", alert.Code);
     }
@@ -102,7 +102,7 @@ public class UpdateAlertRuleTests
     public void A_jour_et_sans_verification_ne_declenchent_rien()
     {
         Assert.Empty(AlertRules.Evaluate(new HealthSnapshot(true, [], [], Updates: null)));
-        var upToDate = new UpdateStatus(new UpdateSettings("stable", false), new AppUpdateInfo("1.0.0", "1.0.0", false, null, null, false, null, DateTimeOffset.UtcNow, null), null);
+        var upToDate = new UpdateStatus(new UpdateSettings("stable"), new AppUpdateInfo("1.0.0", "1.0.0", false, null, null, false, null, DateTimeOffset.UtcNow, null), null);
         Assert.Empty(AlertRules.Evaluate(new HealthSnapshot(true, [], [], Updates: upToDate)));
     }
 }
@@ -121,7 +121,7 @@ sealed class FakeUpdateAgentHandler : HttpMessageHandler
         HttpResponseMessage Json(object o) => new(HttpStatusCode.OK) { Content = JsonContent.Create(o) };
         var response = (request.Method.Method, path) switch
         {
-            ("GET", "system/update") => Json(new UpdateStatus(new UpdateSettings("stable", false), App, Packages)),
+            ("GET", "system/update") => Json(new UpdateStatus(new UpdateSettings("stable"), App, Packages)),
             ("POST", "system/update/check-app") => Json(App),
             ("POST", "system/update/check-packages") => Json(Packages),
             ("POST", "system/update/install-app") => Install(),

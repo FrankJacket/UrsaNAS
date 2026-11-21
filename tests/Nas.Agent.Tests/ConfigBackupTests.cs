@@ -26,7 +26,7 @@ sealed class FakeConfigAgentHandler : HttpMessageHandler
             ("GET", "groups") => Json(new[] { new NasGroup("staff", ["alice"]) }),
             ("GET", "network") => Json(new NetSnapshot(0, [], "netplan")),
             ("GET", "network/ovs") => Json(new OvsStatus(false, false, true, null, [])),
-            ("GET", "system/update") => Json(new UpdateStatus(new UpdateSettings("stable", false), null, null)),
+            ("GET", "system/update") => Json(new UpdateStatus(new UpdateSettings("stable"), null, null)),
             _ => new HttpResponseMessage(HttpStatusCode.NotFound),
         };
         return Task.FromResult(response);

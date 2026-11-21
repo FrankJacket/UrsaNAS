@@ -83,16 +83,7 @@
                 <MudSelectItem Value="@("stable")">@L["Stable releases only"]</MudSelectItem>
                 <MudSelectItem Value="@("prerelease")">@L["Stable releases and pre-releases"]</MudSelectItem>
             </MudSelect>
-            <MudTextField T="string" @bind-Value="token" Label="@L["GitHub access token (read-only)"]" InputType="InputType.Password" Disabled="busy"
-                          HelperText="@(tokenSet ? L["A token is saved. Leave empty to keep it."] : L["The UrsaNAS releases are private: enter a fine-grained token with read access to the repository contents."])"
-                          Style="max-width:520px" />
-            <MudStack Row="true" Class="mt-3">
-                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="() => Save(false)" Disabled="busy">@L["Save"]</MudButton>
-                @if (tokenSet)
-                {
-                    <MudButton Variant="Variant.Outlined" Color="Color.Error" OnClick="() => Save(true)" Disabled="busy">@L["Remove the token"]</MudButton>
-                }
-            </MudStack>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Class="mt-3" OnClick="Save" Disabled="busy">@L["Save"]</MudButton>
         </MudPaper>
 
         <MudText Typo="Typo.h5" Class="mb-2">@L["System packages"]</MudText>
@@ -268,9 +259,9 @@
     PackageUpdates? pkgs;
     AppInstallStatus install = new("idle", null, null, DateTimeOffset.UtcNow);
     readonly HashSet<string> selected = [];
-    string channel = "stable", token = "";
+    string channel = "stable";
     string? error;
-    bool busy, checkingApp, checkingPkgs, showAll, tokenSet, installing, installingPkgs;
+    bool busy, checkingApp, checkingPkgs, showAll, installing, installingPkgs;
     string pkgNames = "";
     List<string> pkgLines = [];
     CancellationTokenSource? pollCts;
@@ -336,7 +327,7 @@
         try
         {
             var s = await Agent.GetUpdateStatusAsync();
-            (channel, tokenSet, app, pkgs) = (s.Settings.Channel, s.Settings.TokenSet, s.App, s.Packages);
+            (channel, app, pkgs) = (s.Settings.Channel, s.App, s.Packages);
             install = await Agent.GetInstallStatusAsync();
             if (install.Stage == "running") StartPolling();
         }
@@ -393,14 +384,12 @@
 
     public void Dispose() => pollCts?.Cancel();
 
-    async Task Save(bool clearToken)
+    async Task Save()
     {
         busy = true; error = null;
         try
         {
-            await Ops.SaveSettingsAsync(channel, token, clearToken);
-            token = "";
-            tokenSet = (await Agent.GetUpdateStatusAsync()).Settings.TokenSet;
+            await Ops.SaveSettingsAsync(channel);
             Snack.Add(L["Saved."], Severity.Success);
         }
         catch (AgentException e) { error = L.Translate(e.Message); }

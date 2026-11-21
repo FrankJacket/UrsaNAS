@@ -62,7 +62,6 @@ public sealed class UpdateInstallTests : IDisposable
         var cfg = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["Update:SettingsFile"] = Path.Combine(_dir, "settings.json"),
-            ["Update:TokenFile"] = Path.Combine(_dir, "token"),
             ["Update:VersionFile"] = Path.Combine(_dir, "VERSION"),
             ["Update:RebootRequiredFile"] = Path.Combine(_dir, "reboot-required"),
             ["Update:WorkDir"] = Path.Combine(_dir, "work"),
@@ -129,7 +128,6 @@ public sealed class UpdateInstallTests : IDisposable
     {
         var tar = BuildTarGz("1.2.3", "install.sh", "echo hi");
         var (svc, runner, http) = Make(req => DefaultDispatch(req, tar));
-        svc.SetSettings(new SetUpdateSettingsRequest("stable", "ghp_ABCDEFGHIJKLMNOPQRSTUVWX"));
         await svc.CheckAppAsync(default);
         await svc.InstallAppAsync(default);
 
@@ -140,8 +138,8 @@ public sealed class UpdateInstallTests : IDisposable
         Assert.True(File.Exists(Path.Combine(workDirArg, "install.sh")));
         Assert.Equal("echo hi", File.ReadAllText(Path.Combine(workDirArg, "install.sh")));
 
-        // le jeton part bien en en-tête, pas seulement lors de la vérification de version
-        Assert.Contains(http.Requests, r => r.Headers.Authorization != null && r.Headers.Authorization.Parameter == "ghp_ABCDEFGHIJKLMNOPQRSTUVWX");
+        // aucune identification n'accompagne les requêtes (vérification de version, téléchargements)
+        Assert.All(http.Requests, r => Assert.Null(r.Headers.Authorization)); // dépôt public : aucun jeton n'est envoyé
     }
 
     [Fact]
