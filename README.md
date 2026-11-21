@@ -2,7 +2,7 @@
 
 UrsaNAS is a home NAS: a web interface (English / French) to manage disks, ZFS storage, file sharing, accounts, monitoring and backups to a USB disk on a Linux machine (tested on Debian 13+ and Ubuntu Server 26.04).
 
-**To install it, see [Install.md](Install.md).**
+**To install it, see [Install.md](Install.md).** To use it, see the **[user wiki](https://github.com/FrankJacket/UrsaNAS/wiki)**.
 
 It is written in C# (.NET 10) with MudBlazor, SQLite and Dapper.
 
