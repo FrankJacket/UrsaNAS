@@ -1330,6 +1330,7 @@ public static class French
         ["Docker volume created"] = "Volume Docker créé",
         ["Docker volume deleted"] = "Volume Docker supprimé",
         ["Docker network created"] = "Réseau Docker créé",
+        ["Tab indents and Shift+Tab outdents (2 spaces). Press Esc then Tab to leave the editor with the keyboard."] = "Tab décale vers la droite et Maj+Tab vers la gauche (2 espaces). Échap puis Tab permet de quitter l'éditeur au clavier.",
         ["The file is not checked: Docker or Compose is not available."] = "Le fichier n'est pas vérifié : Docker ou Compose n'est pas disponible.",
         ["Checking the file…"] = "Vérification du fichier…",
         ["The compose file is valid."] = "Le fichier compose est valide.",

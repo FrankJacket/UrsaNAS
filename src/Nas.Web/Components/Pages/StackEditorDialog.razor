@@ -2,6 +2,7 @@
 @inject DockerOperations Ops
 @inject NasFolderPicker Picker
 @inject IJSRuntime JS
+@implements IAsyncDisposable
 
 @* Création ou modification d'une stack Compose. Le fichier est validé par « docker compose config » avant d'être enregistré. *@
 <MudDialog>
@@ -17,6 +18,7 @@
         @* Un seul bandeau : seuls sa severite et son texte changent (le resultat precedent reste, attenue, pendant une nouvelle validation). *@
         <MudAlert Severity="@CheckSeverity" Dense="true" Class="@("mt-2 compose-check" + (checking ? " checking" : ""))" Style="white-space:pre-wrap">@CheckText</MudAlert>
         <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.CreateNewFolder" OnClick="InsertFolder" Disabled="busy" Class="mt-2">@L["Insert a NAS folder path"]</MudButton>
+        <MudText Typo="Typo.caption" Class="d-block mt-1">@L["Tab indents and Shift+Tab outdents (2 spaces). Press Esc then Tab to leave the editor with the keyboard."]</MudText>
         <MudText Typo="Typo.caption" Class="d-block mt-1">@L["The path is inserted where the cursor is. Docker gives containers full access to it, whatever the share permissions."]</MudText>
     </DialogContent>
     <DialogActions>
@@ -64,6 +66,28 @@
         { MissingImages.Count: > 0 } => L["The compose file is valid."] + " " + L["Not on this NAS yet, downloaded when the stack starts (it fails if the name is wrong):"] + " " + string.Join(", ", check.MissingImages),
         _ => L["The compose file is valid."],
     };
+
+    IJSObjectReference? module;
+
+    /// <summary>Aide à la saisie YAML (retrait conservé, Tab, listes) : le script se branche sur la zone de texte une fois affichée.</summary>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            module = await JS.InvokeAsync<IJSObjectReference>("import", "./yaml-editor.js");
+            await module.InvokeVoidAsync("attach", "stack-text");
+        }
+        catch (JSException) { } // sans le script, la zone de texte reste un champ ordinaire
+        catch (JSDisconnectedException) { }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (module is null) return;
+        try { await module.InvokeVoidAsync("detach", "stack-text"); await module.DisposeAsync(); }
+        catch (Exception e) when (e is JSDisconnectedException or JSException) { }
+    }
 
     protected override async Task OnInitializedAsync()
     {
