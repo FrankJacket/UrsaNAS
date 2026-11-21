@@ -100,6 +100,31 @@ public static class DockerParser
         }).ToList();
     }
 
+    /// <summary>Ajoute à chaque conteneur ses réseaux et adresses, lus dans « docker inspect » (un tableau JSON) ; un conteneur absent de la réponse reste tel quel.</summary>
+    public static IReadOnlyList<ContainerInfo> MergeContainerNetworks(IReadOnlyList<ContainerInfo> list, string inspectJson)
+    {
+        using var doc = JsonDocument.Parse(inspectJson);
+        var items = doc.RootElement.ValueKind switch
+        {
+            JsonValueKind.Array => doc.RootElement.EnumerateArray().ToList(),
+            JsonValueKind.Object => [doc.RootElement],
+            _ => [],
+        };
+        var byId = items.Where(e => e.ValueKind == JsonValueKind.Object)
+            .Select(e => (Id: Str(e, "Id"), Element: e)).Where(x => x.Id.Length > 0).ToList();
+        return list.Select(c =>
+        {
+            var found = byId.Where(x => x.Id.StartsWith(c.Id, StringComparison.Ordinal)).Select(x => x.Element).FirstOrDefault();
+            if (found.ValueKind != JsonValueKind.Object) return c;
+            var nets = found.TryGetProperty("NetworkSettings", out var ns) && ns.ValueKind == JsonValueKind.Object
+                && ns.TryGetProperty("Networks", out var n) && n.ValueKind == JsonValueKind.Object
+                ? n.EnumerateObject().Select(p => new ContainerNet(p.Name, NullIfEmpty(Str(p.Value, "IPAddress")), NullIfEmpty(Str(p.Value, "GlobalIPv6Address")),
+                    NullIfEmpty(Str(p.Value, "Gateway")), NullIfEmpty(Str(p.Value, "MacAddress")))).OrderBy(x => x.Network, StringComparer.OrdinalIgnoreCase).ToList()
+                : [];
+            return c with { Networks = nets };
+        }).ToList();
+    }
+
     static string Str(JsonElement e, string key) => e.ValueKind == JsonValueKind.Object && e.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
     static string? NullIfEmpty(string s) => s.Length == 0 ? null : s;
 }
@@ -157,6 +182,15 @@ public sealed class DockerService(ICommandRunner run, IConfiguration cfg)
 
     public async Task<IReadOnlyList<ContainerInfo>> ContainersAsync(CancellationToken ct = default) =>
         DockerParser.ParseContainers(await Ok(["ps", "-a", "--format", "{{json .}}"], "Listing containers", ct));
+
+    /// <summary>Les conteneurs avec leurs réseaux et adresses IP ; si « inspect » échoue, la liste simple suffit.</summary>
+    public async Task<IReadOnlyList<ContainerInfo>> ContainersDetailedAsync(CancellationToken ct = default)
+    {
+        var list = await ContainersAsync(ct);
+        if (list.Count == 0) return list;
+        try { return DockerParser.MergeContainerNetworks(list, await Ok(["inspect", .. list.Select(c => c.Id)], "Inspecting containers", ct)); }
+        catch (OperationException) { return list; }
+    }
 
     public async Task<IReadOnlyList<ContainerStats>> StatsAsync(CancellationToken ct = default) =>
         DockerParser.ParseStats(await Ok(["stats", "--no-stream", "--format", "{{json .}}"], "Reading the statistics", ct));

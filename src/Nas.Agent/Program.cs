@@ -204,7 +204,7 @@ public partial class Program
 
         // Docker : chaque opération qui modifie quelque chose passe par le verrou propre à DockerService (un téléchargement peut être long).
         app.MapGet("/docker/status", async (DockerService d, CancellationToken ct) => Results.Ok(await d.StatusAsync(ct)));
-        app.MapGet("/docker/containers", (DockerService d, CancellationToken ct) => Read(async () => Results.Ok(await d.ContainersAsync(ct))));
+        app.MapGet("/docker/containers", (DockerService d, CancellationToken ct) => Read(async () => Results.Ok(await d.ContainersDetailedAsync(ct))));
         app.MapGet("/docker/stats", (DockerService d, CancellationToken ct) => Read(async () => Results.Ok(await d.StatsAsync(ct))));
         app.MapGet("/docker/containers/{id}/logs", (string id, int? tail, DockerService d, CancellationToken ct) =>
             Read(async () => Results.Text(await d.LogsAsync(id, tail ?? 200, ct))));

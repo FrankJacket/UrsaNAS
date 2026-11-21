@@ -123,3 +123,29 @@ public class DockerNetworkTests
         Assert.Contains("not found", e.Message);
     }
 }
+
+public class DockerContainerNetworkTests
+{
+    [Fact]
+    public void Les_adresses_IP_viennent_de_docker_inspect()
+    {
+        var list = new[]
+        {
+            new ContainerInfo("aaaaaaaaaaaa", "ng", "nginx", "running", "Up", "0.0.0.0:8090->80/tcp", null),
+            new ContainerInfo("bbbbbbbbbbbb", "macng", "nginx", "running", "Up", "", null),
+            new ContainerInfo("cccccccccccc", "absent", "nginx", "exited", "Exited", "", null),
+        };
+        var r = DockerParser.MergeContainerNetworks(list, """
+            [
+              {"Id":"aaaaaaaaaaaa1111","NetworkSettings":{"Networks":{"bridge":{"IPAddress":"172.17.0.2","Gateway":"172.17.0.1","MacAddress":"02:42:ac:11:00:02","GlobalIPv6Address":"fd00::2"}}}},
+              {"Id":"bbbbbbbbbbbb2222","NetworkSettings":{"Networks":{"lan":{"IPAddress":"192.168.1.50","Gateway":"192.168.1.1","MacAddress":"02:42:c0:a8:01:32"},"b":{"IPAddress":""}}}}
+            ]
+            """);
+        var ng = Assert.Single(r[0].Networks!);
+        Assert.Equal(("bridge", "172.17.0.2", "fd00::2", "172.17.0.1"), (ng.Network, ng.Ip, ng.Ipv6, ng.Gateway));
+        Assert.Equal(["b", "lan"], r[1].Networks!.Select(n => n.Network));
+        Assert.Null(r[1].Networks![0].Ip);          // arrêté ou sans adresse : vide
+        Assert.Equal("192.168.1.50", r[1].Networks![1].Ip);
+        Assert.Null(r[2].Networks);                  // absent de la réponse : inchangé
+    }
+}

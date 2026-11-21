@@ -35,56 +35,45 @@
 
 <MudText Typo="Typo.h5" Class="mb-2">@L["Networks"]</MudText>
 <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="CreateNetwork" Class="mb-4" Disabled="busy">@L["Create a network"]</MudButton>
-<MudTable Items="networks" Hover="true" Dense="true" Loading="@(!loaded)" Class="desk-grow">
-    <HeaderContent><MudTh Style="width:48px"></MudTh><MudTh>@L["Name"]</MudTh><MudTh>@L["Driver"]</MudTh><MudTh>@L["Related containers"]</MudTh></HeaderContent>
-    <RowTemplate>
-        <MudTd>
-            <MudIconButton Size="Size.Small" Icon="@(open.Contains(context.Id) ? Icons.Material.Filled.ExpandMore : Icons.Material.Filled.ChevronRight)"
-                           OnClick="() => Toggle(context.Id)" aria-label="@L["Details"]" />
-        </MudTd>
-        <MudTd><b>@context.Name</b></MudTd>
-        <MudTd>@context.Driver</MudTd>
-        <MudTd>@(context.Containers?.Count ?? 0)</MudTd>
-    </RowTemplate>
-    <ChildRowContent>
-        @if (open.Contains(context.Id))
-        {
-            <MudTr>
-                <td colspan="4" style="padding:8px 16px 16px 56px">
-                    <MudSimpleTable Dense="true" Elevation="0" Class="net-details">
-                        <tbody>
-                            <tr><th>@L["Subnet"]</th><td>@Or(context.Subnet)</td></tr>
-                            <tr><th>@L["Gateway"]</th><td>@Or(context.Gateway)</td></tr>
-                            @if (context.IpRange is not null)
-                            {
-                                <tr><th>@L["IP range"]</th><td>@context.IpRange</td></tr>
-                            }
-                            @if (context.Parent is not null)
-                            {
-                                <tr><th>@L["Network interface"]</th><td>@context.Parent</td></tr>
-                            }
-                            @if (context.Mode is not null)
-                            {
-                                <tr><th>@L["Network mode"]</th><td>@context.Mode</td></tr>
-                            }
-                            <tr><th>IPv6</th><td>@(context.Ipv6 ? L["Enabled"] : L["Not enabled"])</td></tr>
-                            <tr><th>@L["Scope"]</th><td>@context.Scope</td></tr>
-                            <tr><th>@L["Containers"]</th><td>@(context.Containers is { Count: > 0 } c ? string.Join(", ", c) : "--")</td></tr>
-                            @if (!Builtin.Contains(context.Name))
-                            {
-                                <tr>
-                                    <th>@L["Operation"]</th>
-                                    <td><MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" Disabled="busy" OnClick="() => DeleteNetwork(context)">@L["Delete network"]</MudButton></td>
-                                </tr>
-                            }
-                        </tbody>
-                    </MudSimpleTable>
-                </td>
-            </MudTr>
-        }
-    </ChildRowContent>
-    <NoRecordsContent><MudText Class="pa-4">@L["No networks."]</MudText></NoRecordsContent>
-</MudTable>
+@if (loaded && networks.Count == 0)
+{
+    <MudText Class="pa-4">@L["No networks."]</MudText>
+}
+<MudExpansionPanels MultiExpansion="true" Class="desk-grow" Style="overflow:auto">
+    @foreach (var n in networks)
+    {
+        <MudExpansionPanel @key="n.Id" Dense="true">
+            <TitleContent>
+                <div class="net-head">
+                    <b>@n.Name</b>
+                    <div>@n.Driver</div>
+                    <div>@L["Related containers"] : @(n.Containers?.Count ?? 0)</div>
+                </div>
+            </TitleContent>
+            <ChildContent>
+                <MudSimpleTable Dense="true" Elevation="0" Class="net-details">
+                    <tbody>
+                        <tr><th>@L["Subnet"]</th><td>@Or(n.Subnet)</td></tr>
+                        <tr><th>@L["Gateway"]</th><td>@Or(n.Gateway)</td></tr>
+                        @if (n.IpRange is not null) { <tr><th>@L["IP range"]</th><td>@n.IpRange</td></tr> }
+                        @if (n.Parent is not null) { <tr><th>@L["Network interface"]</th><td>@n.Parent</td></tr> }
+                        @if (n.Mode is not null) { <tr><th>@L["Network mode"]</th><td>@n.Mode</td></tr> }
+                        <tr><th>IPv6</th><td>@(n.Ipv6 ? L["Enabled"] : L["Not enabled"])</td></tr>
+                        <tr><th>@L["Scope"]</th><td>@n.Scope</td></tr>
+                        <tr><th>@L["Containers"]</th><td>@(n.Containers is { Count: > 0 } cs ? string.Join(", ", cs) : "--")</td></tr>
+                        @if (!Builtin.Contains(n.Name))
+                        {
+                            <tr>
+                                <th>@L["Operation"]</th>
+                                <td><MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" Disabled="busy" OnClick="() => DeleteNetwork(n)">@L["Delete network"]</MudButton></td>
+                            </tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+            </ChildContent>
+        </MudExpansionPanel>
+    }
+</MudExpansionPanels>
 
 @code {
     /// <summary>Navigation interne de la fenêtre Docker ; absente quand la page est ouverte seule.</summary>
@@ -136,8 +125,6 @@
         }
     }
 
-    readonly HashSet<string> open = [];
-    void Toggle(string id) { if (!open.Remove(id)) open.Add(id); }
     static string Or(string? s) => string.IsNullOrEmpty(s) ? "--" : s;
 
     async Task Confirm(string title, string message, Func<Task> action, string success)
@@ -158,3 +145,8 @@
     Task DeleteNetwork(DockerNetwork n) => Confirm(L["Delete {0}?", n.Name],
         L["The network is deleted. Docker refuses if a container is still connected to it."], () => Ops.RemoveNetworkAsync(n.Name), L["{0} deleted.", n.Name]);
 }
+
+<style>
+    .net-head { display: grid; grid-template-columns: minmax(120px, 1.4fr) minmax(90px, 1fr) minmax(130px, 1fr); gap: 12px; align-items: center; width: 100%; }
+    .net-details th { width: 130px; text-align: left; font-weight: 500; color: var(--mud-palette-text-secondary); vertical-align: top; }
+</style>

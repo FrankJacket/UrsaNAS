@@ -9,7 +9,11 @@ public enum DockerState { NotInstalled, Stopped, Ready }
 public sealed record DockerStatus(DockerState State, string? Version, string? ComposeVersion);
 
 /// <summary><c>State</c> : running, exited, paused… <c>Project</c> : nom de la stack Compose, s'il y en a une.</summary>
-public sealed record ContainerInfo(string Id, string Name, string Image, string State, string Status, string Ports, string? Project);
+public sealed record ContainerInfo(string Id, string Name, string Image, string State, string Status, string Ports, string? Project,
+    IReadOnlyList<ContainerNet>? Networks = null);
+
+/// <summary>Un réseau où le conteneur est branché, avec ses adresses (vides tant que le conteneur est arrêté) — « docker inspect ».</summary>
+public sealed record ContainerNet(string Network, string? Ip, string? Ipv6, string? Gateway, string? Mac);
 
 public sealed record ContainerStats(string Id, double CpuPercent, long MemUsedBytes, long MemLimitBytes);
 

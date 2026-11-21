@@ -1330,6 +1330,7 @@ public static class French
         ["Docker volume created"] = "Volume Docker créé",
         ["Docker volume deleted"] = "Volume Docker supprimé",
         ["Docker network created"] = "Réseau Docker créé",
+        ["None published: reach the container at its IP address."] = "Aucun port publié : joignez le conteneur par son adresse IP.",
         ["Docker is installed but its service is not running."] = "Docker est installé mais son service ne tourne pas.",
         ["Start the service"] = "Démarrer le service",
         ["Stop the service"] = "Arrêter le service",

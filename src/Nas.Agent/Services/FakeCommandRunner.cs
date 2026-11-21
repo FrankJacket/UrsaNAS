@@ -83,7 +83,7 @@ public sealed class FakeCommandRunner : ICommandRunner
     }
 
     // ---- Docker simulé : quelques conteneurs, images, volumes et réseaux qui réagissent aux commandes.
-    sealed record FakeContainer(string Id, string Name, string Image, string State, string Ports, string? Project);
+    sealed record FakeContainer(string Id, string Name, string Image, string State, string Ports, string? Project, string Net = "bridge");
     readonly List<FakeContainer> _containers =
     [
         new("a1b2c3d4e5f6", "jellyfin", "jellyfin/jellyfin:latest", "running", "0.0.0.0:8096->8096/tcp", null),
@@ -152,7 +152,8 @@ public sealed class FakeCommandRunner : ICommandRunner
             case "run" or "create":
                 var name = a.Contains("--name") ? a[a.ToList().IndexOf("--name") + 1] : $"fake-{_containers.Count}";
                 if (_containers.Any(c => c.Name == name)) return Fail($"Error response from daemon: Conflict. The container name \"/{name}\" is already in use");
-                _containers.Add(new(Guid.NewGuid().ToString("N")[..12], name, a[^1], a[0] == "run" ? "running" : "created", "", null));
+                var net = a.ToList().IndexOf("--network") is var ni and >= 0 ? a[ni + 1] : "bridge";
+                _containers.Add(new(Guid.NewGuid().ToString("N")[..12], name, a[^1], a[0] == "run" ? "running" : "created", "", null, net));
                 return Ok();
             case "rename":
                 var k = _containers.FindIndex(c => c.Id == a[1] || c.Name == a[1]);
@@ -160,12 +161,26 @@ public sealed class FakeCommandRunner : ICommandRunner
                 _containers[k] = _containers[k] with { Name = a[2] };
                 return Ok();
             case "update": return Ok(a[^1]);
+            case "inspect" when a.Count > 2: // plusieurs identifiants : seul le réseau nous intéresse (liste des conteneurs)
+                return Ok(Json(_containers.Where(c => a.Skip(1).Contains(c.Id)).Select((c, i) => new
+                {
+                    Id = c.Id.PadRight(64, '0'),
+                    NetworkSettings = new
+                    {
+                        Networks = new Dictionary<string, object>
+                        {
+                            [c.Net] = c.State == "running"
+                                ? new { IPAddress = $"172.17.0.{i + 2}", GlobalIPv6Address = "", Gateway = "172.17.0.1", MacAddress = $"02:42:ac:11:00:{i + 2:x2}" }
+                                : new { IPAddress = "", GlobalIPv6Address = "", Gateway = "", MacAddress = "" },
+                        },
+                    },
+                }).ToList()) + "\n");
             case "inspect":
                 var ic = _containers.FirstOrDefault(c => c.Id == a[^1] || c.Name == a[^1]);
                 if (ic is null) return Fail($"Error: No such object: {a[^1]}");
                 return Ok(Json(new
                 {
-                    Name = "/" + ic.Name, Image = "sha256:fake",
+                    Id = ic.Id.PadRight(64, '0'), Name = "/" + ic.Name, Image = "sha256:fake",
                     State = new { Running = ic.State == "running" },
                     Config = new { Image = ic.Image, Env = new[] { "PATH=/usr/bin", "TZ=UTC" }, Labels = ic.Project is null ? new Dictionary<string, string>() : new() { ["com.docker.compose.project"] = ic.Project } },
                     HostConfig = new
@@ -174,7 +189,7 @@ public sealed class FakeCommandRunner : ICommandRunner
                         PortBindings = ic.Ports.Length == 0 ? new Dictionary<string, object[]>() : new() { ["8096/tcp"] = [new { HostIp = "0.0.0.0", HostPort = "8096" }] },
                     },
                     Mounts = ic.Ports.Length == 0 ? [] : new[] { new { Type = "bind", Source = "/srv/media", Destination = "/media", RW = true } },
-                    NetworkSettings = new { Networks = new Dictionary<string, object> { ["bridge"] = new { } } },
+                    NetworkSettings = new { Networks = new Dictionary<string, object> { [ic.Net] = new { IPAddress = ic.State == "running" ? "172.17.0.2" : "", Gateway = "172.17.0.1", MacAddress = "" } } },
                 }) + "\n");
             case "image" when a[1] == "inspect":
                 return Ok(Json(new { Config = new { Env = new[] { "PATH=/usr/bin" } } }) + "\n");

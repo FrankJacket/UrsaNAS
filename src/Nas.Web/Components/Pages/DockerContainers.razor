@@ -17,41 +17,70 @@
 
 <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="RunNew" Class="mb-4">@L["Run a container"]</MudButton>
 
-<MudTable Items="containers" Class="desk-grow" Hover="true" Dense="true" Loading="@(!loaded)">
-    <HeaderContent>
-        <MudTh>@L["Name"]</MudTh><MudTh>@L["Image"]</MudTh><MudTh>@L["Status"]</MudTh><MudTh>@L["Ports"]</MudTh><MudTh>CPU</MudTh><MudTh>@L["Memory"]</MudTh><MudTh></MudTh>
-    </HeaderContent>
-    <RowTemplate>
-        @{ var st = stats.GetValueOrDefault(context.Id); }
-        <MudTd>
-            <b>@context.Name</b>
-            @if (context.Project is not null) { <MudChip T="string" Size="Size.Small" Class="ml-2">@context.Project</MudChip> }
-        </MudTd>
-        <MudTd>@context.Image</MudTd>
-        <MudTd>
-            <MudChip T="string" Size="Size.Small" Color="@StateColor(context.State)">@context.State</MudChip>
-            <MudText Typo="Typo.caption" Class="d-block">@context.Status</MudText>
-        </MudTd>
-        <MudTd><code>@context.Ports</code></MudTd>
-        <MudTd>@(st is null ? "" : $"{st.CpuPercent:0.0} %")</MudTd>
-        <MudTd>@(st is null ? "" : Fmt.Size(st.MemUsedBytes, L.Lang))</MudTd>
-        <MudTd Style="text-align:right; white-space:nowrap">
-            @if (context.State == "running")
-            {
-                <MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="busy" OnClick='() => Act(context, "stop", L["Container stopped."])'>@L["Stop"]</MudButton>
-                <MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="busy" OnClick='() => Act(context, "restart", L["Container restarted."])'>@L["Restart"]</MudButton>
-            }
-            else
-            {
-                <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" Disabled="busy" OnClick='() => Act(context, "start", L["Container started."])'>@L["Start"]</MudButton>
-            }
-            <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Edit" Disabled="busy" OnClick="() => Edit(context)">@L["Edit"]</MudButton>
-            <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Article" OnClick="() => Logs(context)">@L["Logs"]</MudButton>
-            <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" Disabled="busy" OnClick="() => Delete(context)">@L["Delete"]</MudButton>
-        </MudTd>
-    </RowTemplate>
-    <NoRecordsContent><MudText Class="pa-4">@L["No containers."]</MudText></NoRecordsContent>
-</MudTable>
+@if (loaded && containers.Count == 0)
+{
+    <MudText Class="pa-4">@L["No containers."]</MudText>
+}
+else if (!loaded)
+{
+    <MudProgressLinear Indeterminate="true" />
+}
+<MudExpansionPanels MultiExpansion="true" Class="desk-grow" Style="overflow:auto">
+    @foreach (var c in containers)
+    {
+        var st = stats.GetValueOrDefault(c.Id);
+        <MudExpansionPanel @key="c.Id" Dense="true">
+            <TitleContent>
+                <div class="ctn-head">
+                    <div>
+                        <b>@c.Name</b>
+                        @if (c.Project is not null) { <MudChip T="string" Size="Size.Small" Class="ml-2">@c.Project</MudChip> }
+                    </div>
+                    <div class="ctn-image">@c.Image</div>
+                    <div>
+                        <MudChip T="string" Size="Size.Small" Color="@StateColor(c.State)">@c.State</MudChip>
+                        <MudText Typo="Typo.caption" Class="d-block">@c.Status</MudText>
+                    </div>
+                    <div>@(st is null ? "" : $"CPU {st.CpuPercent:0.0} %")</div>
+                    <div>@(st is null ? "" : Fmt.Size(st.MemUsedBytes, L.Lang))</div>
+                </div>
+            </TitleContent>
+            <ChildContent>
+                <MudSimpleTable Dense="true" Elevation="0" Class="net-details">
+                    <tbody>
+                        <tr><th>@L["Image"]</th><td>@c.Image</td></tr>
+                        <tr><th>@L["Ports"]</th><td>@(c.Ports.Length > 0 ? c.Ports : L["None published: reach the container at its IP address."])</td></tr>
+                        @foreach (var n in c.Networks ?? [])
+                        {
+                            <tr><th>@L["Network"]</th><td><b>@n.Network</b></td></tr>
+                            <tr><th>@L["IP address"]</th><td>@(n.Ip ?? "--")</td></tr>
+                            @if (n.Ipv6 is not null) { <tr><th>IPv6</th><td>@n.Ipv6</td></tr> }
+                            <tr><th>@L["Gateway"]</th><td>@(n.Gateway ?? "--")</td></tr>
+                            @if (n.Mac is not null) { <tr><th>MAC</th><td>@n.Mac</td></tr> }
+                        }
+                        <tr>
+                            <th>@L["Operation"]</th>
+                            <td style="white-space:nowrap">
+                                @if (c.State == "running")
+                                {
+                                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="busy" OnClick='() => Act(c, "stop", L["Container stopped."])'>@L["Stop"]</MudButton>
+                                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="busy" OnClick='() => Act(c, "restart", L["Container restarted."])'>@L["Restart"]</MudButton>
+                                }
+                                else
+                                {
+                                    <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" Disabled="busy" OnClick='() => Act(c, "start", L["Container started."])'>@L["Start"]</MudButton>
+                                }
+                                <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Edit" Disabled="busy" OnClick="() => Edit(c)">@L["Edit"]</MudButton>
+                                <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Article" OnClick="() => Logs(c)">@L["Logs"]</MudButton>
+                                <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" Disabled="busy" OnClick="() => Delete(c)">@L["Delete"]</MudButton>
+                            </td>
+                        </tr>
+                    </tbody>
+                </MudSimpleTable>
+            </ChildContent>
+        </MudExpansionPanel>
+    }
+</MudExpansionPanels>
 
 @code {
     /// <summary>Navigation interne de la fenêtre Docker ; absente quand la page est ouverte seule.</summary>
@@ -137,3 +166,9 @@
         }
     }
 }
+
+<style>
+    .ctn-head { display: grid; grid-template-columns: minmax(120px, 1.2fr) minmax(120px, 1.4fr) minmax(110px, 1fr) 90px 90px; gap: 12px; align-items: center; width: 100%; }
+    .ctn-image { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .net-details th { width: 130px; text-align: left; font-weight: 500; color: var(--mud-palette-text-secondary); vertical-align: top; }
+</style>
