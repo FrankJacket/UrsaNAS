@@ -109,12 +109,10 @@
                 }
                 else
                 {
-                    <MudTable Items="Shown" Dense="true" Hover="true" Class="mt-2">
-                        <HeaderContent><MudTh></MudTh><MudTh>@L["Package"]</MudTh><MudTh>@L["Installed"]</MudTh><MudTh>@L["Available"]</MudTh><MudTh></MudTh></HeaderContent>
+                    @* MultiSelection : MudTable ajoute lui-même la case par ligne et, en en-tête, « tout sélectionner ». *@
+                    <MudTable Items="Shown" Dense="true" Hover="true" Class="mt-2" MultiSelection="true" @bind-SelectedItems="selected">
+                        <HeaderContent><MudTh>@L["Package"]</MudTh><MudTh>@L["Installed"]</MudTh><MudTh>@L["Available"]</MudTh><MudTh></MudTh></HeaderContent>
                         <RowTemplate>
-                            <MudTd>
-                                <MudCheckBox T="bool" Value="selected.Contains(context.Name)" ValueChanged="@((bool v) => Select(context.Name, v))" Dense="true" Disabled="busy" />
-                            </MudTd>
                             <MudTd>
                                 <MudTooltip Text="@context.Name">
                                     <b>@Friendly(context.Name)</b>
@@ -132,8 +130,8 @@
                             </MudTd>
                         </RowTemplate>
                     </MudTable>
-                    <MudButton Variant="Variant.Filled" Color="Color.Warning" Class="mt-3" OnClick="InstallPackages" Disabled="@(busy || selected.Count == 0)">
-                        @(installingPkgs ? L["Installing…"] : L["Update the selected packages"] + (selected.Count > 0 ? $" ({selected.Count})" : ""))
+                    <MudButton Variant="Variant.Filled" Color="Color.Warning" Class="mt-3" OnClick="InstallPackages" Disabled="@(busy || Chosen.Count == 0)">
+                        @(installingPkgs ? L["Installing…"] : L["Update the selected packages"] + (Chosen.Count > 0 ? $" ({Chosen.Count})" : ""))
                     </MudButton>
                     @if (installingPkgs)
                     {
@@ -258,7 +256,7 @@
     AppUpdateInfo? app;
     PackageUpdates? pkgs;
     AppInstallStatus install = new("idle", null, null, DateTimeOffset.UtcNow);
-    readonly HashSet<string> selected = [];
+    HashSet<PackageUpdate> selected = []; // lié à MudTable (MultiSelection)
     string channel = "stable";
     string? error;
     bool busy, checkingApp, checkingPkgs, showAll, installing, installingPkgs;
@@ -280,14 +278,14 @@
 
     System.Globalization.CultureInfo Culture => System.Globalization.CultureInfo.GetCultureInfo(L.Lang);
     List<PackageUpdate> Shown => pkgs?.Items.Where(i => showAll || i.Tracked).ToList() ?? [];
+    /// <summary>Les paquets cochés qui sont encore affichés (un paquet coché puis masqué par « Afficher tous les paquets » ne compte plus).</summary>
+    List<PackageUpdate> Chosen => selected.Where(Shown.Contains).ToList();
 
     static string ServerUtcOffset()
     {
         var o = TimeZoneInfo.Local.GetUtcOffset(DateTime.Now);
         return (o < TimeSpan.Zero ? "-" : "+") + o.Duration().ToString(@"hh\:mm");
     }
-
-    void Select(string name, bool on) { if (on) selected.Add(name); else selected.Remove(name); }
 
     /// <summary>Nom plus parlant pour un paquet connu ; le vrai nom reste visible au survol. Les paquets non reconnus gardent leur nom technique.</summary>
     string Friendly(string name) => name switch
@@ -409,7 +407,7 @@
     async Task CheckPackages()
     {
         checkingPkgs = true; error = null;
-        try { pkgs = await Agent.CheckPackageUpdatesAsync(); selected.Clear(); }
+        try { pkgs = await Agent.CheckPackageUpdatesAsync(); selected = []; }
         catch (AgentException e) { error = L.Translate(e.Message); }
         catch (HttpRequestException) { error = L["Agent unreachable."]; }
         checkingPkgs = false;
@@ -436,9 +434,10 @@
 
     async Task InstallPackages()
     {
-        var names = selected.ToList();
+        var chosen = Chosen;
+        var names = chosen.Select(p => p.Name).ToList();
         if (names.Count == 0) return;
-        var manual = names.Any(n => Shown.Any(p => p.Name == n && p.ManualOnly));
+        var manual = chosen.Any(p => p.ManualOnly);
         var message = L["Install the selected package updates now?"] + " " + string.Join(", ", names)
             + (manual ? " " + L["This restarts an important service or changes the kernel."] : "");
         var ok = await Dialogs.ShowMessageBoxAsync(L["Update packages"], message, yesText: L["Update"], cancelText: L["Cancel"]);
@@ -452,7 +451,7 @@
         {
             await Ops.InstallPackagesAsync(names);
             pkgs = await Agent.CheckPackageUpdatesAsync();
-            selected.Clear();
+            selected = [];
             Snack.Add(L["Packages updated."], Severity.Success);
         }
         catch (AgentException e) { error = L.Translate(e.Message); }
