@@ -9,5 +9,6 @@
   </Folder>
   <Folder Name="/external/">
     <Project Path="external/Ursacopy/src/Ursacopy.Core/Ursacopy.Core.csproj" />
+    <Project Path="external/UrsaUITools/src/Ursa.UITools/Ursa.UITools.csproj" />
   </Folder>
 </Solution>
