@@ -155,6 +155,16 @@ public static partial class Rules
             && !dir.Split('/').Any(p => p is ".." or ".") && !dir.Any(char.IsControl) && !dir.EndsWith('/') && !dir.Contains("//")
             ? null : Msg.F("Invalid disk folder: it must be a disk mounted under /mnt or /media.");
 
+    /// <summary>
+    /// Les permissions avancées sont des attributs étendus (xattr) : ext4, XFS, Btrfs et ZFS les portent, pas exFAT, NTFS ni FAT.
+    /// Un système de fichiers inconnu (null) est accepté.
+    /// </summary>
+    public static bool SupportsAdvancedPermissions(string? fsType) => fsType is not ("exfat" or "ntfs" or "ntfs3" or "vfat" or "fat" or "msdos" or "fuseblk");
+
+    /// <summary>Système de fichiers de la partition montée à ce dossier (null si inconnu).</summary>
+    public static string? FsTypeOfMount(IEnumerable<DiskInfo> disks, string mountPoint) =>
+        disks.SelectMany(d => d.Partitions ?? []).FirstOrDefault(p => p.MountPoints.Contains(mountPoint))?.FsType;
+
     /// <summary>Valide un jeu de partages complet : noms, doublons, utilisateurs connus.</summary>
     public static string? ValidateShares(IReadOnlyList<ShareDef> shares, IReadOnlySet<string> knownUsers)
     {

@@ -22,6 +22,25 @@ sealed class FakeRunner : ICommandRunner
 public class RulesTests
 {
     [Theory]
+    [InlineData("ext4", true)]
+    [InlineData("xfs", true)]
+    [InlineData("btrfs", true)]
+    [InlineData(null, true)]
+    [InlineData("exfat", false)]
+    [InlineData("ntfs", false)]
+    [InlineData("vfat", false)]
+    public void AdvancedPermissionsNeedAFileSystemWithXattr(string? fs, bool expected) =>
+        Assert.Equal(expected, Rules.SupportsAdvancedPermissions(fs));
+
+    [Fact]
+    public void FsTypeOfMountFindsThePartition()
+    {
+        var disks = new[] { new DiskInfo("sdb", "/dev/sdb", 1, null, null, null, [], [new PartitionInfo("sdb1", "/dev/sdb1", 1, "exfat", null, null, ["/mnt/data"])]) };
+        Assert.Equal("exfat", Rules.FsTypeOfMount(disks, "/mnt/data"));
+        Assert.Null(Rules.FsTypeOfMount(disks, "/mnt/other"));
+    }
+
+    [Theory]
     [InlineData("photos", true)]
     [InlineData("Docs_2024-b", true)]
     [InlineData("", false)]

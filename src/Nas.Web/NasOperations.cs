@@ -120,6 +120,14 @@ public class NasOperations(AgentClient agent, Repo repo, IMailSender mail, Authe
     {
         if (Rules.ValidateShareName(share.Name) is { } e1) throw new AgentException(e1);
         if (Rules.ValidateComment(share.Comment) is { } e2) throw new AgentException(e2);
+        if (share.Acl && share.Disk is not null)
+        {
+            string? fs = null;
+            try { fs = Rules.FsTypeOfMount(await agent.GetDisksAsync(), share.Disk); }
+            catch (AgentException) { }
+            catch (HttpRequestException) { }
+            if (!Rules.SupportsAdvancedPermissions(fs)) throw new AgentException(Msg.F("Advanced permissions are not available on a {0} file system: it cannot store them.", fs));
+        }
         await _gate.WaitAsync();
         try
         {

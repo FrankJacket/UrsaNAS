@@ -1,71 +1,91 @@
 @inject NasOperations Ops
 
-@* Création ou modification d'un partage. Le dossier est toujours /srv/nas/<nom> et ne se choisit pas. *@
+@* Création ou modification d'un partage, en deux onglets : réglages généraux, puis permissions. Le dossier est toujours /srv/nas/<nom> et ne se choisit pas. *@
 <MudDialog DefaultFocus="DefaultFocus.FirstChild">
     <DialogContent>
         @if (error is not null)
         {
             <MudAlert Severity="Severity.Error" Class="mb-3">@error</MudAlert>
         }
-        <MudTextField @bind-Value="name" Label="@L["Share name"]" Immediate="true" Disabled="@(busy || Existing is not null)" AutoFocus="@(Existing is null)"
-                      HelperText="@(storage == Plain ? L["Folder: {0}", $"/srv/nas/{name}"] : null)" />
-        <MudSelect T="string" @bind-Value="storage" Label="@L["Storage"]" Disabled="busy" HelperText="@StorageHelp">
-            <MudSelectItem T="string" Value="@Plain">@L["Plain folder ({0})", $"/srv/nas/{name}"]</MudSelectItem>
-            @foreach (var d in Datasets.Concat(created is null ? [] : [created]))
-            {
-                <MudSelectItem T="string" Value="@d">@L["ZFS dataset: {0}", d]</MudSelectItem>
-            }
-            @foreach (var m in Disks)
-            {
-                <MudSelectItem T="string" Value="@(DiskPrefix + m)">@L["Disk: {0}", m]</MudSelectItem>
-            }
-            @if (Existing is null)
-            {
-                @foreach (var p in Pools)
+        <MudTabs @bind-ActivePanelIndex="tab" Elevation="0" Rounded="false" TabPanelsClass="pt-4" KeepPanelsAlive="true">
+            <MudTabPanel Text="@L["General"]">
+                <MudTextField @bind-Value="name" Label="@L["Share name"]" Immediate="true" Disabled="@(busy || current is not null)" AutoFocus="@(current is null)"
+                              HelperText="@(storage == Plain ? L["Folder: {0}", $"/srv/nas/{name}"] : null)" />
+                <MudSelect T="string" @bind-Value="storage" Label="@L["Storage"]" Disabled="busy" HelperText="@StorageHelp">
+                    <MudSelectItem T="string" Value="@Plain">@L["Plain folder ({0})", $"/srv/nas/{name}"]</MudSelectItem>
+                    @foreach (var d in Datasets.Concat(created is null ? [] : [created]))
+                    {
+                        <MudSelectItem T="string" Value="@d">@L["ZFS dataset: {0}", d]</MudSelectItem>
+                    }
+                    @foreach (var m in Disks)
+                    {
+                        <MudSelectItem T="string" Value="@(DiskPrefix + m)">@L["Disk: {0}", m]</MudSelectItem>
+                    }
+                    @if (current is null)
+                    {
+                        @foreach (var p in Pools)
+                        {
+                            <MudSelectItem T="string" Value="@(NewPrefix + p)">@L["New ZFS dataset on pool {0}", $"{p} ({p}/{name})"]</MudSelectItem>
+                        }
+                    }
+                </MudSelect>
+                <MudTextField @bind-Value="comment" Label="@L["Description"]" Disabled="busy" />
+
+                @* NFS et FTP : les permissions avancées ne s'y appliquent pas, la liste ci-dessous décide. *@
+                <MudDivider Class="my-3" />
+                <MudSwitch T="bool" @bind-Value="nfsOn" Label="@L["Share over NFS"]" Color="Color.Primary" Disabled="busy" />
+                @if (nfsOn)
                 {
-                    <MudSelectItem T="string" Value="@(NewPrefix + p)">@L["New ZFS dataset on pool {0}", $"{p} ({p}/{name})"]</MudSelectItem>
+                    <MudTextField @bind-Value="nfsClients" Label="@L["Allowed NFS clients"]" Lines="2" Disabled="busy" Immediate="true" Required="true"
+                                  RequiredError="@L["Enter at least one client."]" Placeholder="192.168.1.0/24"
+                                  HelperText="@L["IP addresses, networks (192.168.1.0/24) or host names, separated by spaces or commas."]" />
+                    <MudSwitch T="bool" @bind-Value="nfsRo" Label="@L["Read-only"]" Color="Color.Primary" Disabled="busy" />
                 }
-            }
-        </MudSelect>
-        <MudTextField @bind-Value="comment" Label="@L["Description"]" Disabled="busy" />
+                <MudSwitch T="bool" @bind-Value="ftpOn" Label="@L["Share over FTP"]" Color="Color.Primary" Disabled="busy" />
+                @if (ftpOn)
+                {
+                    <NamePicker Title="@L["Allowed FTP users"]" Items="Users" @bind-Selected="ftpUsers" Disabled="busy" Empty="@L["Create a user first."]" Height="160px" />
+                    <MudSwitch T="bool" @bind-Value="ftpRo" Label="@L["Read-only"]" Color="Color.Primary" Disabled="busy" />
+                }
+                @if (nfsOn || ftpOn)
+                {
+                    <MudText Typo="Typo.caption" Class="d-block">@L["Advanced permissions do not apply over NFS and FTP: the list above decides who gets in, with access to the whole share."]</MudText>
+                }
+            </MudTabPanel>
 
-        @* NFS et FTP : les permissions avancées ne s'y appliquent pas, la liste ci-dessous décide. *@
-        <MudDivider Class="my-3" />
-        <MudSwitch T="bool" @bind-Value="nfsOn" Label="@L["Share over NFS"]" Color="Color.Primary" Disabled="busy" />
-        @if (nfsOn)
-        {
-            <MudTextField @bind-Value="nfsClients" Label="@L["Allowed NFS clients"]" Lines="2" Disabled="busy"
-                          HelperText="@L["IP addresses, networks (192.168.1.0/24) or host names, separated by spaces or commas."]" />
-            <MudSwitch T="bool" @bind-Value="nfsRo" Label="@L["Read-only"]" Color="Color.Primary" Disabled="busy" />
-        }
-        <MudSwitch T="bool" @bind-Value="ftpOn" Label="@L["Share over FTP"]" Color="Color.Primary" Disabled="busy" />
-        @if (ftpOn)
-        {
-            <NamePicker Title="@L["Allowed FTP users"]" Items="Users" @bind-Selected="ftpUsers" Disabled="busy" Empty="@L["Create a user first."]" Height="160px" />
-            <MudSwitch T="bool" @bind-Value="ftpRo" Label="@L["Read-only"]" Color="Color.Primary" Disabled="busy" />
-        }
-        @if (nfsOn || ftpOn)
-        {
-            <MudText Typo="Typo.caption" Class="d-block">@L["Advanced permissions do not apply over NFS and FTP: the list above decides who gets in, with access to the whole share."]</MudText>
-        }
-        <MudDivider Class="my-3" />
-
-        @if (Existing is null)
-        {
-            <MudText Typo="Typo.caption" Class="d-block mt-2">@L["Permissions are set right after creation: nobody has access until you add some."]</MudText>
-        }
-        else if (!Existing.Acl)
-        {
-            @* Partage créé avant les permissions avancées : on peut encore régler l'ancien mode ou passer au nouveau. *@
-            <NamePicker Title="@L["Allowed users"]" Items="Users" @bind-Selected="selected" Disabled="busy" Empty="@L["Create a user first."]" Height="160px" />
-            <MudSwitch T="bool" @bind-Value="acl" Label="@L["Advanced permissions"]" Color="Color.Primary" Disabled="busy" />
-            <MudText Typo="Typo.caption" Class="d-block">@(acl ? L["Who can do what is set per folder in the Permissions page. The users above only get their current access to start with."] : L["Per-folder permissions, groups, deny rules. Can be turned on later."])</MudText>
-            <MudSwitch T="bool" @bind-Value="readOnly" Label="@L["Read-only"]" Color="Color.Primary" Disabled="busy" />
-        }
+            <MudTabPanel Text="@L["Permissions"]" Disabled="@(current is null && AclMode)">
+                @if (current is not null && current.Acl)
+                {
+                    <FolderPermissions Share="@current.Name" Path="" />
+                }
+                else if (current is null && AclMode)
+                {
+                    <MudText Typo="Typo.body2">@L["Permissions are set right after creation: nobody has access until you add some."]</MudText>
+                }
+                else
+                {
+                    @* Pas de permissions avancées (partage ancien, ou système de fichiers qui ne peut pas les porter) : liste d'utilisateurs. *@
+                    @if (!AclAllowed)
+                    {
+                        <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">@L["Advanced permissions are not available on a {0} file system: it cannot store them.", FsType]</MudAlert>
+                    }
+                    <NamePicker Title="@L["Allowed users"]" Items="Users" @bind-Selected="selected" Disabled="busy" Empty="@L["Create a user first."]" Height="160px" />
+                    <MudSwitch T="bool" @bind-Value="readOnly" Label="@L["Read-only"]" Color="Color.Primary" Disabled="busy" />
+                    @if (AclAllowed && current is not null)
+                    {
+                        <MudSwitch T="bool" @bind-Value="acl" Label="@L["Advanced permissions"]" Color="Color.Primary" Disabled="busy" />
+                        <MudText Typo="Typo.caption" Class="d-block">@(acl ? L["Save to turn on advanced permissions: the users above only get their current access to start with, then you set who can do what per folder."] : L["Per-folder permissions, groups, deny rules. Can be turned on later."])</MudText>
+                    }
+                }
+            </MudTabPanel>
+        </MudTabs>
     </DialogContent>
     <DialogActions>
-        <MudButton OnClick="() => Dialog.Cancel()" Disabled="busy">@L["Cancel"]</MudButton>
-        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save" Disabled="busy">@(busy ? L["Applying…"] : L["Save"])</MudButton>
+        <MudButton OnClick="Close" Disabled="busy">@(changed ? L["Close"] : L["Cancel"])</MudButton>
+        @if (!(tab == 1 && current is { Acl: true }))
+        {
+            <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save" Disabled="busy">@(busy ? L["Applying…"] : L["Save"])</MudButton>
+        }
     </DialogActions>
 </MudDialog>
 
@@ -83,16 +103,31 @@
     /// <summary>Dossiers de montage des disques que ce partage peut utiliser (ceux qu'aucun autre partage n'utilise).</summary>
     [Parameter] public IReadOnlyList<string> Disks { get; set; } = [];
 
+    /// <summary>Système de fichiers de chaque disque monté (dossier de montage → type), pour savoir s'il peut porter les permissions avancées.</summary>
+    [Parameter] public IReadOnlyDictionary<string, string?> DiskFs { get; set; } = new Dictionary<string, string?>();
+
+    /// <summary>Onglet affiché à l'ouverture : 0 = général, 1 = permissions.</summary>
+    [Parameter] public int StartTab { get; set; }
+
     const string Plain = "__plain";
     const string NewPrefix = "__new:";
     const string DiskPrefix = "__disk:";
+    ShareDef? current; // le partage tel qu'enregistré : null tant qu'il n'est pas créé
+    bool changed;      // quelque chose a été enregistré : la page doit se rafraîchir
+    int tab;
     string? created; // jeu de données déjà créé par une tentative précédente de ce dialogue
     string name = "", comment = "", storage = Plain;
-    bool readOnly, acl = true; // un nouveau partage est toujours en permissions avancées
+    bool readOnly, acl = true; // un nouveau partage est en permissions avancées dès que son stockage le permet
 
     static string Current(ShareDef s) => s.Disk is not null ? DiskPrefix + s.Disk : s.Dataset ?? Plain;
 
-    string? StorageHelp => Existing is not null && Current(Existing) != storage
+    string? FsType => storage.StartsWith(DiskPrefix, StringComparison.Ordinal) ? DiskFs.GetValueOrDefault(storage[DiskPrefix.Length..]) : null;
+    bool AclAllowed => Rules.SupportsAdvancedPermissions(FsType);
+
+    /// <summary>Le partage est (ou sera) en permissions avancées.</summary>
+    bool AclMode => AclAllowed && (current is null || acl);
+
+    string? StorageHelp => current is not null && Current(current) != storage
         ? L["Existing files are not moved: copy them to the new location."]
         : Datasets.Count == 0 && Disks.Count == 0 ? L["Create a dataset in the “Datasets” page, or mount a disk in the “Disks” page, to choose it here."] : null;
     IReadOnlyCollection<string> selected = [];
@@ -104,7 +139,9 @@
 
     protected override void OnInitialized()
     {
+        tab = StartTab;
         if (Existing is null) return;
+        current = Existing;
         name = Existing.Name;
         comment = Existing.Comment;
         readOnly = Existing.ReadOnly;
@@ -115,12 +152,24 @@
         if (Existing.Ftp is { } ftp) (ftpOn, ftpRo, ftpUsers) = (true, ftp.ReadOnly, ftp.Users.ToList());
     }
 
+    void Close()
+    {
+        if (changed) Dialog.Close(DialogResult.Ok(current?.Name ?? name.Trim()));
+        else Dialog.Cancel();
+    }
+
     async Task Save()
     {
         error = null;
         busy = true;
         try
         {
+            if (nfsOn && nfsClients.Split([' ', ',', ';', '\n', '\r', '\t'], StringSplitOptions.RemoveEmptyEntries).Length == 0)
+            {
+                tab = 0;
+                throw new AgentException(Msg.F("NFS on share “{0}” needs at least one client.", name.Trim()));
+            }
+            var useAcl = AclAllowed && acl;
             if (storage.StartsWith(NewPrefix, StringComparison.Ordinal))
             {
                 if (Rules.ValidateShareName(name.Trim()) is { } bad) throw new AgentException(bad);
@@ -128,12 +177,25 @@
                 await Ops.CreateDatasetAsync(dataset);
                 created = storage = dataset; // si l'enregistrement du partage échoue, on ne recrée pas le jeu de données
             }
-            await Ops.SaveShareAsync(new ShareDef(name.Trim(), comment.Trim(), readOnly, selected.OrderBy(u => u, StringComparer.Ordinal).ToList(), storage == Plain || storage.StartsWith(DiskPrefix, StringComparison.Ordinal) ? null : storage, acl,
+            var def = new ShareDef(name.Trim(), comment.Trim(), readOnly, selected.OrderBy(u => u, StringComparer.Ordinal).ToList(), storage == Plain || storage.StartsWith(DiskPrefix, StringComparison.Ordinal) ? null : storage, useAcl,
                 nfsOn ? new NfsExport(nfsClients.Split([' ', ',', ';', '\n', '\r', '\t'], StringSplitOptions.RemoveEmptyEntries).ToList(), nfsRo) : null,
                 ftpOn ? new FtpAccess(ftpUsers.OrderBy(u => u, StringComparer.Ordinal).ToList(), ftpRo) : null,
-                storage.StartsWith(DiskPrefix, StringComparison.Ordinal) ? storage[DiskPrefix.Length..] : null), isNew: Existing is null);
-            Dialog.Close(DialogResult.Ok(name.Trim()));
-            return;
+                storage.StartsWith(DiskPrefix, StringComparison.Ordinal) ? storage[DiskPrefix.Length..] : null);
+            var isNew = current is null;
+            await Ops.SaveShareAsync(def, isNew);
+            current = def;
+            acl = useAcl;
+            changed = true;
+            if (isNew && useAcl)
+            {
+                // Un nouveau partage n'est accessible à personne : on enchaîne sur ses permissions, sans fermer.
+                tab = 1;
+            }
+            else
+            {
+                Dialog.Close(DialogResult.Ok(def.Name));
+                return;
+            }
         }
         catch (AgentException e) { error = L.Translate(e.Message); }
         catch (HttpRequestException) { error = L["Agent unreachable."]; }

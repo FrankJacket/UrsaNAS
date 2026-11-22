@@ -15,7 +15,7 @@
     <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Sync" OnClick="Reapply">@L["Reapply"]</MudButton>
 </MudStack>
 <MudTable Items="shares" Class="desk-grow" Hover="true" Dense="true" Loading="@(!loaded)">
-    <HeaderContent><MudTh>@L["Name"]</MudTh><MudTh>@L["Folder"]</MudTh><MudTh>@L["Access"]</MudTh><MudTh>@L["Protocols"]</MudTh><MudTh>@L["Users"]</MudTh><MudTh>@L["Description"]</MudTh><MudTh></MudTh></HeaderContent>
+    <HeaderContent><MudTh>@L["Name"]</MudTh><MudTh>@L["Folder"]</MudTh><MudTh>@L["Access"]</MudTh><MudTh>@L["Protocols"]</MudTh><MudTh>@L["Description"]</MudTh><MudTh></MudTh></HeaderContent>
     <RowTemplate>
         <MudTd>@context.Name</MudTd>
         <MudTd>
@@ -30,7 +30,7 @@
             }
         </MudTd>
         <MudTd>
-            @if (context.Acl) { <MudChip T="string" Size="Size.Small" Color="Color.Primary" OnClick="() => OpenPermissions(context)">@L["Advanced permissions"]</MudChip> }
+            @if (context.Acl) { <MudChip T="string" Size="Size.Small" Color="Color.Primary" OnClick="() => Edit(context, 1)">@L["Advanced permissions"]</MudChip> }
             else { <MudChip T="string" Size="Size.Small" Color="@(context.ReadOnly ? Color.Default : Color.Success)">@(context.ReadOnly ? L["Read-only"] : L["Read/write"])</MudChip> }
         </MudTd>
         <MudTd>
@@ -38,7 +38,6 @@
             @if (context.Nfs is not null) { <MudChip T="string" Size="Size.Small" Color="Color.Info">NFS</MudChip> }
             @if (context.Ftp is not null) { <MudChip T="string" Size="Size.Small" Color="Color.Info">FTP</MudChip> }
         </MudTd>
-        <MudTd>@(context.Acl ? "—" : string.Join(", ", context.ValidUsers))</MudTd>
         <MudTd>@context.Comment</MudTd>
         <MudTd Style="text-align:right">
             <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Edit" OnClick="() => Edit(context)">@L["Edit"]</MudButton>
@@ -80,7 +79,7 @@
     string PathOf(ShareDef s) =>
         s.Disk ?? (s.Dataset is null ? $"/srv/nas/{s.Name}" : mountpoints.GetValueOrDefault(s.Dataset, s.Dataset));
 
-    static readonly DialogOptions Options = new() { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true, BackdropClick = false };
+    static readonly DialogOptions Options = new() { MaxWidth = MaxWidth.Large,FullWidth = true, CloseButton = true, BackdropClick = false };
 
     async Task<IReadOnlyList<string>?> UserNames()
     {
@@ -88,19 +87,11 @@
         catch (HttpRequestException) { Snack.Add(L["Agent unreachable."], Severity.Error); return null; }
     }
 
-    /// <summary>Les permissions de la racine du partage, dans leur dialogue (comme le bouton « Permissions » du gestionnaire de fichiers) : pas de changement de page.</summary>
-    async Task OpenPermissions(ShareDef s)
-    {
-        var parameters = new DialogParameters<FolderPermissionsDialog> { { x => x.Share, s.Name }, { x => x.Path, "" } };
-        await (await Dialogs.ShowAsync<FolderPermissionsDialog>(L["Permissions of {0}", "/" + s.Name], parameters, BigOptions)).Result;
-    }
-
-    static readonly DialogOptions BigOptions = new() { MaxWidth = MaxWidth.Large, FullWidth = true, CloseButton = true, BackdropClick = false };
-
     async Task Add() => await ShowDialog(null, L["New share"]);
-    async Task Edit(ShareDef s) => await ShowDialog(s, L["Edit {0}", s.Name]);
+    /// <summary>Un seul dialogue, en onglets : <paramref name="tab"/> 0 = réglages, 1 = permissions.</summary>
+    async Task Edit(ShareDef s, int tab = 0) => await ShowDialog(s, L["Edit {0}", s.Name], tab);
 
-    async Task ShowDialog(ShareDef? existing, string title)
+    async Task ShowDialog(ShareDef? existing, string title, int startTab = 0)
     {
         if (await UserNames() is not { } users) return;
         // Seuls les jeux de données (pas la racine d'un pool) que aucun autre partage n'utilise.
@@ -108,30 +99,27 @@
         var free = (await LoadDatasetsAsync()).Select(d => d.Name).Where(n => n.Contains('/') && !taken.Contains(n)).ToList();
         var takenDisks = shares.Where(s => s.Disk is not null && s.Name != existing?.Name).Select(s => s.Disk!).ToHashSet();
         var freeDisks = new List<string>();
+        var diskFs = new Dictionary<string, string?>();
         try
         {
-            freeDisks = (await Agent.GetDisksAsync()).SelectMany(d => d.MountPoints.Concat(d.Partitions?.SelectMany(p => p.MountPoints) ?? []))
+            var disks = await Agent.GetDisksAsync();
+            freeDisks = disks.SelectMany(d => d.MountPoints.Concat(d.Partitions?.SelectMany(p => p.MountPoints) ?? []))
                 .Where(m => Rules.ValidateShareDisk(m) is null && !takenDisks.Contains(m)).Distinct().Order().ToList();
+            foreach (var m in freeDisks) diskFs[m] = Rules.FsTypeOfMount(disks, m);
         }
         catch (HttpRequestException) { }
         IReadOnlyList<string> pools = [];
         try { pools = (await Agent.GetPoolsAsync()).Select(p => p.Name).ToList(); }
         catch (AgentException) { }
         catch (HttpRequestException) { }
-        var parameters = new DialogParameters<ShareDialog> { { x => x.Existing, existing }, { x => x.Users, users }, { x => x.Datasets, free }, { x => x.Pools, pools }, { x => x.Disks, freeDisks } };
-        var dialog = await Dialogs.ShowAsync<ShareDialog>(title, parameters, Options);
-        if (await dialog.Result is { Canceled: false } result)
+        var parameters = new DialogParameters<ShareDialog>
         {
-            Snack.Add(L["Share saved."], Severity.Success);
-            await LoadAsync();
-            // Un nouveau partage n'est accessible à personne : on enchaîne sur ses permissions.
-            if (existing is null && result.Data is string created)
-            {
-                var permParameters = new DialogParameters<FolderPermissionsDialog> { { x => x.Share, created }, { x => x.Path, "" } };
-                var big = new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true, CloseButton = true, BackdropClick = false };
-                await (await Dialogs.ShowAsync<FolderPermissionsDialog>(L["Permissions of {0}", "/" + created], permParameters, big)).Result;
-            }
-        }
+            { x => x.Existing, existing }, { x => x.Users, users }, { x => x.Datasets, free }, { x => x.Pools, pools }, { x => x.Disks, freeDisks },
+            { x => x.DiskFs, diskFs }, { x => x.StartTab, startTab },
+        };
+        var dialog = await Dialogs.ShowAsync<ShareDialog>(title, parameters, Options);
+        if (await dialog.Result is { Canceled: false }) Snack.Add(L["Share saved."], Severity.Success);
+        await LoadAsync(); // le dialogue peut avoir enregistré puis été fermé par la croix
     }
 
     async Task Delete(ShareDef s)

@@ -8,7 +8,7 @@
             <MudSpacer />
             @if (Items.Count > SearchFrom)
             {
-                <MudTextField T="string" @bind-Value="search" Placeholder="@L["Search"]" Immediate="true" Dense="true" Margin="Margin.Dense"
+                <MudTextField T="string" @bind-Value="search" Placeholder="@L["Search"]" Immediate="true" Margin="Margin.Dense"
                               Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" IconSize="Size.Small" Style="max-width:200px" />
             }
         </ToolBarContent>
