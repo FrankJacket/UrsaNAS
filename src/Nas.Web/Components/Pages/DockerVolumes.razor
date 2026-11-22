@@ -15,7 +15,8 @@
     <MudAlert Severity="Severity.Error" Class="mb-4">@error <MudLink Href="@(DockNav is null ? "/docker" : null)" OnClick="@(() => DockNav?.Go("status"))">@L["Docker status"]</MudLink></MudAlert>
 }
 
-<MudText Typo="Typo.h5" Class="mb-2">@L["Volumes"]</MudText>
+<MudTabs Class="desk-grow desk-tabs" Elevation="0" TabPanelsClass="pt-4">
+<MudTabPanel Text="@L["Volumes"]">
 <MudAlert Severity="Severity.Info" Class="mb-4">
     @L["A Docker volume is stored in Docker's own folder. To use a folder of the NAS instead, give its path when you start the container or in your stack."]
 </MudAlert>
@@ -32,8 +33,9 @@
     </RowTemplate>
     <NoRecordsContent><MudText Class="pa-4">@L["No volumes."]</MudText></NoRecordsContent>
 </MudTable>
+</MudTabPanel>
 
-<MudText Typo="Typo.h5" Class="mb-2">@L["Networks"]</MudText>
+<MudTabPanel Text="@L["Networks"]">
 <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="CreateNetwork" Class="mb-4" Disabled="busy">@L["Create a network"]</MudButton>
 @if (loaded && networks.Count == 0)
 {
@@ -74,6 +76,8 @@
         </MudExpansionPanel>
     }
 </MudExpansionPanels>
+</MudTabPanel>
+</MudTabs>
 
 @code {
     /// <summary>Navigation interne de la fenêtre Docker ; absente quand la page est ouverte seule.</summary>

@@ -8,6 +8,10 @@ public sealed record Wallpaper(string Id, string Name, string Css)
     public const string DefaultId = "default";
     public const string CustomId = "custom";
 
+    /// <summary>Pas de fond d'écran : le bureau prend la couleur de fond unie du thème (clair ou sombre).</summary>
+    public const string NoneId = "none";
+    public const string NoneCss = "var(--mud-palette-background)";
+
     public static readonly IReadOnlyList<Wallpaper> Builtin =
     [
         new("aurora", "Aurora", "radial-gradient(at 20% 15%, #3ddc97 0, transparent 45%), radial-gradient(at 80% 25%, #5b6cff 0, transparent 50%), radial-gradient(at 50% 90%, #8e2de2 0, transparent 55%), #0b1026"),

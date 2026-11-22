@@ -131,6 +131,12 @@ app.MapPost("/downloads/config-backup", async (ExportConfigRequest req, ConfigBa
     }
     catch (AgentException e) { return Results.BadRequest(e.Message); }
 });
+app.MapPost("/downloads/audit-csv", async (Repo repo, HttpContext ctx) =>
+{
+    var bytes = AuditCsv.Bytes(await repo.GetAllAuditAsync());
+    await repo.AuditAsync(ctx.User.Identity?.Name ?? "unknown", "Audit log downloaded");
+    return Results.Bytes(bytes, "text/csv; charset=utf-8", $"ursanas-audit-{DateTime.Now:yyyyMMdd-HHmm}.csv");
+});
 app.MapGet("/vm-console/{name}", (string name, HttpContext ctx, AgentClient agent) => VmConsoleProxy.HandleAsync(name, ctx, agent));
 app.MapGet("/terminal-ws", (HttpContext ctx, IConfiguration cfg, Repo repo) => TerminalProxy.HandleAsync(ctx, cfg, repo));
 app.MapRazorComponents<App>().AddInteractiveServerRenderMode();

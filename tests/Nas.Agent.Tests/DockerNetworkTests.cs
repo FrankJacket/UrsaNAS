@@ -205,3 +205,42 @@ public class StackValidationTests
         Assert.Empty(r.Calls);
     }
 }
+
+public class AuditCsvTests
+{
+    static Nas.Web.Data.AuditRow Row(string actor, string action, string? detail, int minute = 0) =>
+        new() { Actor = actor, Action = action, Detail = detail, At = new DateTime(2026, 11, 22, 14, minute, 5, DateTimeKind.Unspecified) };
+
+    [Fact]
+    public void Le_CSV_a_un_en_tete_des_dates_ISO_en_UTC_et_des_fins_de_ligne_CRLF()
+    {
+        var csv = Nas.Web.Data.AuditCsv.Build([Row("alice", "Share created", "docs"), Row("system", "Alert", null, 1)]);
+        Assert.Equal("Date (UTC),Author,Action,Detail\r\n" +
+                     "2026-11-22T14:00:05Z,alice,Share created,docs\r\n" +
+                     "2026-11-22T14:01:05Z,system,Alert,\r\n", csv);
+    }
+
+    [Fact]
+    public void Les_virgules_guillemets_et_retours_a_la_ligne_sont_proteges()
+    {
+        var csv = Nas.Web.Data.AuditCsv.Build([Row("a", "x", "un, deux \"trois\"\nquatre")]);
+        Assert.Contains("\"un, deux \"\"trois\"\"\nquatre\"", csv);
+    }
+
+    [Theory]
+    [InlineData("=1+1", "'=1+1")]
+    [InlineData("+cmd", "'+cmd")]
+    [InlineData("-2", "'-2")]
+    [InlineData("@SUM(A1)", "'@SUM(A1)")]
+    [InlineData("normal", "normal")]
+    public void Un_texte_ne_peut_pas_devenir_une_formule_de_tableur(string detail, string expected) =>
+        Assert.EndsWith("," + expected + "\r\n", Nas.Web.Data.AuditCsv.Build([Row("a", "x", detail)]));
+
+    [Fact]
+    public void Le_fichier_est_en_UTF8_avec_marque_d_ordre_des_octets()
+    {
+        var bytes = Nas.Web.Data.AuditCsv.Bytes([Row("é", "x", null)]);
+        Assert.Equal([0xEF, 0xBB, 0xBF], bytes[..3]);
+        Assert.Contains("é", System.Text.Encoding.UTF8.GetString(bytes[3..]));
+    }
+}

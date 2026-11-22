@@ -67,6 +67,20 @@ public class Repo(Db db)
             "SELECT Id,At,Actor,Action,Detail FROM AuditLog ORDER BY Id DESC LIMIT @limit", new { limit })).ToList();
     }
 
+    /// <summary>Tout le journal, du plus ancien au plus récent (export).</summary>
+    public async Task<List<AuditRow>> GetAllAuditAsync()
+    {
+        using var c = db.Open();
+        return (await c.QueryAsync<AuditRow>("SELECT Id,At,Actor,Action,Detail FROM AuditLog ORDER BY Id")).ToList();
+    }
+
+    /// <summary>Supprime toutes les entrées du journal ; renvoie leur nombre.</summary>
+    public async Task<int> ClearAuditAsync()
+    {
+        using var c = db.Open();
+        return await c.ExecuteAsync("DELETE FROM AuditLog");
+    }
+
     // ---- Partages : définition voulue ; l'agent en fabrique la configuration Samba
     public async Task<List<ShareDef>> GetSharesAsync()
     {
@@ -201,6 +215,16 @@ public class Repo(Db db)
         using var c = db.Open();
         return (await c.QueryAsync<AlertRow>(
             "SELECT Id,Code,Severity,Title,Detail,RaisedAt,ResolvedAt FROM Alerts ORDER BY Id DESC LIMIT @limit", new { limit })).ToList();
+    }
+
+    /// <summary>
+    /// Supprime l'historique : les alertes résolues. Les alertes actives restent, car le problème existe toujours (les supprimer les ferait
+    /// rouvrir au contrôle suivant, avec un nouveau courriel). Renvoie le nombre d'alertes supprimées.
+    /// </summary>
+    public async Task<int> ClearAlertHistoryAsync()
+    {
+        using var c = db.Open();
+        return await c.ExecuteAsync("DELETE FROM Alerts WHERE ResolvedAt IS NOT NULL");
     }
 
     public async Task RaiseAlertAsync(Candidate a)

@@ -28,6 +28,10 @@
         <span class="wall-thumb" style="background:linear-gradient(160deg, color-mix(in srgb, var(--mud-palette-primary) 35%, #0b0b1a), var(--mud-palette-primary))"></span>
         <span class="pre-name">@L["Theme color"]</span>
     </button>
+    <button type="button" class="wall-card @(Theme.Wallpaper == Wallpaper.NoneId ? "selected" : null)" @onclick="() => ChooseWall(Wallpaper.NoneId)">
+        <span class="wall-thumb" style="background:@Wallpaper.NoneCss"></span>
+        <span class="pre-name">@L["None"]</span>
+    </button>
     @foreach (var w in Wallpaper.Builtin)
     {
         var wall = w;

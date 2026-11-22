@@ -4,6 +4,8 @@
 @inject NasOperations Ops
 @inject AlertMonitor Monitor
 @inject ISnackbar Snack
+@inject AuthenticationStateProvider Auth
+@inject IDialogService Dialogs
 
 @if (!InWindow) { <MudText Typo="Typo.h4" Class="mb-4">@L["Alerts"]</MudText> }
 
@@ -26,6 +28,10 @@
 
 <MudTabs Class="desk-grow desk-tabs">
     <MudTabPanel Text="@L["History"]">
+        <MudStack Row="true" Spacing="2" Class="mb-2" AlignItems="AlignItems.Center">
+            <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.DeleteSweep" OnClick="ClearHistory" Disabled="@(clearing || !history.Any(a => a.ResolvedAt is not null))">@L["Clear the history"]</MudButton>
+            <MudText Typo="Typo.caption">@L["Deletes the alerts that are resolved. Current alerts stay until the problem is gone."]</MudText>
+        </MudStack>
         <MudTable Items="history" Hover="true" Dense="true" Class="desk-grow">
             <HeaderContent><MudTh>@L["Opened"]</MudTh><MudTh>@L["Severity"]</MudTh><MudTh>@L["Alert"]</MudTh><MudTh>@L["Resolved"]</MudTh></HeaderContent>
             <RowTemplate>
@@ -148,6 +154,25 @@
         var bad = parts.FirstOrDefault(a => !MailRules.IsEmail(a));
         toValid = bad is null;
         return bad is null ? null : L["Invalid address: {0}.", bad];
+    }
+
+    bool clearing;
+
+    async Task ClearHistory()
+    {
+        var ok = await Dialogs.ShowMessageBoxAsync(L["Clear the alert history?"],
+            L["The resolved alerts are deleted for good. Current alerts are kept."], yesText: L["Clear the history"], cancelText: L["Cancel"]);
+        if (ok != true) return;
+        clearing = true;
+        try
+        {
+            var count = await Repo.ClearAlertHistoryAsync();
+            var actor = (await Auth.GetAuthenticationStateAsync()).User.Identity?.Name ?? "unknown";
+            await Repo.AuditAsync(actor, "Alert history cleared", Msg.F("{0} alerts deleted", count));
+            Snack.Add(L["Alert history cleared."], Severity.Success);
+            await LoadAsync();
+        }
+        finally { clearing = false; }
     }
 
     async Task CheckNow()
