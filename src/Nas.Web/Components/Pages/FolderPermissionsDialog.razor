@@ -135,7 +135,7 @@
     {
         var parameters = new DialogParameters<AclRuleDialog>
         {
-            { x => x.Existing, existing }, { x => x.Users, users }, { x => x.Groups, groups.Select(g => g.Name).ToList() },
+            { x => x.Existing, existing }, { x => x.Users, users }, { x => x.Groups, groups.Select(g => g.Name).Where(n => n != AclRules.AdminsGroup).ToList() },
         };
         var dialog = await Dialogs.ShowAsync<AclRuleDialog>(existing is null ? L["Add a permission"] : L["Edit a permission"], parameters, RuleOptions);
         if (await dialog.Result is { Canceled: false, Data: List<AclRule> added })

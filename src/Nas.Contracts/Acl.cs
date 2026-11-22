@@ -69,9 +69,9 @@ public sealed record SetGroupMembersRequest(IReadOnlyList<string> Members);
 public sealed record CreateGroupRequest(string Name, IReadOnlyList<string> Members);
 
 /// <summary>Sous-dossiers directs d'un dossier d'un partage, pour l'arborescence de l'interface.</summary>
-public sealed record FolderEntry(string Name, DateTime ModifiedUtc);
+public sealed record FolderEntry(string Name, DateTime ModifiedUtc, DateTime? CreatedUtc = null, string? Owner = null);
 
-public sealed record FileEntry(string Name, long Size, DateTime ModifiedUtc);
+public sealed record FileEntry(string Name, long Size, DateTime ModifiedUtc, DateTime? CreatedUtc = null, string? Owner = null);
 
 /// <summary>Contenu d'un dossier : sous-dossiers, et fichiers si on les a demandés.</summary>
 public sealed record FolderListing(string Path, IReadOnlyList<FolderEntry> Folders, IReadOnlyList<FileEntry>? Files = null);

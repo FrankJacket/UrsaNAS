@@ -26,10 +26,10 @@ public sealed class DiskFilesService(BackupService backup)
         var cur = path.Length == 0 ? root : AclService.Dir(root, path);
         var info = new DirectoryInfo(cur);
         var folders = info.EnumerateDirectories().Where(d => d.LinkTarget is null && AclRules.ValidSegment(d.Name))
-            .OrderBy(d => d.Name, StringComparer.OrdinalIgnoreCase).Select(d => new FolderEntry(d.Name, d.LastWriteTimeUtc)).ToList();
+            .OrderBy(d => d.Name, StringComparer.OrdinalIgnoreCase).Select(d => new FolderEntry(d.Name, d.LastWriteTimeUtc, d.CreationTimeUtc)).ToList();
         var files = withFiles
             ? info.EnumerateFiles().Where(f => f.LinkTarget is null && AclRules.ValidSegment(f.Name))
-                .OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase).Select(f => new FileEntry(f.Name, f.Length, f.LastWriteTimeUtc)).ToList()
+                .OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase).Select(f => new FileEntry(f.Name, f.Length, f.LastWriteTimeUtc, f.CreationTimeUtc)).ToList()
             : null;
         return new FolderListing(path, folders, files);
     }

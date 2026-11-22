@@ -69,7 +69,7 @@ public static partial class Rules
     public static string? ValidateUserName(string? name)
     {
         if (string.IsNullOrEmpty(name) || !UserNameRegex().IsMatch(name))
-            return Msg.F("Invalid user name: 1 to 32 lowercase characters (letters, digits, _ and -), no spaces.");
+            return Msg.F("Invalid user name: 1 to 32 characters (letters, digits, _ and -), no spaces.");
         if (ReservedUsers.Contains(name)) return Msg.F("“{0}” is a reserved name.", name);
         return null;
     }

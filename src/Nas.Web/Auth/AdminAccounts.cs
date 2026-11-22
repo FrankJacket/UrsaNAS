@@ -121,7 +121,7 @@ public sealed class AdminAccounts(Repo repo, IUserDirectory users, TimeProvider?
     /// <summary>Crée le premier administrateur : un utilisateur du NAS membre du groupe « admins ».</summary>
     public async Task CreateFirstAsync(string name, string password, CancellationToken ct = default)
     {
-        name = (name ?? "").Trim();
+        name = (name ?? "").Trim().ToLowerInvariant();
         if (Rules.ValidateUserName(name) is { } e1) throw new AgentException(e1);
         if (Rules.ValidatePassword(password) is { } e2) throw new AgentException(e2);
         if ((await users.ListAsync(ct)).Any(u => u.Name == name))

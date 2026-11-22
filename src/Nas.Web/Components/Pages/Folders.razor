@@ -43,7 +43,7 @@ else if (loaded)
     {
     <MudPaper Elevation="0" Class="explorer desk-grow">
         <div class="ex-row ex-head">
-            <div class="ex-name">@L["Name"]</div><div class="ex-mod">@L["Modified"]</div><div class="ex-size">@L["Size"]</div><div class="ex-perm">@L["Permissions"]</div>
+            <div class="ex-name">@L["Name"]</div><div class="ex-mod">@L["Created on"]</div><div class="ex-mod">@L["Modified"]</div><div class="ex-size">@L["Size"]</div><div class="ex-owner">@L["Owner"]</div><div class="ex-perm">@L["Permissions"]</div>
         </div>
         <MudTreeView @key="treeKey" T="Node" Items="@TopItems()" ServerData="LoadChildren" SelectedValue="selected" SelectedValueChanged="Select"
                      ExpandOnDoubleClick="true" Hover="true" Dense="true" Class="ex-tree">
@@ -54,8 +54,10 @@ else if (loaded)
                         @{ var node = item.Value!; var st = St(node); }
                         <div class="ex-row" @oncontextmenu="e => Context(e, node)" @oncontextmenu:preventDefault="true">
                             <div class="ex-name">@node.Name</div>
+                            <div class="ex-mod">@(node.Created is { } c ? Fmt.Dt(c) : "")</div>
                             <div class="ex-mod">@(node.Modified is { } m ? Fmt.Dt(m) : "")</div>
                             <div class="ex-size">@(node.IsFile ? Fmt.Size(node.Size, L.Lang) : "")</div>
+                            <div class="ex-owner" title="@node.Owner">@OwnerLabel(node.Owner)</div>
                             <div class="ex-perm">
                                 @if (st is { Inherit: false }) { <MudChip T="string" Size="Size.Small" Color="Color.Warning" Icon="@Icons.Material.Filled.LinkOff">@L["Inheritance off"]</MudChip> }
                                 @if (st is { Rules.Count: > 0 }) { <MudChip T="string" Size="Size.Small" Icon="@Icons.Material.Filled.Lock">@L["{0} permission(s)", st.Rules.Count]</MudChip> }
@@ -95,13 +97,14 @@ else if (loaded)
 <style>
     .explorer { border: 1px solid var(--mud-palette-lines-default); border-radius: 12px; overflow: auto; max-height: calc(100vh - 280px); }
     .desk-body .explorer { max-height: none; }
-    .ex-row { display: grid; grid-template-columns: minmax(160px, 1fr) 170px 100px 280px; align-items: center; width: 100%; user-select: none; }
+    .ex-row { display: grid; grid-template-columns: minmax(160px, 1fr) 150px 150px 90px 110px 240px; align-items: center; width: 100%; user-select: none; }
     .ex-head { padding: 6px 12px 6px 40px; font-weight: 500; position: sticky; top: 0; z-index: 1; background: var(--mud-palette-surface); border-bottom: 1px solid var(--mud-palette-lines-default); }
     .ex-tree .mud-treeview-item-content { padding-right: 12px; }
     .ex-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .ex-size { text-align: right; padding-right: 16px; }
+    .ex-owner { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .ex-perm { display: flex; gap: 6px; flex-wrap: wrap; }
-    @@media (max-width: 800px) { .ex-row { grid-template-columns: 1fr; } .ex-mod, .ex-size, .ex-perm { display: none; } }
+    @@media (max-width: 800px) { .ex-row { grid-template-columns: 1fr; } .ex-mod, .ex-size, .ex-owner, .ex-perm { display: none; } }
 </style>
 
 @code {
@@ -113,7 +116,8 @@ else if (loaded)
     sealed class Node
     {
         public string Place = "", Path = "", Name = "";
-        public DateTime? Modified;
+        public DateTime? Modified, Created;
+        public string? Owner;
         public int Depth;
         public bool Loaded, IsFile;
         public long Size;
@@ -231,9 +235,9 @@ else if (loaded)
             var listing = await Agent.GetFoldersAsync(n.Place, n.Path, files: true);
             var old = n.Children.Where(c => !c.IsFile).ToDictionary(c => c.Name);
             n.Children = listing.Folders.Select(f => old.TryGetValue(f.Name, out var o) ? Touch(o, f)
-                : new Node { Place = n.Place, Name = f.Name, Path = n.Path.Length == 0 ? f.Name : n.Path + "/" + f.Name, Depth = n.Depth + 1, Modified = f.ModifiedUtc }).ToList();
+                : new Node { Place = n.Place, Name = f.Name, Path = n.Path.Length == 0 ? f.Name : n.Path + "/" + f.Name, Depth = n.Depth + 1, Modified = f.ModifiedUtc, Created = f.CreatedUtc, Owner = f.Owner }).ToList();
             n.Children.AddRange((listing.Files ?? []).Select(f => new Node { Place = n.Place, Name = f.Name, Path = n.Path.Length == 0 ? f.Name : n.Path + "/" + f.Name,
-                Depth = n.Depth + 1, Modified = f.ModifiedUtc, IsFile = true, Size = f.Size, Loaded = true }));
+                Depth = n.Depth + 1, Modified = f.ModifiedUtc, Created = f.CreatedUtc, Owner = f.Owner, IsFile = true, Size = f.Size, Loaded = true }));
             n.Data.Children = n.Children.Select(c => c.Data).ToList();
             n.Loaded = true;
             error = null;
@@ -242,7 +246,10 @@ else if (loaded)
         catch (HttpRequestException) { Snack.Add(L["Agent unreachable."], Severity.Error); }
     }
 
-    static Node Touch(Node n, FolderEntry f) { n.Modified = f.ModifiedUtc; return n; }
+    static Node Touch(Node n, FolderEntry f) { n.Modified = f.ModifiedUtc; n.Created = f.CreatedUtc; n.Owner = f.Owner; return n; }
+
+    /// <summary>Le compte de service de l'interface crée les dossiers faits depuis le gestionnaire : on l'affiche sous un nom lisible.</summary>
+    string OwnerLabel(string? owner) => owner == "ursanas-acl" ? L["Web interface"] : owner ?? "";
 
     async Task Reload(Node n)
     {

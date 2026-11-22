@@ -7,7 +7,7 @@
         }
         <MudText Typo="Typo.subtitle2">@L["Object"]</MudText>
         <MudStack Row="true" Spacing="2" Wrap="Wrap.Wrap">
-            <NamePicker Title="@L["Groups"]" Items="Groups" @bind-Selected="selGroups" Empty="@L["No group yet."]" Height="180px" Style="min-width:220px;flex:1" />
+            <NamePicker Title="@L["Groups"]" Items="Groups" @bind-Selected="selGroups" Display="GroupLabel" HelperText="@L["Administrators already have full access everywhere."]" Empty="@L["No group yet."]" Height="180px" Style="min-width:220px;flex:1" />
             <NamePicker Title="@L["Users"]" Items="Users" @bind-Selected="selUsers" Height="180px" Style="min-width:220px;flex:1" />
         </MudStack>
 
@@ -77,6 +77,7 @@
     [Parameter, EditorRequired] public IReadOnlyList<string> Groups { get; set; } = [];
 
     IReadOnlyCollection<string> selUsers = [], selGroups = [];
+    static string GroupLabel(string name) => name == AclRules.AllUsersGroup ? "AllUsers" : name;
     bool allow = true, firstLevel;
     AclRights rights = AclRights.Read;
     AclApply apply = AclApply.Everything;

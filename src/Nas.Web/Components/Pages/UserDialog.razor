@@ -7,7 +7,7 @@
         {
             <MudAlert Severity="Severity.Error" Class="mb-3">@error</MudAlert>
         }
-        <MudTextField @bind-Value="name" Label="@L["User name"]" HelperText="@L["Lowercase letters, digits, _ and -"]" Immediate="true" Disabled="busy" AutoFocus="true" />
+        <MudTextField @bind-Value="name" Label="@L["User name"]" HelperText="@L["Letters, digits, _ and - (saved in lowercase)"]" Immediate="true" Disabled="busy" AutoFocus="true" />
         <MudTextField @bind-Value="fullName" Label="@L["Full name"]" MaxLength="NasOperations.MaxFullNameLength" Immediate="true" Disabled="busy" />
         <MudTextField @bind-Value="email" Label="@L["Email address"]" InputMode="InputMode.email" Immediate="true" Disabled="busy" />
         <MudTextField @bind-Value="password" Label="@L["Password"]" InputType="InputType.Password" HelperText="@L["At least {0} characters", Rules.MinPasswordLength]" Disabled="busy" />

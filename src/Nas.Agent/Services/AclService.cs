@@ -250,14 +250,27 @@ public sealed class AclService(ICommandRunner run, UserService users, GroupServi
         var root = await SharePathAsync(share, ct);
         var dir = path.Length == 0 ? root : Path.Combine(root, path);
         if (!Directory.Exists(dir) || new DirectoryInfo(dir).LinkTarget is not null) throw new OperationException(Msg.F("Invalid folder path."));
+        var owners = await OwnersAsync(dir, ct);
+        string? OwnerOf(string name) => owners.GetValueOrDefault(name);
         var entries = new DirectoryInfo(dir).EnumerateDirectories()
             .Where(d => d.LinkTarget is null && AclRules.ValidSegment(d.Name))
-            .OrderBy(d => d.Name, StringComparer.OrdinalIgnoreCase).Select(d => new FolderEntry(d.Name, d.LastWriteTimeUtc)).ToList();
+            .OrderBy(d => d.Name, StringComparer.OrdinalIgnoreCase).Select(d => new FolderEntry(d.Name, d.LastWriteTimeUtc, d.CreationTimeUtc, OwnerOf(d.Name))).ToList();
         var files = withFiles
             ? new DirectoryInfo(dir).EnumerateFiles().Where(f => f.LinkTarget is null && AclRules.ValidSegment(f.Name))
-                .OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase).Select(f => new FileEntry(f.Name, f.Length, f.LastWriteTimeUtc)).ToList()
+                .OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase).Select(f => new FileEntry(f.Name, f.Length, f.LastWriteTimeUtc, f.CreationTimeUtc, OwnerOf(f.Name))).ToList()
             : null;
         return new FolderListing(path, entries, files);
+    }
+
+    /// <summary>Propriétaire Unix de chaque élément direct d'un dossier (celui qui l'a créé : Samba crée les fichiers au nom de l'utilisateur connecté).</summary>
+    async Task<Dictionary<string, string>> OwnersAsync(string dir, CancellationToken ct)
+    {
+        var owners = new Dictionary<string, string>(StringComparer.Ordinal);
+        var r = await run.RunAsync("find", [dir, "-mindepth", "1", "-maxdepth", "1", "-printf", "%f\t%u\n"], ct: ct);
+        if (r.ExitCode != 0) return owners;
+        foreach (var line in r.StdOut.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            if (line.LastIndexOf('\t') is var i and > 0) owners[line[..i]] = line[(i + 1)..];
+        return owners;
     }
 
     /// <summary>Crée un dossier par Samba (compte de service) : le serveur lui applique lui-même l'héritage du parent.</summary>

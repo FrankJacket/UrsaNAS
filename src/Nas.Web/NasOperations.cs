@@ -34,6 +34,7 @@ public class NasOperations(AgentClient agent, Repo repo, IMailSender mail, Authe
     {
         fullName = fullName.Trim();
         email = email.Trim();
+        name = name.Trim().ToLowerInvariant(); // comptes Linux et Samba : minuscules ; la casse se garde dans le nom complet
         if (Rules.ValidateUserName(name) is { } e1) throw new AgentException(e1);
         if (Rules.ValidatePassword(password) is { } e2) throw new AgentException(e2);
         if (ValidateProfile(fullName, email) is { } e3) throw new AgentException(e3);
@@ -173,6 +174,7 @@ public class NasOperations(AgentClient agent, Repo repo, IMailSender mail, Authe
     // ---- Groupes (groupes Linux préfixés nasg-) et permissions avancées
     public async Task CreateGroupAsync(string name, IReadOnlyList<string> members)
     {
+        name = name.Trim().ToLowerInvariant();
         if (AclRules.ValidateGroupName(name) is { } e) throw new AgentException(e);
         await Audited(() => agent.CreateGroupAsync(new CreateGroupRequest(name, members)), "Group created", name);
     }

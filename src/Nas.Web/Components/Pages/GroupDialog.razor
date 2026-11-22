@@ -7,7 +7,7 @@
         {
             <MudAlert Severity="Severity.Error" Class="mb-3">@error</MudAlert>
         }
-        <MudTextField @bind-Value="name" Label="@L["Group name"]" HelperText="@L["Lowercase letters, digits, _ and -"]" Immediate="true"
+        <MudTextField @bind-Value="name" Label="@L["Group name"]" HelperText="@L["Letters, digits, _ and - (saved in lowercase)"]" Immediate="true"
                       Disabled="@(busy || Existing is not null)" AutoFocus="@(Existing is null)" />
         <NamePicker Class="mt-3" Title="@L["Members"]" Items="Users" @bind-Selected="selected" Disabled="busy"
                     Empty="@L["Create a user first."]" HelperText="@L["Changes apply the next time a member connects."]" />
