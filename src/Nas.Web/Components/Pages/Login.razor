@@ -38,7 +38,7 @@
     {
         form ??= new();
         // Aucun compte : on passe par l'installation plutôt que d'afficher un formulaire qui ne peut pas réussir.
-        if (await Accounts.CountAsync() == 0) Nav.NavigateTo("/setup", forceLoad: true);
+        if (await Accounts.NeedsSetupAsync()) Nav.NavigateTo("/setup", forceLoad: true);
     }
 
     async Task Submit()
@@ -50,18 +50,21 @@
             return;
         }
 
-        var admin = await Accounts.ValidateAsync(form.Name, form.Password);
-        if (admin is null)
+        SignIn admin;
+        try { admin = await Accounts.ValidateAsync(form.Name, form.Password); }
+        catch (AgentException e) { error = L.Translate(e.Message); return; }
+        catch (HttpRequestException) { error = L["Agent unreachable: is the ursanas-agent service running?"]; return; }
+        if (!admin.Ok)
         {
             Throttle.Fail(form.Name, ip);
             await Repo.AuditAsync("unknown", "Sign-in refused", Msg.F("{0} from {1}", Trunc(form.Name), ip));
-            error = L["Incorrect username or password."];
+            error = admin.NotAdmin ? L["This account is not an administrator."] : L["Incorrect username or password."];
             return;
         }
 
         Throttle.Success(form.Name);
         await HttpContext.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, AdminAccounts.PrincipalFor(admin));
-        await Repo.AuditAsync(admin.Name, "Sign-in", ip);
+        await Repo.AuditAsync(admin.Name!, "Sign-in", ip);
         Nav.NavigateTo(LocalUrl.Safe(ReturnUrl), forceLoad: true);
     }
 

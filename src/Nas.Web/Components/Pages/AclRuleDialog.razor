@@ -7,19 +7,8 @@
         }
         <MudText Typo="Typo.subtitle2">@L["Object"]</MudText>
         <MudStack Row="true" Spacing="2" Wrap="Wrap.Wrap">
-            <MudSelect T="string" Label="@L["Groups"]" MultiSelection="true" @bind-SelectedValues="selGroups" Dense="true" Style="min-width:220px;flex:1"
-                       HelperText="@(Groups.Count == 0 ? L["No group yet."] : null)">
-                @foreach (var n in Groups)
-                {
-                    <MudSelectItem T="string" Value="@n">@n</MudSelectItem>
-                }
-            </MudSelect>
-            <MudSelect T="string" Label="@L["Users"]" MultiSelection="true" @bind-SelectedValues="selUsers" Dense="true" Style="min-width:220px;flex:1">
-                @foreach (var n in Users)
-                {
-                    <MudSelectItem T="string" Value="@n">@n</MudSelectItem>
-                }
-            </MudSelect>
+            <NamePicker Title="@L["Groups"]" Items="Groups" @bind-Selected="selGroups" Empty="@L["No group yet."]" Height="180px" Style="min-width:220px;flex:1" />
+            <NamePicker Title="@L["Users"]" Items="Users" @bind-Selected="selUsers" Height="180px" Style="min-width:220px;flex:1" />
         </MudStack>
 
         <MudText Typo="Typo.subtitle2" Class="mt-3">@L["Type"]</MudText>

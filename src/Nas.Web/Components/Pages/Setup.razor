@@ -38,21 +38,23 @@
     protected override async Task OnInitializedAsync()
     {
         form ??= new();
-        if (await Accounts.CountAsync() > 0) Nav.NavigateTo("/login", forceLoad: true);
+        if (!await Accounts.NeedsSetupAsync()) Nav.NavigateTo("/login", forceLoad: true);
     }
 
     async Task Submit()
     {
         var ip = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "?";
-        if (await Accounts.CountAsync() > 0) { Nav.NavigateTo("/login", forceLoad: true); return; }
+        if (!await Accounts.NeedsSetupAsync()) { Nav.NavigateTo("/login", forceLoad: true); return; }
         if (form.Password != form.Confirm) { error = L["The two passwords do not match."]; return; }
 
-        try { await Accounts.CreateAsync(form.Name, form.Password); }
+        try { await Accounts.CreateFirstAsync(form.Name, form.Password); }
         catch (AgentException e) { error = L.Translate(e.Message); return; }
+        catch (HttpRequestException) { error = L["Agent unreachable: is the ursanas-agent service running?"]; return; }
 
-        var admin = (await Accounts.ValidateAsync(form.Name, form.Password))!;
+        var admin = await Accounts.ValidateAsync(form.Name, form.Password);
+        if (!admin.Ok) { error = L["Incorrect username or password."]; return; }
         await HttpContext.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, AdminAccounts.PrincipalFor(admin));
-        await Repo.AuditAsync(admin.Name, "First administrator created", ip);
+        await Repo.AuditAsync(admin.Name!, "First administrator created", ip);
         Nav.NavigateTo("/", forceLoad: true);
     }
 }

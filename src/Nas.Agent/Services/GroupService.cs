@@ -38,6 +38,7 @@ public sealed class GroupService(ICommandRunner run, UserService users)
     public async Task CreateAsync(CreateGroupRequest req, CancellationToken ct = default)
     {
         if (AclRules.ValidateGroupName(req.Name) is { } e) throw new OperationException(e);
+        if (AclRules.IsFixedGroup(req.Name)) throw new OperationException(Msg.F("Group “{0}” already exists.", req.Name));
         await RequireMembersAsync(req.Members, ct);
         if (await GidAsync(req.Name, ct) is not null) throw new OperationException(Msg.F("Group “{0}” already exists.", req.Name));
         Check(await run.RunAsync("groupadd", ["--system", SystemName(req.Name)], ct: ct), "Creating the group");
@@ -48,12 +49,15 @@ public sealed class GroupService(ICommandRunner run, UserService users)
     {
         await RequireExistsAsync(name, ct);
         await RequireMembersAsync(members, ct);
+        if (name == AclRules.AllUsersGroup) throw new OperationException(Msg.F("Everyone is always a member of this group."));
+        if (name == AclRules.AdminsGroup && members.Count == 0) throw new OperationException(Msg.F("Cannot remove the last administrator."));
         // gpasswd -M remplace la liste entière ; une liste vide vide le groupe.
         Check(await run.RunAsync("gpasswd", ["-M", string.Join(',', members.Distinct().OrderBy(m => m, StringComparer.Ordinal)), SystemName(name)], ct: ct), "Changing the members");
     }
 
     public async Task DeleteAsync(string name, CancellationToken ct = default)
     {
+        if (AclRules.IsFixedGroup(name)) throw new OperationException(Msg.F("This group is part of UrsaNAS and cannot be deleted."));
         await RequireExistsAsync(name, ct);
         Check(await run.RunAsync("groupdel", [SystemName(name)], ct: ct), "Deleting the group");
     }

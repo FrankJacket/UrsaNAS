@@ -109,6 +109,24 @@ public class AgentClient(HttpClient http)
     public async Task CreateUserAsync(CreateUserRequest req, CancellationToken ct = default) =>
         await EnsureOkAsync(await http.PostAsJsonAsync("users", req, ct), ct);
 
+    /// <summary>Vérifie le mot de passe contre le compte Samba ; <c>Valid</c> est faux si le compte ou le mot de passe est inconnu.</summary>
+    public async Task<UserSession> VerifyUserAsync(string name, string password, CancellationToken ct = default)
+    {
+        using var r = await http.PostAsJsonAsync("users/verify", new VerifyUserRequest(name, password), ct);
+        await EnsureOkAsync(r, ct);
+        return (await r.Content.ReadFromJsonAsync<UserSession>(ct))!;
+    }
+
+    public async Task<UserSession> GetUserSessionAsync(string name, CancellationToken ct = default)
+    {
+        using var r = await http.GetAsync($"users/{Uri.EscapeDataString(name)}/session", ct);
+        await EnsureOkAsync(r, ct);
+        return (await r.Content.ReadFromJsonAsync<UserSession>(ct))!;
+    }
+
+    public async Task SetUserAdminAsync(string name, bool admin, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PutAsJsonAsync($"users/{Uri.EscapeDataString(name)}/admin", new SetAdminRequest(admin), ct), ct);
+
     public async Task SetPasswordAsync(string name, string password, CancellationToken ct = default) =>
         await EnsureOkAsync(await http.PutAsJsonAsync($"users/{Uri.EscapeDataString(name)}/password", new SetPasswordRequest(password), ct), ct);
 

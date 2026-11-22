@@ -9,13 +9,8 @@
         }
         <MudTextField @bind-Value="name" Label="@L["Group name"]" HelperText="@L["Lowercase letters, digits, _ and -"]" Immediate="true"
                       Disabled="@(busy || Existing is not null)" AutoFocus="@(Existing is null)" />
-        <MudSelect T="string" Label="@L["Members"]" MultiSelection="true" @bind-SelectedValues="selected" Disabled="busy"
-                   HelperText="@(Users.Count == 0 ? L["Create a user first."] : L["Changes apply the next time a member connects."])">
-            @foreach (var u in Users)
-            {
-                <MudSelectItem T="string" Value="@u">@u</MudSelectItem>
-            }
-        </MudSelect>
+        <NamePicker Class="mt-3" Title="@L["Members"]" Items="Users" @bind-Selected="selected" Disabled="busy"
+                    Empty="@L["Create a user first."]" HelperText="@L["Changes apply the next time a member connects."]" />
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="() => Dialog.Cancel()" Disabled="busy">@L["Cancel"]</MudButton>

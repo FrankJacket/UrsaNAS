@@ -34,6 +34,7 @@ public sealed class ConfigBackupOperations(Repo repo, BackupRepo backups, AgentC
         try
         {
             files["users.json"] = Serialize(await agent.GetUsersAsync(ct));
+            files["user-profiles.json"] = Serialize((await repo.GetUserProfilesAsync()).Values.OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase));
             files["groups.json"] = Serialize(await agent.GetGroupsAsync(ct));
             files["network.json"] = Serialize(await agent.GetNetworkAsync(ct));
             files["open-vswitch.json"] = Serialize(await agent.GetOvsAsync(ct));

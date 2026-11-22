@@ -54,7 +54,6 @@ public sealed class DesktopState
 
         new("users", "Users", "Accounts", Icons.Material.Filled.People, "/users", typeof(Components.Pages.Users), 1000, 620),
         new("groups", "Groups", "Accounts", Icons.Material.Filled.Groups, "/groups", typeof(Components.Pages.Groups), 900, 600),
-        new("admins", "Administrators", "Accounts", Icons.Material.Filled.AdminPanelSettings, "/admins", typeof(Components.Pages.Admins), 800, 560),
 
         new("alerts", "Alerts", "Monitoring", Icons.Material.Filled.NotificationsActive, "/alerts", typeof(Components.Pages.Alerts), 1000, 620),
         new("journal", "Audit log", "Monitoring", Icons.Material.Filled.History, "/journal", typeof(Components.Pages.Journal), 1200, 700),

@@ -4,20 +4,32 @@
 @inject NasOperations Ops
 @inject IDialogService Dialogs
 @inject ISnackbar Snack
+@inject AuthenticationStateProvider Auth
+@inject Repo Repo
 
 @if (!InWindow) { <MudText Typo="Typo.h4" Class="mb-4">@L["Users"]</MudText> }
 @if (error is not null)
 {
     <MudAlert Severity="Severity.Error" Class="mb-4">@error</MudAlert>
 }
+<MudText Class="mb-4">@L["Users sign in to the shares. Administrators (the Admins group) can also sign in to this interface and have full access to every share."]</MudText>
 <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PersonAdd" OnClick="Add" Class="mb-4">@L["Add a user"]</MudButton>
 <MudTable Items="users" Class="desk-grow" Hover="true" Dense="true" Loading="@(!loaded)">
-    <HeaderContent><MudTh>@L["Name"]</MudTh><MudTh></MudTh></HeaderContent>
+    <HeaderContent><MudTh>@L["Name"]</MudTh><MudTh>@L["Full name"]</MudTh><MudTh>@L["Email address"]</MudTh><MudTh>@L["Groups"]</MudTh><MudTh></MudTh></HeaderContent>
     <RowTemplate>
-        <MudTd>@context.Name</MudTd>
+        <MudTd>@context.Name @if (context.Name == me) { <MudChip T="string" Size="Size.Small" Class="ml-2">@L["you"]</MudChip> }</MudTd>
+        <MudTd>@ProfileOf(context.Name).FullName</MudTd>
+        <MudTd>@ProfileOf(context.Name).Email</MudTd>
+        <MudTd>
+            @foreach (var g in GroupsOf(context.Name))
+            {
+                <MudChip T="string" Size="Size.Small" Color="@(g == AclRules.AdminsGroup ? Color.Primary : Color.Default)" Icon="@(g == AclRules.AdminsGroup ? Icons.Material.Filled.AdminPanelSettings : null)">@Display(g)</MudChip>
+            }
+        </MudTd>
         <MudTd Style="text-align:right">
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Edit" OnClick="() => EditUser(context)">@L["Edit user"]</MudButton>
             <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Key" OnClick="() => ChangePassword(context)">@L["Password"]</MudButton>
-            <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="() => Delete(context)">@L["Delete"]</MudButton>
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" Disabled="@(context.Name == me)" OnClick="() => Delete(context)">@L["Delete"]</MudButton>
         </MudTd>
     </RowTemplate>
     <NoRecordsContent><MudText Class="pa-4">@L["No users."]</MudText></NoRecordsContent>
@@ -28,12 +40,31 @@
     [CascadingParameter(Name = "InWindow")] bool InWindow { get; set; }
 
     IReadOnlyList<NasUser> users = [];
+    IReadOnlyList<NasGroup> groups = [];
+    Dictionary<string, UserProfile> profiles = new(StringComparer.OrdinalIgnoreCase);
+
+    UserProfile ProfileOf(string name) => profiles.GetValueOrDefault(name) ?? new UserProfile(name, "", "");
+
+    /// <summary>Les groupes de l'utilisateur, sauf « allusers » dont tout le monde est membre ; Admins d'abord.</summary>
+    IEnumerable<string> GroupsOf(string name) => groups.Where(g => g.Name != AclRules.AllUsersGroup && g.Members.Contains(name))
+        .Select(g => g.Name).OrderBy(g => g == AclRules.AdminsGroup ? 0 : 1).ThenBy(g => g, StringComparer.Ordinal);
+
+    static string Display(string name) => name switch { AclRules.AdminsGroup => "Admins", AclRules.AllUsersGroup => "AllUsers", _ => name };
+    string me = "";
     string? error;
     bool loaded;
 
     protected override async Task LoadAsync()
     {
-        try { users = await Agent.GetUsersAsync(); error = null; }
+        me = (await Auth.GetAuthenticationStateAsync()).User.Identity?.Name ?? "";
+        try
+        {
+            users = await Agent.GetUsersAsync();
+            groups = await Agent.GetGroupsAsync();
+            profiles = await Repo.GetUserProfilesAsync();
+            error = null;
+        }
+        catch (AgentException e) { error = L.Translate(e.Message); }
         catch (HttpRequestException) { error = L["Agent unreachable: is the ursanas-agent service running?"]; }
         loaded = true;
     }
@@ -50,11 +81,26 @@
         }
     }
 
+    async Task EditUser(NasUser u)
+    {
+        var parameters = new DialogParameters<EditUserDialog>
+        {
+            { x => x.UserName, u.Name }, { x => x.FullName, ProfileOf(u.Name).FullName }, { x => x.Email, ProfileOf(u.Name).Email },
+            { x => x.Groups, groups }, { x => x.Me, me },
+        };
+        var dialog = await Dialogs.ShowAsync<EditUserDialog>(L["Edit {0}", u.Name], parameters, Options);
+        if (await dialog.Result is { Canceled: false })
+        {
+            Snack.Add(L["User saved."], Severity.Success);
+            await LoadAsync();
+        }
+    }
+
     async Task ChangePassword(NasUser u)
     {
         var parameters = new DialogParameters<PasswordDialog> { { x => x.UserName, u.Name } };
         var dialog = await Dialogs.ShowAsync<PasswordDialog>(L["Password of {0}", u.Name], parameters, Options);
-        if (await dialog.Result is { Canceled: false }) Snack.Add(L["Password changed."], Severity.Success);
+        if (await dialog.Result is { Canceled: false }) Snack.Add(u.Name == me ? L["Password changed: sign in again."] : L["Password changed."], Severity.Success);
     }
 
     async Task Delete(NasUser u)

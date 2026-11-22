@@ -1,0 +1,70 @@
+@inject NasOperations Ops
+
+@* Modification d'un utilisateur : nom complet, courriel et groupes. Le rôle d'administrateur est l'appartenance au groupe « Admins ». *@
+<MudDialog>
+    <DialogContent>
+        @if (error is not null)
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-3">@error</MudAlert>
+        }
+        <MudTextField @bind-Value="fullName" Label="@L["Full name"]" MaxLength="NasOperations.MaxFullNameLength" Immediate="true" Disabled="busy" AutoFocus="true" />
+        <MudTextField @bind-Value="email" Label="@L["Email address"]" InputMode="InputMode.email" Immediate="true" Disabled="busy"
+                      Validation="@(new Func<string?, string?>(ValidateEmail))" />
+
+        <NamePicker Class="mt-4" Title="@L["Groups"]" Items="groupNames" @bind-Selected="selected" Disabled="busy" Locked="locked" Display="Display" Notes="Note"
+                    HelperText="@L["Membership of the Admins group gives the right to sign in to this interface and full access to every share."]" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => Dialog.Cancel()" Disabled="busy">@L["Cancel"]</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save" Disabled="@(busy || ValidateEmail(email) is not null)">@(busy ? L["Saving…"] : L["Save"])</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance Dialog { get; set; } = default!;
+
+    [Parameter, EditorRequired] public string UserName { get; set; } = "";
+    [Parameter] public string FullName { get; set; } = "";
+    [Parameter] public string Email { get; set; } = "";
+    [Parameter] public IReadOnlyList<NasGroup> Groups { get; set; } = [];
+    /// <summary>L'utilisateur connecté : il ne peut pas se retirer lui-même du groupe Admins.</summary>
+    [Parameter] public string Me { get; set; } = "";
+
+    string fullName = "", email = "";
+    IReadOnlyCollection<string> selected = [];
+    IReadOnlyList<string> groupNames = [];
+    IReadOnlyCollection<string> locked = [];
+    string? error;
+    bool busy;
+
+    protected override void OnInitialized()
+    {
+        fullName = FullName;
+        email = Email;
+        groupNames = Groups.Select(g => g.Name).ToList();
+        selected = Groups.Where(g => g.Members.Contains(UserName)).Select(g => g.Name).ToList();
+        // AllUsers est toujours cochée ; on ne se retire pas soi-même d'Admins.
+        locked = Groups.Select(g => g.Name).Where(n => n == AclRules.AllUsersGroup || (n == AclRules.AdminsGroup && UserName == Me && selected.Contains(n))).ToList();
+    }
+
+    string? Note(string name) => name == AclRules.AllUsersGroup ? L["everyone"] : locked.Contains(name) ? L["you cannot remove your own role"] : null;
+
+    static string Display(string name) => name switch { AclRules.AdminsGroup => "Admins", AclRules.AllUsersGroup => "AllUsers", _ => name };
+
+    string? ValidateEmail(string? text) => string.IsNullOrWhiteSpace(text) || Nas.Web.Alerting.MailRules.IsEmail(text.Trim()) ? null : L["Invalid email address."];
+
+    async Task Save()
+    {
+        error = null;
+        busy = true;
+        try
+        {
+            await Ops.UpdateUserAsync(UserName, fullName, email, selected.Append(AclRules.AllUsersGroup).Distinct().ToList());
+            Dialog.Close(DialogResult.Ok(true));
+            return;
+        }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable."]; }
+        busy = false;
+    }
+}

@@ -24,6 +24,9 @@ public class AlertRow
     public DateTime? ResolvedAt { get; set; }
 }
 
+/// <summary>Nom complet et adresse courriel d'un utilisateur du NAS (facultatifs).</summary>
+public sealed record UserProfile(string Name, string FullName, string Email);
+
 public class AdminRow
 {
     public string Name { get; set; } = "";
@@ -163,7 +166,7 @@ public class Repo(Db db)
         await c.ExecuteAsync($"DELETE FROM FolderAcls WHERE Share=@share AND {InTree}", new { share, path });
     }
 
-    // ---- Comptes qui peuvent se connecter à l'interface
+    // ---- Anciens comptes administrateurs de l'interface (avant leur fusion avec les utilisateurs) : lus seulement pour les convertir à leur première connexion
     public async Task<int> CountAdminsAsync()
     {
         using var c = db.Open();
@@ -177,29 +180,32 @@ public class Repo(Db db)
             "SELECT Name,PasswordHash,Stamp,CreatedAt FROM AdminUsers WHERE Name=@name", new { name });
     }
 
-    public async Task<List<AdminRow>> ListAdminsAsync()
-    {
-        using var c = db.Open();
-        return (await c.QueryAsync<AdminRow>("SELECT Name,PasswordHash,Stamp,CreatedAt FROM AdminUsers ORDER BY Name")).ToList();
-    }
-
-    public async Task InsertAdminAsync(string name, string hash, string stamp)
-    {
-        using var c = db.Open();
-        await c.ExecuteAsync("INSERT INTO AdminUsers(Name,PasswordHash,Stamp,CreatedAt) VALUES(@name,@hash,@stamp,@at)",
-            new { name, hash, stamp, at = DateTime.UtcNow });
-    }
-
-    public async Task UpdateAdminPasswordAsync(string name, string hash, string stamp)
-    {
-        using var c = db.Open();
-        await c.ExecuteAsync("UPDATE AdminUsers SET PasswordHash=@hash, Stamp=@stamp WHERE Name=@name", new { name, hash, stamp });
-    }
-
     public async Task DeleteAdminAsync(string name)
     {
         using var c = db.Open();
         await c.ExecuteAsync("DELETE FROM AdminUsers WHERE Name=@name", new { name });
+    }
+
+    // ---- Profils des utilisateurs (nom complet, courriel)
+    public async Task<Dictionary<string, UserProfile>> GetUserProfilesAsync()
+    {
+        using var c = db.Open();
+        return (await c.QueryAsync<UserProfile>("SELECT Name,FullName,Email FROM UserProfiles")).ToDictionary(p => p.Name, StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Enregistre le profil ; un profil vide (ni nom ni courriel) est supprimé plutôt que gardé vide.</summary>
+    public async Task SetUserProfileAsync(string name, string fullName, string email)
+    {
+        using var c = db.Open();
+        if (fullName.Length == 0 && email.Length == 0) { await c.ExecuteAsync("DELETE FROM UserProfiles WHERE Name=@name", new { name }); return; }
+        await c.ExecuteAsync("INSERT INTO UserProfiles(Name,FullName,Email) VALUES(@name,@fullName,@email) ON CONFLICT(Name) DO UPDATE SET FullName=@fullName, Email=@email",
+            new { name, fullName, email });
+    }
+
+    public async Task DeleteUserProfileAsync(string name)
+    {
+        using var c = db.Open();
+        await c.ExecuteAsync("DELETE FROM UserProfiles WHERE Name=@name", new { name });
     }
 
     // ---- Alertes

@@ -6,6 +6,9 @@ namespace Nas.Agent.Services;
 /// <summary>Génère le fichier de configuration Samba des partages gérés par UrsaNAS.</summary>
 public static class ShareConf
 {
+    /// <summary>Référence Samba au groupe des administrateurs.</summary>
+    public static readonly string AdminsRef = "@" + AclRules.GroupPrefix + AclRules.AdminsGroup;
+
     /// <param name="datasetPaths">Point de montage de chaque jeu de données ZFS utilisé par un partage.</param>
     public static string Render(IReadOnlyList<ShareDef> shares, string shareRoot, IReadOnlyDictionary<string, string>? datasetPaths = null)
     {
@@ -23,10 +26,17 @@ public static class ShareConf
             {
                 // Les permissions fines vivent dans les ACL NT : pas de liste d'utilisateurs, le noyau garde sa base 2770 root:nasusers.
                 sb.Append("   vfs objects = acl_xattr\n   acl_xattr:ignore system acls = yes\n   map acl inherit = yes\n");
-                sb.Append("   admin users = ").Append(AclService.ServiceUser).Append('\n');
+                // Les administrateurs (groupe admins) ont tous les droits : « admin users » passe outre les ACL.
+                sb.Append("   admin users = ").Append(AclService.ServiceUser).Append(' ').Append(AdminsRef).Append('\n');
                 sb.Append("   force group = ").Append(UserService.Group).Append("\n   force create mode = 0660\n   force directory mode = 2770\n");
             }
-            else sb.Append("   valid users = ").Append(string.Join(' ', s.ValidUsers)).Append('\n');
+            else
+            {
+                // Les administrateurs entrent dans tous les partages et y ont tous les droits, même en lecture seule.
+                sb.Append("   valid users = ").Append(string.Join(' ', s.ValidUsers.Append(AdminsRef))).Append('\n');
+                sb.Append("   admin users = ").Append(AdminsRef).Append('\n');
+                if (s.ReadOnly) sb.Append("   write list = ").Append(AdminsRef).Append('\n');
+            }
             sb.Append("   create mask = 0660\n");
             sb.Append("   directory mask = 2770\n");
         }
@@ -88,7 +98,7 @@ public sealed class ShareService(ICommandRunner run, UserService users, IConfigu
         // sans cette étape il serait en 0770 et personne d'autre que root ne pourrait atteindre un partage.
         Directory.CreateDirectory(ShareRoot);
         Check(await run.RunAsync("chmod", ["0755", ShareRoot], ct: ct), "chmod");
-        await users.EnsureGroupAsync(ct); // les dossiers appartiennent à ce groupe, qui n'existe pas avant le premier utilisateur
+        await users.EnsureSystemGroupsAsync(ct); // nasusers (propriétaire des dossiers), admins et allusers : ils n'existent pas avant le premier utilisateur
 
         foreach (var s in shares)
         {

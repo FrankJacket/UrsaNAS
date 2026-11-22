@@ -11,7 +11,7 @@ namespace Nas.Web;
 /// Les opérations de l'interface : valide, demande à l'agent d'agir, enregistre l'état voulu en base puis journalise.
 /// L'agent est appelé en premier : si Samba refuse un changement, la base n'est pas modifiée.
 /// </summary>
-public class NasOperations(AgentClient agent, Repo repo, IMailSender mail, AdminAccounts admins, AuthenticationStateProvider auth)
+public class NasOperations(AgentClient agent, Repo repo, IMailSender mail, AuthenticationStateProvider auth)
 {
     // Statique : partagé par tous les circuits, car l'instance vit le temps d'une session.
     static readonly SemaphoreSlim _gate = new(1, 1);
@@ -19,36 +19,64 @@ public class NasOperations(AgentClient agent, Repo repo, IMailSender mail, Admin
     /// <summary>L'administrateur connecté, tel qu'il apparaît dans le journal.</summary>
     async Task<string> ActorAsync() => (await auth.GetAuthenticationStateAsync()).User.Identity?.Name ?? "unknown";
 
-    // ---- Administrateurs de l'interface
-    public async Task CreateAdminAsync(string name, string password)
+    // ---- Utilisateurs (le rôle d'administrateur est l'appartenance au groupe « admins »)
+    public const int MaxFullNameLength = 100;
+
+    /// <summary>Nom complet et courriel sont facultatifs ; un courriel renseigné doit être une adresse valide.</summary>
+    public static string? ValidateProfile(string fullName, string email)
     {
-        await admins.CreateAsync(name, password);
-        await repo.AuditAsync(await ActorAsync(), "Administrator created", name);
+        if (fullName.Length > MaxFullNameLength || fullName.Any(char.IsControl)) return Msg.F("The full name must be at most {0} characters, without control characters.", MaxFullNameLength);
+        if (email.Length > 0 && !MailRules.IsEmail(email)) return Msg.F("Invalid email address.");
+        return null;
     }
 
-    public async Task SetAdminPasswordAsync(string name, string password)
+    public async Task CreateUserAsync(string name, string password, bool admin = false, string fullName = "", string email = "")
     {
-        await admins.SetPasswordAsync(name, password);
-        await repo.AuditAsync(await ActorAsync(), "Administrator password changed", name); // jamais le mot de passe lui-même
-    }
-
-    public async Task DeleteAdminAsync(string name)
-    {
-        var actor = await ActorAsync();
-        await admins.DeleteAsync(name, actor);
-        await repo.AuditAsync(actor, "Administrator deleted", name);
-    }
-
-    // ---- Utilisateurs
-    public async Task CreateUserAsync(string name, string password)
-    {
+        fullName = fullName.Trim();
+        email = email.Trim();
         if (Rules.ValidateUserName(name) is { } e1) throw new AgentException(e1);
         if (Rules.ValidatePassword(password) is { } e2) throw new AgentException(e2);
+        if (ValidateProfile(fullName, email) is { } e3) throw new AgentException(e3);
         await _gate.WaitAsync();
         try
         {
-            await agent.CreateUserAsync(new CreateUserRequest(name, password));
-            await repo.AuditAsync(await ActorAsync(), "User created", name);
+            await agent.CreateUserAsync(new CreateUserRequest(name, password, admin));
+            await repo.SetUserProfileAsync(name, fullName, email);
+            await repo.AuditAsync(await ActorAsync(), admin ? "Administrator created" : "User created", name);
+        }
+        finally { _gate.Release(); }
+    }
+
+    /// <summary>
+    /// Modifie un utilisateur : nom complet, courriel et groupes dont il est membre. « allusers » ne se change pas (tout le monde en est membre).
+    /// On ne peut pas se retirer soi-même du groupe « admins » ; l'agent refuse de retirer le dernier administrateur.
+    /// </summary>
+    public async Task UpdateUserAsync(string name, string fullName, string email, IReadOnlyCollection<string> groups)
+    {
+        fullName = fullName.Trim();
+        email = email.Trim();
+        if (ValidateProfile(fullName, email) is { } e) throw new AgentException(e);
+        var actor = await ActorAsync();
+        await _gate.WaitAsync();
+        try
+        {
+            var all = await agent.GetGroupsAsync();
+            var changes = new List<(string Group, List<string> Members)>();
+            foreach (var g in all.Where(g => g.Name != AclRules.AllUsersGroup))
+            {
+                var wanted = groups.Contains(g.Name);
+                var current = g.Members.Contains(name);
+                if (wanted == current) continue;
+                if (g.Name == AclRules.AdminsGroup && !wanted && string.Equals(name, actor, StringComparison.OrdinalIgnoreCase))
+                    throw new AgentException(Msg.F("You cannot remove your own administrator role."));
+                changes.Add((g.Name, (wanted ? [.. g.Members, name] : g.Members.Where(m => m != name)).ToList()));
+            }
+
+            foreach (var (group, members) in changes) await agent.SetGroupMembersAsync(group, members);
+            await repo.SetUserProfileAsync(name, fullName, email);
+            AdminAccounts.Forget(name);
+            await repo.AuditAsync(actor, "User changed", changes.Count == 0 ? name
+                : $"{name}: {string.Join(", ", changes.Select(c => (c.Members.Contains(name) ? "+" : "-") + c.Group))}");
         }
         finally { _gate.Release(); }
     }
@@ -61,12 +89,15 @@ public class NasOperations(AgentClient agent, Repo repo, IMailSender mail, Admin
         {
             await agent.SetPasswordAsync(name, password);
             await repo.AuditAsync(await ActorAsync(), "Password changed", name); // jamais le mot de passe lui-même
+            AdminAccounts.Forget(name);
         }
         finally { _gate.Release(); }
     }
 
     public async Task DeleteUserAsync(string name)
     {
+        if (string.Equals(name, await ActorAsync(), StringComparison.OrdinalIgnoreCase))
+            throw new AgentException(Msg.F("You cannot delete your own account."));
         await _gate.WaitAsync();
         try
         {
@@ -77,6 +108,7 @@ public class NasOperations(AgentClient agent, Repo repo, IMailSender mail, Admin
             if (ruled.Count > 0)
                 throw new AgentException(Msg.F("“{0}” is used by permissions on {1}: remove those permissions first.", name, string.Join(", ", ruled)));
             await agent.DeleteUserAsync(name);
+            await repo.DeleteUserProfileAsync(name);
             await repo.AuditAsync(await ActorAsync(), "User deleted", name);
         }
         finally { _gate.Release(); }

@@ -30,7 +30,7 @@
             }
         </MudTd>
         <MudTd>
-            @if (context.Acl) { <MudChip T="string" Size="Size.Small" Color="Color.Primary" Href="@($"/permissions?share={context.Name}")">@L["Advanced permissions"]</MudChip> }
+            @if (context.Acl) { <MudChip T="string" Size="Size.Small" Color="Color.Primary" OnClick="() => OpenPermissions(context)">@L["Advanced permissions"]</MudChip> }
             else { <MudChip T="string" Size="Size.Small" Color="@(context.ReadOnly ? Color.Default : Color.Success)">@(context.ReadOnly ? L["Read-only"] : L["Read/write"])</MudChip> }
         </MudTd>
         <MudTd>
@@ -87,6 +87,15 @@
         try { return (await Agent.GetUsersAsync()).Select(u => u.Name).ToList(); }
         catch (HttpRequestException) { Snack.Add(L["Agent unreachable."], Severity.Error); return null; }
     }
+
+    /// <summary>Les permissions de la racine du partage, dans leur dialogue (comme le bouton « Permissions » du gestionnaire de fichiers) : pas de changement de page.</summary>
+    async Task OpenPermissions(ShareDef s)
+    {
+        var parameters = new DialogParameters<FolderPermissionsDialog> { { x => x.Share, s.Name }, { x => x.Path, "" } };
+        await (await Dialogs.ShowAsync<FolderPermissionsDialog>(L["Permissions of {0}", "/" + s.Name], parameters, BigOptions)).Result;
+    }
+
+    static readonly DialogOptions BigOptions = new() { MaxWidth = MaxWidth.Large, FullWidth = true, CloseButton = true, BackdropClick = false };
 
     async Task Add() => await ShowDialog(null, L["New share"]);
     async Task Edit(ShareDef s) => await ShowDialog(s, L["Edit {0}", s.Name]);

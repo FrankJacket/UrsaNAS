@@ -41,13 +41,7 @@
         <MudSwitch T="bool" @bind-Value="ftpOn" Label="@L["Share over FTP"]" Color="Color.Primary" Disabled="busy" />
         @if (ftpOn)
         {
-            <MudSelect T="string" Label="@L["Allowed FTP users"]" MultiSelection="true" @bind-SelectedValues="ftpUsers" Disabled="busy"
-                       HelperText="@(Users.Count == 0 ? L["Create a user first."] : null)">
-                @foreach (var u in Users)
-                {
-                    <MudSelectItem T="string" Value="@u">@u</MudSelectItem>
-                }
-            </MudSelect>
+            <NamePicker Title="@L["Allowed FTP users"]" Items="Users" @bind-Selected="ftpUsers" Disabled="busy" Empty="@L["Create a user first."]" Height="160px" />
             <MudSwitch T="bool" @bind-Value="ftpRo" Label="@L["Read-only"]" Color="Color.Primary" Disabled="busy" />
         }
         @if (nfsOn || ftpOn)
@@ -63,13 +57,7 @@
         else if (!Existing.Acl)
         {
             @* Partage créé avant les permissions avancées : on peut encore régler l'ancien mode ou passer au nouveau. *@
-            <MudSelect T="string" Label="@L["Allowed users"]" MultiSelection="true" @bind-SelectedValues="selected" Disabled="busy"
-                       HelperText="@(Users.Count == 0 ? L["Create a user first."] : null)">
-                @foreach (var u in Users)
-                {
-                    <MudSelectItem T="string" Value="@u">@u</MudSelectItem>
-                }
-            </MudSelect>
+            <NamePicker Title="@L["Allowed users"]" Items="Users" @bind-Selected="selected" Disabled="busy" Empty="@L["Create a user first."]" Height="160px" />
             <MudSwitch T="bool" @bind-Value="acl" Label="@L["Advanced permissions"]" Color="Color.Primary" Disabled="busy" />
             <MudText Typo="Typo.caption" Class="d-block">@(acl ? L["Who can do what is set per folder in the Permissions page. The users above only get their current access to start with."] : L["Per-folder permissions, groups, deny rules. Can be turned on later."])</MudText>
             <MudSwitch T="bool" @bind-Value="readOnly" Label="@L["Read-only"]" Color="Color.Primary" Disabled="busy" />

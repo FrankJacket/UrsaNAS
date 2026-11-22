@@ -3,9 +3,17 @@ using System.Text.RegularExpressions;
 namespace Nas.Contracts;
 
 /// <summary>Un utilisateur du NAS (compte système sans shell + compte Samba).</summary>
-public sealed record NasUser(string Name);
+public sealed record NasUser(string Name, bool Admin = false);
 
-public sealed record CreateUserRequest(string Name, string Password);
+public sealed record CreateUserRequest(string Name, string Password, bool Admin = false);
+
+/// <summary>Vérifie un mot de passe contre le compte Samba (utilisé par la connexion à l'interface).</summary>
+public sealed record VerifyUserRequest(string Name, string Password);
+
+/// <summary>État d'un compte pour la session web : <c>Stamp</c> change quand le mot de passe change (les sessions ouvertes deviennent alors invalides).</summary>
+public sealed record UserSession(bool Valid, bool Admin, string Stamp);
+
+public sealed record SetAdminRequest(bool Admin);
 
 public sealed record SetPasswordRequest(string Password);
 

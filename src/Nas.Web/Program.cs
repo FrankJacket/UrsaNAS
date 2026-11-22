@@ -26,7 +26,8 @@ b.Services.AddScoped<NasOperations>();
 b.Services.AddScoped<Loc>();
 
 // Authentification : cookie, tout est protégé par défaut (seules /login et /setup sont publiques).
-b.Services.AddSingleton<AdminAccounts>();
+b.Services.AddScoped<IUserDirectory, AgentUserDirectory>();
+b.Services.AddScoped<AdminAccounts>();
 b.Services.AddSingleton<LoginThrottle>();
 b.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(o =>
@@ -57,6 +58,7 @@ b.Services.AddSingleton<AlertState>();
 b.Services.AddSingleton<AlertService>();
 b.Services.AddSingleton<AlertMonitor>();
 b.Services.AddHostedService(sp => sp.GetRequiredService<AlertMonitor>());
+b.Services.AddHostedService<ShareSync>();
 
 b.Services.AddSingleton<DockerAvailability>();
 b.Services.AddHostedService<DockerMonitor>();

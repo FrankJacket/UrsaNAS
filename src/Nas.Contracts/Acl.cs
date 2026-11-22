@@ -119,6 +119,13 @@ public static partial class AclRules
     /// <summary>Préfixe du groupe Linux : les groupes d'UrsaNAS sont reconnaissables et ceux du système ne sont jamais touchés.</summary>
     public const string GroupPrefix = "nasg-";
 
+    /// <summary>Groupes fixes, créés à l'installation et jamais supprimés : « admins » (administrateurs : connexion à l'interface, tous les droits sur les partages)
+    /// et « allusers » (chaque utilisateur en est membre dès sa création).</summary>
+    public const string AdminsGroup = "admins";
+    public const string AllUsersGroup = "allusers";
+
+    public static bool IsFixedGroup(string name) => name is AdminsGroup or AllUsersGroup;
+
     public const int MaxDepth = 32;
 
     public static string? ValidateGroupName(string? name) =>

@@ -8,8 +8,11 @@
             <MudAlert Severity="Severity.Error" Class="mb-3">@error</MudAlert>
         }
         <MudTextField @bind-Value="name" Label="@L["User name"]" HelperText="@L["Lowercase letters, digits, _ and -"]" Immediate="true" Disabled="busy" AutoFocus="true" />
+        <MudTextField @bind-Value="fullName" Label="@L["Full name"]" MaxLength="NasOperations.MaxFullNameLength" Immediate="true" Disabled="busy" />
+        <MudTextField @bind-Value="email" Label="@L["Email address"]" InputMode="InputMode.email" Immediate="true" Disabled="busy" />
         <MudTextField @bind-Value="password" Label="@L["Password"]" InputType="InputType.Password" HelperText="@L["At least {0} characters", Rules.MinPasswordLength]" Disabled="busy" />
         <MudTextField @bind-Value="confirm" Label="@L["Confirm password"]" InputType="InputType.Password" Disabled="busy" />
+        <MudCheckBox T="bool" @bind-Value="admin" Label="@L["Administrator: can sign in to this interface and has full access to every share"]" Disabled="busy" />
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="() => Dialog.Cancel()" Disabled="busy">@L["Cancel"]</MudButton>
@@ -21,6 +24,8 @@
     [CascadingParameter] IMudDialogInstance Dialog { get; set; } = default!;
 
     string name = "", password = "", confirm = "";
+    bool admin;
+    string fullName = "", email = "";
     string? error;
     bool busy;
 
@@ -31,7 +36,7 @@
         busy = true;
         try
         {
-            await Ops.CreateUserAsync(name.Trim(), password);
+            await Ops.CreateUserAsync(name.Trim(), password, admin, fullName, email);
             Dialog.Close(DialogResult.Ok(true));
             return;
         }

@@ -1,0 +1,70 @@
+@* Sélection multiple de noms (utilisateurs, groupes) : le même composant partout, un MudDataGrid avec cases à cocher, recherche et « tout cocher ». *@
+<div class="@Class" style="@Style">
+    <MudDataGrid T="string" Items="Items" MultiSelection="true" SelectedItems="selected" SelectedItemsChanged="OnChanged"
+                 SelectOnRowClick="@(!Disabled)" QuickFilter="Match" Dense="true" Hover="true" Outlined="true" Elevation="0"
+                 FixedHeader="true" Height="@Height" Style="width:100%">
+        <ToolBarContent>
+            <MudText Typo="Typo.subtitle2">@Title</MudText>
+            <MudSpacer />
+            @if (Items.Count > SearchFrom)
+            {
+                <MudTextField T="string" @bind-Value="search" Placeholder="@L["Search"]" Immediate="true" Dense="true" Margin="Margin.Dense"
+                              Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" IconSize="Size.Small" Style="max-width:200px" />
+            }
+        </ToolBarContent>
+        <Columns>
+            <SelectColumn T="string" ShowInHeader="@(Items.Count > 1)" DisabledFunc="IsDisabled" />
+            <TemplateColumn T="string" Title="@L["Name"]" Sortable="false">
+                <CellTemplate>@Shown(context.Item)@Note(context.Item)</CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent><MudText Class="pa-3" Typo="Typo.body2">@(Empty ?? L["Nothing to choose from."])</MudText></NoRecordsContent>
+    </MudDataGrid>
+    @if (HelperText is not null)
+    {
+        <MudText Typo="Typo.caption" Class="d-block mt-1">@HelperText</MudText>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<string> Items { get; set; } = [];
+    [Parameter] public IReadOnlyCollection<string> Selected { get; set; } = [];
+    [Parameter] public EventCallback<IReadOnlyCollection<string>> SelectedChanged { get; set; }
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public string? HelperText { get; set; }
+    /// <summary>Texte quand la liste est vide.</summary>
+    [Parameter] public string? Empty { get; set; }
+    [Parameter] public string Height { get; set; } = "200px";
+    [Parameter] public string? Class { get; set; }
+    [Parameter] public string? Style { get; set; }
+    /// <summary>Noms toujours cochés, qu'on ne peut pas décocher.</summary>
+    [Parameter] public IReadOnlyCollection<string> Locked { get; set; } = [];
+    /// <summary>Nom affiché pour un élément (par défaut, le nom lui-même).</summary>
+    [Parameter] public Func<string, string>? Display { get; set; }
+    /// <summary>Texte ajouté après un nom (par exemple la raison d'un élément verrouillé).</summary>
+    [Parameter] public Func<string, string?>? Notes { get; set; }
+    /// <summary>La recherche apparaît quand la liste dépasse ce nombre d'éléments.</summary>
+    [Parameter] public int SearchFrom { get; set; } = 6;
+
+    HashSet<string> selected = [];
+    string search = "";
+
+    protected override void OnInitialized()
+    {
+        selected = new HashSet<string>(Selected, StringComparer.Ordinal);
+        foreach (var l in Locked) selected.Add(l);
+    }
+
+    string Shown(string name) => Display?.Invoke(name) ?? name;
+    string Note(string name) => Notes?.Invoke(name) is { Length: > 0 } n ? " — " + n : "";
+    bool IsDisabled(string name) => Disabled || Locked.Contains(name);
+    bool Match(string name) => string.IsNullOrWhiteSpace(search) || Shown(name).Contains(search.Trim(), StringComparison.OrdinalIgnoreCase);
+
+    async Task OnChanged(HashSet<string> items)
+    {
+        selected = new HashSet<string>(items, StringComparer.Ordinal);
+        foreach (var l in Locked) selected.Add(l); // un nom verrouillé ne se décoche pas, même par « tout décocher »
+        await SelectedChanged.InvokeAsync(selected.ToList());
+    }
+}

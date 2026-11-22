@@ -90,6 +90,11 @@ public partial class Program
 
         var app = builder.Build();
 
+        // Groupes fixes (admins, allusers) : créés s'ils manquent, et les comptes existants rangés dans allusers (mise à jour d'une ancienne version).
+        try { app.Services.GetRequiredService<UserService>().EnsureSystemGroupsAsync().GetAwaiter().GetResult(); }
+        catch (Exception e) when (e is OperationException or System.ComponentModel.Win32Exception)
+        { app.Logger.LogWarning("System groups could not be prepared: {Message}", e.Message); }
+
         app.UseWebSockets();
         app.MapGet("/terminal", (HttpContext ctx, IConfiguration cfg) => TerminalEndpoint.HandleAsync(ctx, cfg));
         app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
@@ -139,6 +144,12 @@ public partial class Program
         app.MapGet("/users", async (UserService u, CancellationToken ct) => Results.Ok(await u.ListAsync(ct)));
         app.MapPost("/users", (CreateUserRequest r, UserService u, CancellationToken ct) =>
             Guard(async () => { await u.CreateAsync(r, ct); return Results.NoContent(); }));
+        app.MapPost("/users/verify", (VerifyUserRequest r, UserService u, CancellationToken ct) =>
+            Guard(async () => Results.Ok(await u.VerifyAsync(r, ct))));
+        app.MapGet("/users/{name}/session", (string name, UserService u, CancellationToken ct) =>
+            Guard(async () => Results.Ok(await u.SessionAsync(name, ct))));
+        app.MapPut("/users/{name}/admin", (string name, SetAdminRequest r, UserService u, CancellationToken ct) =>
+            Guard(async () => { await u.SetAdminAsync(name, r.Admin, ct); return Results.NoContent(); }));
         app.MapPut("/users/{name}/password", (string name, SetPasswordRequest r, UserService u, CancellationToken ct) =>
             Guard(async () => { await u.SetPasswordAsync(name, r.Password, ct); return Results.NoContent(); }));
         app.MapDelete("/users/{name}", (string name, UserService u, CancellationToken ct) =>

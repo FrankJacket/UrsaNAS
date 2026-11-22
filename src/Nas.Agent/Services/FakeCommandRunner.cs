@@ -10,6 +10,7 @@ public sealed class FakeCommandRunner : ICommandRunner
 {
     readonly object _lock = new();
     readonly List<string> _users = ["alice", "bob", "carol"];
+    readonly Dictionary<string, string> _passwords = new(); // mot de passe de chaque compte (de quoi vérifier une connexion en mode simulé)
     bool _service; // le compte de service n'est pas dans nasusers : il ne figure pas dans la liste des utilisateurs
     readonly Dictionary<string, List<string>> _groups = new() { ["nasusers"] = [], ["nasg-staff"] = ["alice", "bob"] };
     readonly string _shares = Path.Combine(Path.GetTempPath(), "ursanas-fake-shares");
@@ -20,15 +21,24 @@ public sealed class FakeCommandRunner : ICommandRunner
 
     public Task<CommandResult> RunAsync(string fileName, IReadOnlyList<string> args, string? stdin = null, CancellationToken ct = default)
     {
-        lock (_lock) return Task.FromResult(Run(fileName, args));
+        lock (_lock) return Task.FromResult(Run(fileName, args, stdin));
     }
 
     int Gid(string group) => 900 + _groups.Keys.ToList().IndexOf(group);
 
-    CommandResult Run(string cmd, IReadOnlyList<string> a)
+    CommandResult Run(string cmd, IReadOnlyList<string> a, string? stdin = null)
     {
         switch (cmd)
         {
+            case "smbpasswd" when a.Contains("-a") || a.Contains("-s"):
+                if (a[^1] != "-s" && stdin is not null) _passwords[a[^1]] = stdin.Split('\n')[0];
+                return Ok();
+            case "smbpasswd":
+                _passwords.Remove(a[^1]);
+                return Ok();
+            case "pdbedit" when a.Contains("-w"):
+                var pw = _users.Contains(a[^1]) ? _passwords.GetValueOrDefault(a[^1], "password123") : null;
+                return pw is null ? Fail() : Ok($"{a[^1]}:1000:XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX:{NtHash.Of(pw)}:[U          ]:LCT-00000000:\n");
             case "getent" when a[0] == "group" && a.Count == 1:
                 return Ok(string.Concat(_groups.Select(g => $"{g.Key}:x:{Gid(g.Key)}:{string.Join(',', g.Value)}\n")));
             case "getent" when a[0] == "group":
