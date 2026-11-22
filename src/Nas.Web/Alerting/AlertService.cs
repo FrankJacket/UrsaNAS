@@ -26,6 +26,9 @@ public sealed class AlertState
 /// </summary>
 public sealed class AlertService(Repo repo, IMailSender mail, AlertState state)
 {
+    /// <summary>Durée pendant laquelle la réouverture d'une alerte fermée n'envoie pas de nouveau courriel.</summary>
+    public static readonly TimeSpan RepeatQuiet = TimeSpan.FromHours(24);
+
     readonly SemaphoreSlim _gate = new(1, 1);
     IReadOnlySet<string> _previous = new HashSet<string>();
 
@@ -42,21 +45,30 @@ public sealed class AlertService(Repo repo, IMailSender mail, AlertState state)
             if (snapshot.Smart is null) unknown.Add("smart:");
             if (snapshot.Backups is null) unknown.Add("backup:");
             if (snapshot.Remotes is null) unknown.Add("remote:");
+            // Mises à jour : une lecture ratée ou un contrôle pas encore fait n'est pas « plus de mise à jour disponible ».
+            if (snapshot.Updates?.App is null or { Error: not null }) unknown.Add("update:app");
+            if (snapshot.Updates?.Packages is null or { Error: not null }) unknown.Add("update:packages");
 
             var (raise, resolve) = AlertEngine.Step(current, active, _previous, unknown, immediate);
             _previous = current.Select(c => c.Code).ToHashSet(StringComparer.Ordinal);
 
+            // Une alerte qui clignote (fermée puis rouverte en moins de RepeatQuiet) n'est avisée qu'une fois : sa première ouverture
+            // a déjà été envoyée, et le retour à la normale de ses ouvertures suivantes ne l'est pas non plus.
             foreach (var c in raise)
             {
+                var repeat = await repo.WasResolvedRecentlyAsync(c.Code, RepeatQuiet);
                 await repo.RaiseAlertAsync(c);
                 await repo.AuditAsync("system", "Alert", c.Title);
-                await NotifyAsync(Msg.F(c.Severity == AlertRules.Critical ? "CRITICAL: {0}" : "Warning: {0}", c.Title), c.Detail, ct);
+                if (!repeat)
+                    await NotifyAsync(Msg.F(c.Severity == AlertRules.Critical ? "CRITICAL: {0}" : "Warning: {0}", c.Title), c.Detail, ct);
             }
             foreach (var a in resolve)
             {
+                var repeat = await repo.WasResolvedRecentlyAsync(a.Code, RepeatQuiet, beforeId: a.Id);
                 await repo.ResolveAlertAsync(a.Id);
                 await repo.AuditAsync("system", "Alert resolved", a.Title);
-                await NotifyAsync(Msg.F("Recovered: {0}", a.Title), "The problem is no longer observed.", ct);
+                if (!repeat)
+                    await NotifyAsync(Msg.F("Recovered: {0}", a.Title), "The problem is no longer observed.", ct);
             }
 
             var now = await repo.GetActiveAlertsAsync();

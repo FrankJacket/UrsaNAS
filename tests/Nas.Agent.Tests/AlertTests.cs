@@ -254,6 +254,43 @@ public class AlertServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Une_alerte_qui_clignote_n_envoie_qu_un_seul_courriel()
+    {
+        await _repo.SaveMailSettingsAsync(Mail);
+
+        await _svc.ProcessAsync(Sick(), immediate: true);   // ouverture : courriel
+        await _svc.ProcessAsync(Healthy(), immediate: true); // fermeture : courriel « Recovered » (première fois)
+        Assert.Equal(2, _mail.Sent.Count);
+
+        await _svc.ProcessAsync(Sick(), immediate: true);   // rouverte aussitôt : silence
+        await _svc.ProcessAsync(Healthy(), immediate: true);
+        await _svc.ProcessAsync(Sick(), immediate: true);
+        await _svc.ProcessAsync(Healthy(), immediate: true);
+
+        Assert.Equal(2, _mail.Sent.Count);
+        Assert.Equal(3, (await _repo.GetAlertHistoryAsync()).Count); // l'historique garde chaque ouverture
+    }
+
+    [Fact]
+    public async Task Une_lecture_ratee_des_mises_a_jour_ne_ferme_pas_l_alerte_de_mise_a_jour()
+    {
+        var update = new UpdateStatus(new UpdateSettings("stable"), new AppUpdateInfo("0.3.3", "0.3.4", true, null, null, false, null, DateTimeOffset.UtcNow, null), null);
+        await _svc.ProcessAsync(new HealthSnapshot(true, [], [], Updates: update), immediate: true);
+        Assert.Contains(await _repo.GetActiveAlertsAsync(), a => a.Code == "update:app");
+
+        await _svc.ProcessAsync(new HealthSnapshot(true, [], [], Updates: null), immediate: true); // lecture ratée
+        Assert.Contains(await _repo.GetActiveAlertsAsync(), a => a.Code == "update:app");
+
+        var failed = new UpdateStatus(new UpdateSettings("stable"), new AppUpdateInfo("0.3.3", null, false, null, null, false, null, DateTimeOffset.UtcNow, "GitHub injoignable"), null);
+        await _svc.ProcessAsync(new HealthSnapshot(true, [], [], Updates: failed), immediate: true); // recherche en erreur
+        Assert.Contains(await _repo.GetActiveAlertsAsync(), a => a.Code == "update:app");
+
+        var done = new UpdateStatus(new UpdateSettings("stable"), new AppUpdateInfo("0.3.4", "0.3.4", false, null, null, false, null, DateTimeOffset.UtcNow, null), null);
+        await _svc.ProcessAsync(new HealthSnapshot(true, [], [], Updates: done), immediate: true); // vraiment à jour
+        Assert.DoesNotContain(await _repo.GetActiveAlertsAsync(), a => a.Code == "update:app");
+    }
+
+    [Fact]
     public async Task Agent_muet_ne_ferme_pas_les_alertes_de_pool()
     {
         await _svc.ProcessAsync(Sick(), immediate: true);

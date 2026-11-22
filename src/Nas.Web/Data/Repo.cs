@@ -234,6 +234,18 @@ public class Repo(Db db)
             new { a.Code, a.Severity, a.Title, a.Detail, at = DateTime.UtcNow });
     }
 
+    /// <summary>
+    /// Vrai si une alerte de ce code a été fermée il y a moins de <paramref name="within"/> (avant l'alerte <paramref name="beforeId"/>, si donnée).
+    /// Sert à reconnaître une alerte qui « clignote » (s'ouvre, se ferme, se rouvre) pour ne pas envoyer un courriel à chaque tour.
+    /// </summary>
+    public async Task<bool> WasResolvedRecentlyAsync(string code, TimeSpan within, long? beforeId = null)
+    {
+        using var c = db.Open();
+        return await c.ExecuteScalarAsync<long>(
+            "SELECT COUNT(*) FROM Alerts WHERE Code=@code AND ResolvedAt IS NOT NULL AND ResolvedAt>=@since AND (@beforeId IS NULL OR Id<@beforeId)",
+            new { code, since = DateTime.UtcNow - within, beforeId }) > 0;
+    }
+
     public async Task ResolveAlertAsync(long id)
     {
         using var c = db.Open();
