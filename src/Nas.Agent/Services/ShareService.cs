@@ -88,6 +88,7 @@ public sealed class ShareService(ICommandRunner run, UserService users, IConfigu
         // sans cette étape il serait en 0770 et personne d'autre que root ne pourrait atteindre un partage.
         Directory.CreateDirectory(ShareRoot);
         Check(await run.RunAsync("chmod", ["0755", ShareRoot], ct: ct), "chmod");
+        await users.EnsureGroupAsync(ct); // les dossiers appartiennent à ce groupe, qui n'existe pas avant le premier utilisateur
 
         foreach (var s in shares)
         {

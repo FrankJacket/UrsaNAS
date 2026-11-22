@@ -159,6 +159,8 @@ fi
 # ---------------------------------------------------------------- UrsaNAS
 say "Installing UrsaNAS"
 getent group ursanas >/dev/null || groupadd --system ursanas
+# Group of the NAS accounts and shares: it must exist even before the first user is created (shares are owned by it).
+getent group nasusers >/dev/null || groupadd --system nasusers
 getent passwd ursanas >/dev/null || \
   useradd --system --gid ursanas --home-dir /var/lib/ursanas --shell /usr/sbin/nologin ursanas
 

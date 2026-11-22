@@ -239,6 +239,25 @@ public class ShareServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Cree_le_groupe_nasusers_avant_le_premier_partage_s_il_n_existe_pas()
+    {
+        // Installation neuve : aucun utilisateur créé, donc pas encore de groupe nasusers.
+        var created = false;
+        _run.Handler = c => (c.File, c.Args.Length > 0 ? c.Args[0] : "") switch
+        {
+            ("getent", "group") => created ? new(0, "nasusers:x:990:\n", "") : new(2, "", ""),
+            ("groupadd", _) => (created = true) ? new(0, "", "") : new(0, "", ""),
+            _ => new(0, "", ""),
+        };
+
+        await _svc.ApplyAsync([new ShareDef("docs", "", false, [], Acl: true)]); // partage à ACL : aucun utilisateur à nommer
+
+        var groupadd = _run.Calls.FindIndex(c => c.File == "groupadd" && c.Args.SequenceEqual(["--system", "nasusers"]));
+        var chgrp = _run.Calls.FindIndex(c => c.File == "chgrp");
+        Assert.True(groupadd >= 0 && chgrp > groupadd, "le groupe doit être créé avant le premier chgrp");
+    }
+
+    [Fact]
     public async Task Retour_arriere_si_testparm_refuse()
     {
         await _svc.ApplyAsync([new ShareDef("docs", "", false, ["alice"])]);

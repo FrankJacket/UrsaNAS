@@ -35,13 +35,19 @@ public sealed class UserService(ICommandRunner run)
         return names.Select(n => new NasUser(n)).ToList();
     }
 
+    /// <summary>Crée le groupe des comptes et des partages s'il n'existe pas encore (il n'existe pas avant le premier utilisateur sur une installation neuve).</summary>
+    public async Task EnsureGroupAsync(CancellationToken ct = default)
+    {
+        if ((await run.RunAsync("getent", ["group", Group], ct: ct)).ExitCode != 0)
+            Check(await run.RunAsync("groupadd", ["--system", Group], ct: ct), "Creating the group");
+    }
+
     public async Task CreateAsync(CreateUserRequest req, CancellationToken ct = default)
     {
         if (Rules.ValidateUserName(req.Name) is { } e1) throw new OperationException(e1);
         if (Rules.ValidatePassword(req.Password) is { } e2) throw new OperationException(e2);
 
-        if ((await run.RunAsync("getent", ["group", Group], ct: ct)).ExitCode != 0)
-            Check(await run.RunAsync("groupadd", ["--system", Group], ct: ct), "Creating the group");
+        await EnsureGroupAsync(ct);
 
         if ((await run.RunAsync("id", ["-u", req.Name], ct: ct)).ExitCode == 0)
         {
