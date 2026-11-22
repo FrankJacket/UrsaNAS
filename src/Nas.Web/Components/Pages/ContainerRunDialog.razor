@@ -29,6 +29,8 @@
                 </MudAlert>
             }
         }
+        <MudExpansionPanels MultiExpansion="false">
+        <MudExpansionPanel Text="@L["Settings"]" Expanded="true">
         <MudAutocomplete T="string" @bind-Value="image" SearchFunc="SearchImages" Label="@L["Image"]" Placeholder="nginx:latest"
                          MinCharacters="0" MaxItems="50" CoerceText="false" CoerceValue="true" Disabled="busy" AutoFocus="true"
                          HelperText="@L["Pick an image already on the NAS, or type a name to download (the first start can take a while)."]" />
@@ -42,8 +44,9 @@
             <MudSelectItem T="string" Value='"always"'>@L["Always"]</MudSelectItem>
             <MudSelectItem T="string" Value='"on-failure"'>@L["On failure"]</MudSelectItem>
         </MudSelect>
+        </MudExpansionPanel>
 
-        <MudText Typo="Typo.subtitle2" Class="mt-5">@L["Port settings"]</MudText>
+        <MudExpansionPanel Text="@L["Port settings"]">
         <MudText Typo="Typo.caption" Class="d-block mb-2">@L["Map a port of the NAS (host port) to a port of the container."]</MudText>
         @foreach (var p in ports)
         {
@@ -59,8 +62,22 @@
             </MudStack>
         }
         <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="() => ports.Add(new())" Disabled="busy">@L["Add port"]</MudButton>
+        </MudExpansionPanel>
 
-        <MudText Typo="Typo.subtitle2" Class="mt-5">@L["Storage location"]</MudText>
+        <MudExpansionPanel Text="@L["Environment variables"]">
+        @foreach (var e in env)
+        {
+            var row = e;
+            <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
+                <MudTextField @bind-Value="row.Name" Label="@L["Variable name"]" Placeholder="TZ" Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true" Disabled="busy" />
+                <MudTextField @bind-Value="row.Value" Label="@L["Value"]" Placeholder="America/Toronto" Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true" Disabled="busy" />
+                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="() => env.Remove(row)" Disabled="busy" aria-label="@L["Remove"]" />
+            </MudStack>
+        }
+        <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="() => env.Add(new())" Disabled="busy">@L["Add variable"]</MudButton>
+        </MudExpansionPanel>
+
+        <MudExpansionPanel Text="@L["Storage locations"]">
         <MudText Typo="Typo.caption" Class="d-block mb-2">@L["Map a folder of the NAS (or the name of a Docker volume) to a path inside the container."]</MudText>
         @foreach (var v in volumes)
         {
@@ -77,20 +94,9 @@
             </MudStack>
         }
         <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="() => volumes.Add(new())" Disabled="busy">@L["Add path"]</MudButton>
+        </MudExpansionPanel>
 
-        <MudText Typo="Typo.subtitle2" Class="mt-5">@L["Environment variables"]</MudText>
-        @foreach (var e in env)
-        {
-            var row = e;
-            <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
-                <MudTextField @bind-Value="row.Name" Label="@L["Variable name"]" Placeholder="TZ" Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true" Disabled="busy" />
-                <MudTextField @bind-Value="row.Value" Label="@L["Value"]" Placeholder="America/Toronto" Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true" Disabled="busy" />
-                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="() => env.Remove(row)" Disabled="busy" aria-label="@L["Remove"]" />
-            </MudStack>
-        }
-        <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="() => env.Add(new())" Disabled="busy">@L["Add variable"]</MudButton>
-
-        <MudText Typo="Typo.subtitle2" Class="mt-5">@L["Capabilities"]</MudText>
+        <MudExpansionPanel Text="@L["Capabilities"]">
         <MudText Typo="Typo.caption" Class="d-block mb-2">@L["Runtime privilege and Linux capabilities: the rights granted to the container. Checked rights are granted; the ones Docker grants by default are marked."]</MudText>
         <MudCheckBox T="bool" @bind-Value="privileged" Label="@L["Privileged: all rights and access to every device of the NAS (--privileged)"]" Disabled="busy" />
         @if (privileged)
@@ -113,6 +119,8 @@
             }
         </div>
         <MudText Typo="Typo.caption">★ @L["Granted by default by Docker."]</MudText>
+        </MudExpansionPanel>
+        </MudExpansionPanels>
         <style>
             .caps { border: 1px solid var(--mud-palette-lines-default); border-radius: 8px; max-height: 280px; overflow: auto; padding: 4px 8px; display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); column-gap: 12px; }
             .cap { padding: 2px 0; }
