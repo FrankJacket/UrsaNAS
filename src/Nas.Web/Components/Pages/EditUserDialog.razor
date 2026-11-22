@@ -41,13 +41,14 @@
     {
         fullName = FullName;
         email = Email;
-        groupNames = Groups.Select(g => g.Name).ToList();
-        selected = Groups.Where(g => g.Members.Contains(UserName)).Select(g => g.Name).ToList();
-        // AllUsers est toujours cochée ; on ne se retire pas soi-même d'Admins.
-        locked = Groups.Select(g => g.Name).Where(n => n == AclRules.AllUsersGroup || (n == AclRules.AdminsGroup && UserName == Me && selected.Contains(n))).ToList();
+        // AllUsers n'est pas proposée : tout le monde en est membre (elle est ajoutée à l'enregistrement).
+        groupNames = Groups.Select(g => g.Name).Where(n => n != AclRules.AllUsersGroup).ToList();
+        selected = Groups.Where(g => g.Name != AclRules.AllUsersGroup && g.Members.Contains(UserName)).Select(g => g.Name).ToList();
+        // On ne se retire pas soi-même d'Admins.
+        locked = groupNames.Where(n => n == AclRules.AdminsGroup && UserName == Me && selected.Contains(n)).ToList();
     }
 
-    string? Note(string name) => name == AclRules.AllUsersGroup ? L["everyone"] : locked.Contains(name) ? L["you cannot remove your own role"] : null;
+    string? Note(string name) => locked.Contains(name) ? L["you cannot remove your own role"] : null;
 
     static string Display(string name) => name switch { AclRules.AdminsGroup => "Admins", AclRules.AllUsersGroup => "AllUsers", _ => name };
 

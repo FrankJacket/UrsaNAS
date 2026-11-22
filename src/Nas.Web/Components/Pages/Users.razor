@@ -15,17 +15,11 @@
 <MudText Class="mb-4">@L["Users sign in to the shares. Administrators (the Admins group) can also sign in to this interface and have full access to every share."]</MudText>
 <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PersonAdd" OnClick="Add" Class="mb-4">@L["Add a user"]</MudButton>
 <MudTable Items="users" Class="desk-grow" Hover="true" Dense="true" Loading="@(!loaded)">
-    <HeaderContent><MudTh>@L["Name"]</MudTh><MudTh>@L["Full name"]</MudTh><MudTh>@L["Email address"]</MudTh><MudTh>@L["Groups"]</MudTh><MudTh></MudTh></HeaderContent>
+    <HeaderContent><MudTh>@L["Name"]</MudTh><MudTh>@L["Full name"]</MudTh><MudTh>@L["Email address"]</MudTh><MudTh></MudTh></HeaderContent>
     <RowTemplate>
         <MudTd>@context.Name @if (context.Name == me) { <MudChip T="string" Size="Size.Small" Class="ml-2">@L["you"]</MudChip> }</MudTd>
         <MudTd>@ProfileOf(context.Name).FullName</MudTd>
         <MudTd>@ProfileOf(context.Name).Email</MudTd>
-        <MudTd>
-            @foreach (var g in GroupsOf(context.Name))
-            {
-                <MudChip T="string" Size="Size.Small" Color="@(g == AclRules.AdminsGroup ? Color.Primary : Color.Default)" Icon="@(g == AclRules.AdminsGroup ? Icons.Material.Filled.AdminPanelSettings : null)">@Display(g)</MudChip>
-            }
-        </MudTd>
         <MudTd Style="text-align:right">
             <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Edit" OnClick="() => EditUser(context)">@L["Edit user"]</MudButton>
             <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Key" OnClick="() => ChangePassword(context)">@L["Password"]</MudButton>
@@ -45,11 +39,6 @@
 
     UserProfile ProfileOf(string name) => profiles.GetValueOrDefault(name) ?? new UserProfile(name, "", "");
 
-    /// <summary>Les groupes de l'utilisateur, sauf « allusers » dont tout le monde est membre ; Admins d'abord.</summary>
-    IEnumerable<string> GroupsOf(string name) => groups.Where(g => g.Name != AclRules.AllUsersGroup && g.Members.Contains(name))
-        .Select(g => g.Name).OrderBy(g => g == AclRules.AdminsGroup ? 0 : 1).ThenBy(g => g, StringComparer.Ordinal);
-
-    static string Display(string name) => name switch { AclRules.AdminsGroup => "Admins", AclRules.AllUsersGroup => "AllUsers", _ => name };
     string me = "";
     string? error;
     bool loaded;

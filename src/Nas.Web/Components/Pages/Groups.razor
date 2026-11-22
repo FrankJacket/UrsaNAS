@@ -12,12 +12,11 @@
 }
 <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.GroupAdd" OnClick="Add" Class="mb-4">@L["Add a group"]</MudButton>
 <MudTable Items="groups" Class="desk-grow" Hover="true" Dense="true" Loading="@(!loaded)">
-    <HeaderContent><MudTh>@L["Name"]</MudTh><MudTh>@L["Members"]</MudTh><MudTh></MudTh></HeaderContent>
+    <HeaderContent><MudTh>@L["Name"]</MudTh><MudTh></MudTh></HeaderContent>
     <RowTemplate>
         <MudTd>@Display(context.Name) @if (AclRules.IsFixedGroup(context.Name)) { <MudChip T="string" Size="Size.Small" Class="ml-2" Icon="@Icons.Material.Filled.Lock">@L["Built in"]</MudChip> }</MudTd>
-        <MudTd>@(context.Members.Count == 0 ? "—" : string.Join(", ", context.Members))</MudTd>
         <MudTd Style="text-align:right">
-            <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Edit" Disabled="@(context.Name == AclRules.AllUsersGroup)" OnClick="() => Edit(context)">@L["Edit"]</MudButton>
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Edit" OnClick="() => Edit(context)">@L["Edit"]</MudButton>
             <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" Disabled="@AclRules.IsFixedGroup(context.Name)" OnClick="() => Delete(context)">@L["Delete"]</MudButton>
         </MudTd>
     </RowTemplate>
@@ -37,7 +36,8 @@
 
     protected override async Task LoadAsync()
     {
-        try { groups = await Agent.GetGroupsAsync(); error = null; }
+        // AllUsers (tout le monde) n'a rien à régler : on ne l'affiche pas.
+        try { groups = (await Agent.GetGroupsAsync()).Where(g => g.Name != AclRules.AllUsersGroup).ToList(); error = null; }
         catch (AgentException e) { error = L.Translate(e.Message); }
         catch (HttpRequestException) { error = L["Agent unreachable: is the ursanas-agent service running?"]; }
         loaded = true;
