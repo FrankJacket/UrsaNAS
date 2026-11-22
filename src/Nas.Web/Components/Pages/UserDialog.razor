@@ -1,42 +1,79 @@
 @inject NasOperations Ops
 
-@* Création d'un utilisateur. Se ferme avec DialogResult.Ok(true) une fois le compte créé. *@
+@* Création (UserName vide) ou modification d'un utilisateur : nom, nom complet, courriel, groupes (et mot de passe à la création).
+   Le rôle d'administrateur est l'appartenance au groupe « Admins ». Se ferme avec DialogResult.Ok(true) une fois enregistré. *@
 <MudDialog>
     <DialogContent>
         @if (error is not null)
         {
             <MudAlert Severity="Severity.Error" Class="mb-3">@error</MudAlert>
         }
-        <MudTextField @bind-Value="name" Label="@L["User name"]" HelperText="@L["Letters, digits, _ and - (saved in lowercase)"]" Immediate="true" Disabled="busy" AutoFocus="true" />
-        <MudTextField @bind-Value="fullName" Label="@L["Full name"]" MaxLength="NasOperations.MaxFullNameLength" Immediate="true" Disabled="busy" />
-        <MudTextField @bind-Value="email" Label="@L["Email address"]" InputMode="InputMode.email" Immediate="true" Disabled="busy" />
-        <MudTextField @bind-Value="password" Label="@L["Password"]" InputType="InputType.Password" HelperText="@L["At least {0} characters", Rules.MinPasswordLength]" Disabled="busy" />
-        <MudTextField @bind-Value="confirm" Label="@L["Confirm password"]" InputType="InputType.Password" Disabled="busy" />
-        <MudCheckBox T="bool" @bind-Value="admin" Label="@L["Administrator: can sign in to this interface and has full access to every share"]" Disabled="busy" />
+        <MudTextField @bind-Value="name" Label="@L["User name"]" HelperText="@(IsNew ? L["Letters, digits, _ and - (saved in lowercase)"] : null)" Immediate="true" Disabled="@(busy || !IsNew)" AutoFocus="@IsNew" />
+        <MudTextField @bind-Value="fullName" Label="@L["Full name"]" MaxLength="NasOperations.MaxFullNameLength" Immediate="true" Disabled="busy" AutoFocus="@(!IsNew)" />
+        <MudTextField @bind-Value="email" Label="@L["Email address"]" InputMode="InputMode.email" Immediate="true" Disabled="busy"
+                      Validation="@(new Func<string?, string?>(ValidateEmail))" />
+        @if (IsNew)
+        {
+            <MudTextField @bind-Value="password" Label="@L["Password"]" InputType="InputType.Password" HelperText="@L["At least {0} characters", Rules.MinPasswordLength]" Disabled="busy" />
+            <MudTextField @bind-Value="confirm" Label="@L["Confirm password"]" InputType="InputType.Password" Disabled="busy" />
+        }
+
+        <NamePicker Class="mt-4" Title="@L["Groups"]" Items="groupNames" @bind-Selected="selected" Disabled="busy" Locked="locked" Display="Display" Notes="Note"
+                    HelperText="@L["Membership of the Admins group gives the right to sign in to this interface and full access to every share."]" />
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="() => Dialog.Cancel()" Disabled="busy">@L["Cancel"]</MudButton>
-        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save" Disabled="busy">@(busy ? L["Creating…"] : L["Create"])</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save" Disabled="@(busy || ValidateEmail(email) is not null)">@(busy ? (IsNew ? L["Creating…"] : L["Saving…"]) : (IsNew ? L["Create"] : L["Save"]))</MudButton>
     </DialogActions>
 </MudDialog>
 
 @code {
     [CascadingParameter] IMudDialogInstance Dialog { get; set; } = default!;
 
-    string name = "", password = "", confirm = "";
-    bool admin;
-    string fullName = "", email = "";
+    /// <summary>Utilisateur à modifier ; vide = nouvel utilisateur.</summary>
+    [Parameter] public string UserName { get; set; } = "";
+    [Parameter] public string FullName { get; set; } = "";
+    [Parameter] public string Email { get; set; } = "";
+    [Parameter] public IReadOnlyList<NasGroup> Groups { get; set; } = [];
+    /// <summary>L'utilisateur connecté : il ne peut pas se retirer lui-même du groupe Admins.</summary>
+    [Parameter] public string Me { get; set; } = "";
+
+    bool IsNew => UserName.Length == 0;
+
+    string name = "", fullName = "", email = "", password = "", confirm = "";
+    IReadOnlyCollection<string> selected = [];
+    IReadOnlyList<string> groupNames = [];
+    IReadOnlyCollection<string> locked = [];
     string? error;
     bool busy;
+
+    protected override void OnInitialized()
+    {
+        name = UserName;
+        fullName = FullName;
+        email = Email;
+        // AllUsers n'est pas proposée : tout le monde en est membre (elle est ajoutée à l'enregistrement).
+        groupNames = Groups.Select(g => g.Name).Where(n => n != AclRules.AllUsersGroup).ToList();
+        selected = IsNew ? [] : Groups.Where(g => g.Name != AclRules.AllUsersGroup && g.Members.Contains(UserName)).Select(g => g.Name).ToList();
+        // On ne se retire pas soi-même d'Admins.
+        locked = groupNames.Where(n => n == AclRules.AdminsGroup && !IsNew && UserName == Me && selected.Contains(n)).ToList();
+    }
+
+    string? Note(string group) => locked.Contains(group) ? L["you cannot remove your own role"] : null;
+
+    static string Display(string group) => group == AclRules.AdminsGroup ? "Admins" : group;
+
+    string? ValidateEmail(string? text) => string.IsNullOrWhiteSpace(text) || Nas.Web.Alerting.MailRules.IsEmail(text.Trim()) ? null : L["Invalid email address."];
 
     async Task Save()
     {
         error = null;
-        if (password != confirm) { error = L["The two passwords differ."]; return; }
+        if (IsNew && password != confirm) { error = L["The two passwords differ."]; return; }
         busy = true;
         try
         {
-            await Ops.CreateUserAsync(name.Trim(), password, admin, fullName, email);
+            if (IsNew) await Ops.CreateUserAsync(name.Trim(), password, selected.Contains(AclRules.AdminsGroup), fullName, email, selected);
+            else await Ops.UpdateUserAsync(UserName, fullName, email, selected.Append(AclRules.AllUsersGroup).Distinct().ToList());
             Dialog.Close(DialogResult.Ok(true));
             return;
         }

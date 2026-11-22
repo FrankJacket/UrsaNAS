@@ -62,7 +62,7 @@
 
     async Task Add()
     {
-        var dialog = await Dialogs.ShowAsync<UserDialog>(L["New user"], Options);
+        var dialog = await Dialogs.ShowAsync<UserDialog>(L["New user"], new DialogParameters<UserDialog> { { x => x.Groups, groups } }, Options);
         if (await dialog.Result is { Canceled: false })
         {
             Snack.Add(L["User created."], Severity.Success);
@@ -72,12 +72,12 @@
 
     async Task EditUser(NasUser u)
     {
-        var parameters = new DialogParameters<EditUserDialog>
+        var parameters = new DialogParameters<UserDialog>
         {
             { x => x.UserName, u.Name }, { x => x.FullName, ProfileOf(u.Name).FullName }, { x => x.Email, ProfileOf(u.Name).Email },
             { x => x.Groups, groups }, { x => x.Me, me },
         };
-        var dialog = await Dialogs.ShowAsync<EditUserDialog>(L["Edit {0}", u.Name], parameters, Options);
+        var dialog = await Dialogs.ShowAsync<UserDialog>(L["Edit {0}", u.Name], parameters, Options);
         if (await dialog.Result is { Canceled: false })
         {
             Snack.Add(L["User saved."], Severity.Success);

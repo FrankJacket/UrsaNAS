@@ -30,7 +30,7 @@ public class NasOperations(AgentClient agent, Repo repo, IMailSender mail, Authe
         return null;
     }
 
-    public async Task CreateUserAsync(string name, string password, bool admin = false, string fullName = "", string email = "")
+    public async Task CreateUserAsync(string name, string password, bool admin = false, string fullName = "", string email = "", IReadOnlyCollection<string>? groups = null)
     {
         fullName = fullName.Trim();
         email = email.Trim();
@@ -43,6 +43,9 @@ public class NasOperations(AgentClient agent, Repo repo, IMailSender mail, Authe
         {
             await agent.CreateUserAsync(new CreateUserRequest(name, password, admin));
             await repo.SetUserProfileAsync(name, fullName, email);
+            // Les autres groupes demandés (Admins est déjà réglé par « admin », AllUsers par la création du compte).
+            foreach (var g in (await agent.GetGroupsAsync()).Where(g => groups?.Contains(g.Name) == true && g.Name is not (AclRules.AdminsGroup or AclRules.AllUsersGroup) && !g.Members.Contains(name)))
+                await agent.SetGroupMembersAsync(g.Name, [.. g.Members, name]);
             await repo.AuditAsync(await ActorAsync(), admin ? "Administrator created" : "User created", name);
         }
         finally { _gate.Release(); }
