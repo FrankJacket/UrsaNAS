@@ -13,13 +13,23 @@
         }
         <MudTextField @bind-Value="name" Label="@L["Stack name"]" Immediate="true" Disabled="@(busy || Existing is not null)"
                       HelperText="@L["Lowercase letters, digits, _ and -."]" AutoFocus="@(Existing is null)" />
-        <MudTextField @bind-Value="content" Label="compose.yml" Lines="18" Immediate="true" DebounceInterval="600" OnDebounceIntervalElapsed="Validate" Disabled="busy" Class="mt-3 compose-text"
-                      UserAttributes='@(new Dictionary<string, object> { ["id"] = "stack-text", ["spellcheck"] = "false" })' />
-        @* Un seul bandeau : seuls sa severite et son texte changent (le resultat precedent reste, attenue, pendant une nouvelle validation). *@
-        <MudAlert Severity="@CheckSeverity" Dense="true" Class="@("mt-2 compose-check" + (checking ? " checking" : ""))" Style="white-space:pre-wrap">@CheckText</MudAlert>
-        <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.CreateNewFolder" OnClick="InsertFolder" Disabled="busy" Class="mt-2">@L["Insert a NAS folder path"]</MudButton>
-        <MudText Typo="Typo.caption" Class="d-block mt-1">@L["Tab indents and Shift+Tab outdents (2 spaces). Press Esc then Tab to leave the editor with the keyboard."]</MudText>
-        <MudText Typo="Typo.caption" Class="d-block mt-1">@L["The path is inserted where the cursor is. Docker gives containers full access to it, whatever the share permissions."]</MudText>
+        @* Les deux onglets restent affichés (KeepPanelsAlive) : l'aide à la saisie YAML se branche sur la zone du compose.yml dès l'ouverture. *@
+        <MudTabs Elevation="0" Rounded="false" TabPanelsClass="pt-3" KeepPanelsAlive="true" Class="mt-2">
+            <MudTabPanel Text="@L["Compose file"]">
+                <MudTextField @bind-Value="content" Label="compose.yml" Lines="18" Immediate="true" DebounceInterval="600" OnDebounceIntervalElapsed="Validate" Disabled="busy" Class="compose-text"
+                              UserAttributes='@(new Dictionary<string, object> { ["id"] = "stack-text", ["spellcheck"] = "false" })' />
+                @* Un seul bandeau : seuls sa severite et son texte changent (le resultat precedent reste, attenue, pendant une nouvelle validation). *@
+                <MudAlert Severity="@CheckSeverity" Dense="true" Class="@("mt-2 compose-check" + (checking ? " checking" : ""))" Style="white-space:pre-wrap">@CheckText</MudAlert>
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.CreateNewFolder" OnClick="InsertFolder" Disabled="busy" Class="mt-2">@L["Insert a NAS folder path"]</MudButton>
+                <MudText Typo="Typo.caption" Class="d-block mt-1">@L["Tab indents and Shift+Tab outdents (2 spaces). Press Esc then Tab to leave the editor with the keyboard."]</MudText>
+                <MudText Typo="Typo.caption" Class="d-block mt-1">@L["The path is inserted where the cursor is. Docker gives containers full access to it, whatever the share permissions."]</MudText>
+            </MudTabPanel>
+            <MudTabPanel Text="@L["Environment file"]">
+                <MudTextField @bind-Value="env" Label=".env" Lines="18" Immediate="true" DebounceInterval="600" OnDebounceIntervalElapsed="Validate" Disabled="busy" Class="compose-text"
+                              Placeholder="MYSQL_ROOT_PASSWORD=change-me" UserAttributes='@(new Dictionary<string, object> { ["spellcheck"] = "false", ["autocomplete"] = "off" })' />
+                <MudText Typo="Typo.caption" Class="d-block mt-1">@L["Saved as .env next to compose.yml. One NAME=value per line; lines starting with # are comments. The compose file can use these values as variables. Leave it empty for no .env file."]</MudText>
+            </MudTabPanel>
+        </MudTabs>
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="() => Dialog.Cancel()" Disabled="busy">@L["Cancel"]</MudButton>
@@ -40,7 +50,7 @@
 
     const string Template = "services:\n  app:\n    image: nginx:latest\n    ports:\n      - \"8080:80\"\n    restart: unless-stopped\n";
 
-    string name = "", content = Template;
+    string name = "", content = Template, env = "";
     string? error;
     bool busy, checking;
     StackValidation? check;
@@ -93,7 +103,7 @@
     {
         if (Existing is null) { await Validate(); return; }
         name = Existing;
-        try { content = (await Agent.GetStackAsync(Existing)).Content; }
+        try { var stack = await Agent.GetStackAsync(Existing); content = stack.Content; env = stack.Env; }
         catch (AgentException e) { error = L.Translate(e.Message); }
         catch (HttpRequestException) { error = L["Agent unreachable."]; }
         await Validate();
@@ -104,7 +114,7 @@
         var id = ++checkId;
         checking = true;
         StackValidation? result = null;
-        try { result = await Agent.ValidateStackAsync(Existing, content); }
+        try { result = await Agent.ValidateStackAsync(Existing, content, env); }
         catch (AgentException e) { result = new(true, L.Translate(e.Message), []); }
         catch (HttpRequestException) { } // agent injoignable : on ne bloque pas, l'enregistrement le signalera
         if (id != checkId) return;
@@ -130,7 +140,7 @@
         busy = true;
         try
         {
-            await Ops.SaveStackAsync(name.Trim(), content);
+            await Ops.SaveStackAsync(name.Trim(), content, env);
             if (start) await Ops.StackAsync(name.Trim(), "up");
             Dialog.Close(DialogResult.Ok(start));
             return;

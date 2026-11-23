@@ -142,6 +142,8 @@ public sealed class DockerService(ICommandRunner run, IConfiguration cfg)
     string Bin => cfg["Docker:Binary"] ?? "docker";
     string StacksDir => (cfg["Docker:StacksDir"] ?? "/var/lib/ursanas/stacks").TrimEnd('/', '\\');
     string StackFile(string name) => Path.Combine(StacksDir, name, "compose.yml");
+    /// <summary>Le « .env » d'une stack : dans le dossier du compose.yml, où Compose le lit tout seul pour les variables du fichier.</summary>
+    string EnvFile(string name) => Path.Combine(StacksDir, name, ".env");
 
     // ---- État
 
@@ -468,7 +470,7 @@ public sealed class DockerService(ICommandRunner run, IConfiguration cfg)
         if (Rules.ValidateStackName(name) is { } e) throw new OperationException(e);
         var file = StackFile(name);
         if (!File.Exists(file)) throw new OperationException(Msg.F("Stack “{0}” does not exist.", name));
-        return new StackContent(name, File.ReadAllText(file));
+        return new StackContent(name, File.ReadAllText(file), File.Exists(EnvFile(name)) ? File.ReadAllText(EnvFile(name)) : "");
     }
 
     /// <summary>
@@ -476,9 +478,10 @@ public sealed class DockerService(ICommandRunner run, IConfiguration cfg)
     /// référencés, variables. Ne bloque jamais l'édition si Docker ou Compose manquent (<c>Checked</c> = false : l'enregistrement le dira).
     /// Les images absentes du NAS sont signalées en avertissement : elles seront téléchargées au démarrage (ou n'existent pas).
     /// </summary>
-    public async Task<StackValidation> ValidateStackAsync(string? name, string content, CancellationToken ct = default)
+    public async Task<StackValidation> ValidateStackAsync(string? name, string content, string? env = null, CancellationToken ct = default)
     {
         if (Rules.ValidateStackContent(content) is { } e) return new(true, e, []);
+        if (Rules.ValidateStackEnv(env) is { } ee) return new(true, ee, []);
         if (!string.IsNullOrEmpty(name) && Rules.ValidateStackName(name) is { } en) throw new OperationException(en);
         var status = await StatusAsync(ct);
         if (status.State != DockerState.Ready || status.ComposeVersion is null) return new(false, null, []);
@@ -492,7 +495,15 @@ public sealed class DockerService(ICommandRunner run, IConfiguration cfg)
             var tmp = Path.Combine(tmpDir, "compose.yml");
             await File.WriteAllTextAsync(tmp, content, ct);
             // Les chemins relatifs du fichier (env_file…) se lisent depuis le dossier de la stack, comme à l'exécution.
-            var baseArgs = new List<string> { "compose", "-p", project, "--project-directory", Directory.Exists(stackDir) ? stackDir : tmpDir, "-f", tmp };
+            var baseArgs = new List<string> { "compose", "-p", project, "--project-directory", Directory.Exists(stackDir) ? stackDir : tmpDir };
+            if (env is not null)
+            {
+                // Le « .env » en cours d'édition remplace celui du disque pour la vérification.
+                var tmpEnv = Path.Combine(tmpDir, ".env");
+                await File.WriteAllTextAsync(tmpEnv, env, ct);
+                baseArgs.AddRange(["--env-file", tmpEnv]);
+            }
+            baseArgs.AddRange(["-f", tmp]);
             var r = await run.RunAsync(Bin, [.. baseArgs, "config", "-q"], ct: ct);
             if (r.ExitCode != 0) return new(true, (string.IsNullOrWhiteSpace(r.StdErr) ? r.StdOut : r.StdErr).Trim().Replace(tmp, "compose.yml"), []);
 
@@ -511,10 +522,11 @@ public sealed class DockerService(ICommandRunner run, IConfiguration cfg)
     }
 
     /// <summary>Enregistre le fichier après l'avoir fait valider par « docker compose config » : un fichier invalide n'écrase jamais l'ancien.</summary>
-    public Task SaveStackAsync(string name, string content, CancellationToken ct = default)
+    public Task SaveStackAsync(string name, string content, string? env = null, CancellationToken ct = default)
     {
         if (Rules.ValidateStackName(name) is { } e1) throw new OperationException(e1);
         if (Rules.ValidateStackContent(content) is { } e2) throw new OperationException(e2);
+        if (Rules.ValidateStackEnv(env) is { } e3) throw new OperationException(e3);
         return Mutate(async () =>
         {
             await RequireComposeAsync(ct);
@@ -522,17 +534,32 @@ public sealed class DockerService(ICommandRunner run, IConfiguration cfg)
             var created = !Directory.Exists(dir);
             Directory.CreateDirectory(dir);
             var tmp = Path.Combine(dir, "compose.yml.new");
+            var tmpEnv = Path.Combine(dir, ".env.new");
             await File.WriteAllTextAsync(tmp, content, ct);
+            if (env is not null) await File.WriteAllTextAsync(tmpEnv, env, ct);
             try
             {
-                var r = await run.RunAsync(Bin, ["compose", "-p", name, "-f", tmp, "config", "-q"], ct: ct);
+                // Le « .env » à enregistrer sert à la vérification (variables du compose.yml) ; sans lui, Compose lit celui du dossier.
+                string[] envArgs = env is null ? [] : ["--env-file", tmpEnv];
+                var r = await run.RunAsync(Bin, ["compose", "-p", name, .. envArgs, "-f", tmp, "config", "-q"], ct: ct);
                 if (r.ExitCode != 0)
                     throw new OperationException(Msg.F("The compose file is invalid: {0}", (string.IsNullOrWhiteSpace(r.StdErr) ? r.StdOut : r.StdErr).Trim()));
-                if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(tmp, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead); // peut contenir des mots de passe
+                if (!OperatingSystem.IsWindows())
+                {
+                    // peuvent contenir des mots de passe
+                    File.SetUnixFileMode(tmp, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead);
+                    if (env is not null) File.SetUnixFileMode(tmpEnv, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead);
+                }
                 File.Move(tmp, StackFile(name), overwrite: true);
+                if (env is not null)
+                {
+                    if (string.IsNullOrWhiteSpace(env)) File.Delete(EnvFile(name)); // un « .env » vidé disparaît
+                    else File.Move(tmpEnv, EnvFile(name), overwrite: true);
+                }
             }
             finally
             {
+                if (File.Exists(tmpEnv)) File.Delete(tmpEnv);
                 if (File.Exists(tmp)) File.Delete(tmp);
                 if (created && !File.Exists(StackFile(name))) Directory.Delete(dir, recursive: true); // un fichier refusé ne laisse pas de dossier vide
             }

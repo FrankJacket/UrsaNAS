@@ -38,7 +38,8 @@ public sealed record DockerServiceRequest(string Action);
 /// <summary>Une stack Compose enregistrée sur le NAS ; <c>Running</c>/<c>Total</c> comptent ses conteneurs.</summary>
 public sealed record StackInfo(string Name, int Running, int Total);
 
-public sealed record StackContent(string Name, string Content);
+/// <summary><c>Env</c> : contenu du fichier « .env » de la stack (dans le même dossier que compose.yml), vide s'il n'y en a pas.</summary>
+public sealed record StackContent(string Name, string Content, string Env = "");
 
 /// <summary>Ports « 8080:80 », variables « CLE=valeur », volumes « /hote:/conteneur[:ro] » ou « volume:/conteneur[:ro] ».</summary>
 /// <summary><c>Network</c> : réseau Docker où brancher le conteneur ; créé s'il n'existe pas. Vide : réseau par défaut.</summary>
@@ -58,10 +59,14 @@ public sealed record ContainerSettings(RunContainerRequest Settings, bool Runnin
 
 public sealed record PullImageRequest(string Image);
 public sealed record DockerNameRequest(string Name);
-public sealed record SaveStackRequest(string Content);
+/// <summary><c>Env</c> : contenu du « .env » à enregistrer (vide = le supprimer) ; null = ne pas y toucher.</summary>
+public sealed record SaveStackRequest(string Content, string? Env = null);
 
-/// <summary><c>Name</c> : la stack éditée (vide pour une nouvelle) ; sert à lire les chemins relatifs du fichier depuis son dossier.</summary>
-public sealed record ValidateStackRequest(string? Name, string Content);
+/// <summary>
+/// <c>Name</c> : la stack éditée (vide pour une nouvelle) ; sert à lire les chemins relatifs du fichier depuis son dossier.
+/// <c>Env</c> : le « .env » en cours d'édition, utilisé à la place de celui du disque ; null = celui du disque.
+/// </summary>
+public sealed record ValidateStackRequest(string? Name, string Content, string? Env = null);
 
 /// <summary>
 /// <c>Checked</c> : false si Docker ou Compose ne sont pas disponibles (rien n'a été vérifié, l'édition n'est pas bloquée). <c>Error</c> : null si le
@@ -221,6 +226,15 @@ public static partial class Rules
         if (string.IsNullOrWhiteSpace(content)) return Msg.F("The compose file is empty.");
         if (System.Text.Encoding.UTF8.GetByteCount(content) > MaxStackBytes) return Msg.F("The compose file is too large (100 KB at most).");
         if (content.Contains('\0')) return Msg.F("The compose file contains invalid characters.");
+        return null;
+    }
+
+    /// <summary>Le « .env » peut être vide ou absent (null) ; sinon même limites que le compose.yml.</summary>
+    public static string? ValidateStackEnv(string? env)
+    {
+        if (string.IsNullOrEmpty(env)) return null;
+        if (System.Text.Encoding.UTF8.GetByteCount(env) > MaxStackBytes) return Msg.F("The environment file is too large (100 KB at most).");
+        if (env.Contains('\0')) return Msg.F("The environment file contains invalid characters.");
         return null;
     }
 }

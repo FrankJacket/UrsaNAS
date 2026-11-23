@@ -509,6 +509,39 @@ public sealed class DockerServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Le_fichier_env_est_enregistre_a_cote_du_compose_et_relu()
+    {
+        var r = ComposeRunner();
+        var s = Svc(r);
+        await s.SaveStackAsync("blog", "services: {}\n", "DB_PASSWORD=secret\n");
+        Assert.Equal("DB_PASSWORD=secret\n", File.ReadAllText(Path.Combine(_dir, "blog", ".env")));
+        Assert.Equal("DB_PASSWORD=secret\n", s.ReadStack("blog").Env);
+        Assert.Contains(r.Calls, c => c.Contains("--env-file") && c.Contains("config")); // vérifié avec le .env à enregistrer
+        Assert.False(File.Exists(Path.Combine(_dir, "blog", ".env.new")));
+    }
+
+    [Fact]
+    public async Task Sans_env_le_fichier_existant_reste_et_un_env_vide_le_supprime()
+    {
+        var s = Svc(ComposeRunner());
+        await s.SaveStackAsync("blog", "services: {}\n", "A=1\n");
+        await s.SaveStackAsync("blog", "services: {}\n"); // null : on n'y touche pas
+        Assert.Equal("A=1\n", s.ReadStack("blog").Env);
+        await s.SaveStackAsync("blog", "services: {}\n", "");
+        Assert.Equal("", s.ReadStack("blog").Env);
+        Assert.False(File.Exists(Path.Combine(_dir, "blog", ".env")));
+    }
+
+    [Fact]
+    public async Task Un_env_refuse_ne_change_rien()
+    {
+        var s = Svc(ComposeRunner());
+        await s.SaveStackAsync("blog", "services: {}\n", "A=1\n");
+        await Assert.ThrowsAsync<OperationException>(() => s.SaveStackAsync("blog", "services: {}\n", "A=\0"));
+        Assert.Equal("A=1\n", s.ReadStack("blog").Env);
+    }
+
+    [Fact]
     public async Task Sans_compose_on_n_enregistre_pas_de_stack()
     {
         var r = new Runner(a => a[0] == "version" ? new(0, "27\n", "") : new(1, "", "unknown"));

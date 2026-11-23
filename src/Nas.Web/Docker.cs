@@ -139,11 +139,12 @@ public class DockerOperations(AgentClient agent, Repo repo, AuthenticationStateP
         await repo.AuditAsync(await ActorAsync(), "Docker network deleted", name);
     }
 
-    public async Task SaveStackAsync(string name, string content)
+    public async Task SaveStackAsync(string name, string content, string? env = null)
     {
         if (Rules.ValidateStackName(name) is { } e1) throw new AgentException(e1);
         if (Rules.ValidateStackContent(content) is { } e2) throw new AgentException(e2);
-        await agent.SaveStackAsync(name, content);
+        if (Rules.ValidateStackEnv(env) is { } e3) throw new AgentException(e3);
+        await agent.SaveStackAsync(name, content, env);
         await repo.AuditAsync(await ActorAsync(), "Docker stack saved", name);
     }
 

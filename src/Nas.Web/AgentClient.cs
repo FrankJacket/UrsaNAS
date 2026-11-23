@@ -456,15 +456,15 @@ public class AgentClient(HttpClient http)
         return await r.Content.ReadFromJsonAsync<StackContent>(ct) ?? throw new AgentException(Msg.F("The agent answered {0}.", 204));
     }
 
-    public async Task<StackValidation> ValidateStackAsync(string? name, string content, CancellationToken ct = default)
+    public async Task<StackValidation> ValidateStackAsync(string? name, string content, string? env = null, CancellationToken ct = default)
     {
-        using var r = await http.PostAsJsonAsync("docker/stacks/validate", new ValidateStackRequest(name, content), ct);
+        using var r = await http.PostAsJsonAsync("docker/stacks/validate", new ValidateStackRequest(name, content, env), ct);
         await EnsureOkAsync(r, ct);
         return await r.Content.ReadFromJsonAsync<StackValidation>(ct) ?? new(false, null, []);
     }
 
-    public async Task SaveStackAsync(string name, string content, CancellationToken ct = default) =>
-        await EnsureOkAsync(await http.PutAsJsonAsync($"docker/stacks/{Uri.EscapeDataString(name)}", new SaveStackRequest(content), ct), ct);
+    public async Task SaveStackAsync(string name, string content, string? env = null, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PutAsJsonAsync($"docker/stacks/{Uri.EscapeDataString(name)}", new SaveStackRequest(content, env), ct), ct);
 
     public async Task StackActionAsync(string name, string action, CancellationToken ct = default) =>
         await EnsureOkAsync(await http.PostAsync($"docker/stacks/{Uri.EscapeDataString(name)}/{action}", null, ct), ct);

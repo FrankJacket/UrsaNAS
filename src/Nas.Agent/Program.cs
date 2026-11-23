@@ -248,9 +248,9 @@ public partial class Program
         app.MapGet("/docker/stacks", (DockerService d, CancellationToken ct) => Read(async () => Results.Ok(await d.StacksAsync(ct))));
         app.MapGet("/docker/stacks/{name}", (string name, DockerService d) => Read(() => Task.FromResult(Results.Ok(d.ReadStack(name)))));
         app.MapPost("/docker/stacks/validate", (ValidateStackRequest r, DockerService d, CancellationToken ct) =>
-            Read(async () => Results.Ok(await d.ValidateStackAsync(r.Name, r.Content, ct))));
+            Read(async () => Results.Ok(await d.ValidateStackAsync(r.Name, r.Content, r.Env, ct))));
         app.MapPut("/docker/stacks/{name}",(string name, SaveStackRequest r, DockerService d, CancellationToken ct) =>
-            Read(async () => { await d.SaveStackAsync(name, r.Content, ct); return Results.NoContent(); }));
+            Read(async () => { await d.SaveStackAsync(name, r.Content, r.Env, ct); return Results.NoContent(); }));
         app.MapPost("/docker/stacks/{name}/{action}", (string name, string action, DockerService d, CancellationToken ct) =>
             Read(async () => { await d.StackActionAsync(name, action, ct); return Results.NoContent(); }));
         // Machines virtuelles (libvirt)
