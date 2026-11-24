@@ -1,0 +1,65 @@
+Template: ursanas/title
+Type: title
+Description: UrsaNAS setup
+Description-fr.UTF-8: Configuration d'UrsaNAS
+
+Template: ursanas/progress-title
+Type: text
+Description: Setting up UrsaNAS
+Description-fr.UTF-8: Configuration d'UrsaNAS
+
+Template: ursanas/progress-prepare
+Type: text
+Description: Preparing UrsaNAS...
+Description-fr.UTF-8: Préparation d'UrsaNAS...
+
+Template: ursanas/progress-zfs
+Type: text
+Description: Installing ZFS (this can take several minutes)...
+Description-fr.UTF-8: Installation de ZFS (cela peut prendre plusieurs minutes)...
+
+Template: ursanas/progress-docker
+Type: text
+Description: Installing Docker...
+Description-fr.UTF-8: Installation de Docker...
+
+Template: ursanas/progress-kvm
+Type: text
+Description: Installing virtual machine support (KVM)...
+Description-fr.UTF-8: Installation de la virtualisation (KVM)...
+
+Template: ursanas/progress-rclone
+Type: text
+Description: Installing rclone (OneDrive, Dropbox)...
+Description-fr.UTF-8: Installation de rclone (OneDrive, Dropbox)...
+
+Template: ursanas/progress-finish
+Type: text
+Description: Finishing...
+Description-fr.UTF-8: Finalisation...
+
+Template: ursanas/disk-size
+Type: string
+Default: 64
+Description: System disk size (GB):
+ UrsaNAS uses at most this much of the disk for the system: boot partition, swap and root file system. The rest of the disk is left untouched.
+ .
+ Enter a number of gigabytes, at least 16, or 0 to use the whole disk.
+Description-fr.UTF-8: Taille du disque système (Go) :
+ UrsaNAS utilise au plus cet espace sur le disque pour le système : partition de démarrage, swap et système de fichiers racine. Le reste du disque n'est pas touché.
+ .
+ Entrez un nombre de gigaoctets, au moins 16, ou 0 pour utiliser tout le disque.
+
+Template: ursanas/disk-size-invalid
+Type: error
+Description: Invalid disk size
+ Enter a whole number of gigabytes, at least 16, or 0 to use the whole disk.
+Description-fr.UTF-8: Taille de disque invalide
+ Entrez un nombre entier de gigaoctets, au moins 16, ou 0 pour utiliser tout le disque.
+
+Template: ursanas/disk-too-small
+Type: error
+Description: The disk is too small
+ UrsaNAS needs a system disk of at least 16 GB, plus the swap space. Use a larger disk.
+Description-fr.UTF-8: Le disque est trop petit
+ UrsaNAS a besoin d'un disque système d'au moins 16 Go, plus l'espace de swap. Utilisez un disque plus grand.

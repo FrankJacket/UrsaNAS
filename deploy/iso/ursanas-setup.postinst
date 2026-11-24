@@ -1,0 +1,76 @@
+#!/bin/sh
+# The "UrsaNAS setup" page of the installer, run by the main menu just before the network setup (item 1700).
+# One page asks what the machine needs: its name, the first user and the size of the system disk. The answers are
+# handed to the standard steps (network, user creation) that then skip their own questions; partman-early.sh
+# turns the disk size into a partitioning recipe when the disks are known.
+
+. /usr/share/debconf/confmodule
+
+debconf-loadtemplate ursanas /var/lib/dpkg/info/ursanas-setup.templates
+db_settitle ursanas/title
+
+MIN_TOTAL_GB=16     # smallest accepted system disk size
+
+valid_host() {
+    case $1 in '' | -* | *- | *[!A-Za-z0-9-]*) return 1 ;; esac
+    [ ${#1} -le 63 ]
+}
+valid_user() {
+    case $1 in '' | [!a-z]* | *[!a-z0-9_-]*) return 1 ;; esac
+    [ ${#1} -le 32 ]
+}
+show_error() {
+    db_input critical "$1" || true
+    db_go || true
+}
+
+# The machine is called "ursanas" unless the installer already knows better (boot parameter).
+db_get netcfg/get_hostname || true
+case $RET in '' | debian) db_set netcfg/get_hostname ursanas || true ;; esac
+
+while :; do
+    db_get passwd/user-password || true
+    previous_password=$RET
+
+    for q in netcfg/get_hostname passwd/user-fullname passwd/username passwd/user-password \
+             passwd/user-password-again ursanas/disk-size; do
+        db_fset "$q" seen false || true
+        db_input critical "$q" || true
+    done
+    db_go || true
+
+    db_get netcfg/get_hostname;         host=$RET
+    db_get passwd/username;             user=$RET
+    db_get passwd/user-password;        password=$RET
+    db_get passwd/user-password-again;  again=$RET
+    db_get ursanas/disk-size;           size_gb=$RET
+
+    # A password left empty keeps the one already known (boot parameter, or the previous try).
+    if [ -z "$password" ] && [ -z "$again" ] && [ -n "$previous_password" ]; then
+        password=$previous_password
+        again=$previous_password
+        db_set passwd/user-password "$password" || true
+        db_set passwd/user-password-again "$again" || true
+    fi
+
+    if ! valid_host "$host"; then show_error netcfg/invalid_hostname; continue; fi
+    if ! valid_user "$user"; then show_error passwd/username-bad; continue; fi
+    if [ -z "$password" ]; then show_error passwd/password-empty; continue; fi
+    if [ "$password" != "$again" ]; then show_error passwd/password-mismatch; continue; fi
+    case $size_gb in
+        '' | *[!0-9]*) show_error ursanas/disk-size-invalid; db_set ursanas/disk-size 64; continue ;;
+    esac
+    if [ "$size_gb" -ne 0 ] && [ "$size_gb" -lt "$MIN_TOTAL_GB" ]; then
+        show_error ursanas/disk-size-invalid; db_set ursanas/disk-size 64; continue
+    fi
+    break
+done
+
+# The standard steps use these answers and do not ask again; the name also wins over one supplied by the DHCP server.
+db_set netcfg/hostname "$host" || true
+db_set passwd/make-user true || true
+for q in netcfg/get_hostname passwd/user-fullname passwd/username passwd/user-password passwd/user-password-again; do
+    db_fset "$q" seen true || true
+done
+
+exit 0

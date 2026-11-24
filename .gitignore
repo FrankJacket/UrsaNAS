@@ -13,3 +13,4 @@ obj-linux/
 
 # Réglages locaux de Claude Code (chemins et autorisations propres à cette machine)
 .claude/
+artifacts-iso/

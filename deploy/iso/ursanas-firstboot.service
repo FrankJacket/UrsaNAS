@@ -1,0 +1,15 @@
+[Unit]
+Description=First-boot installation of UrsaNAS
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/opt/ursanas-setup/ursanas.tar.gz
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/ursanas-firstboot
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=infinity
+
+[Install]
+WantedBy=multi-user.target
