@@ -1,7 +1,8 @@
 #!/bin/bash
 # Builds the UrsaNAS installation ISO: the official Debian netinst ISO, plus an installer that asks only a few
-# questions (see preseed.cfg) and that installs the UrsaNAS package at the first start of the new system.
-# Run it in WSL (Debian or Ubuntu); it does not need root and it never modifies the Debian ISO it starts from.
+# questions (see preseed.cfg), installs the UrsaNAS dependencies with Linux (see late.sh and ursanas-deps.sh) and
+# installs the UrsaNAS package at the first start of the new system (see ursanas-firstboot.sh).
+# Run it on Linux or in WSL (Debian or Ubuntu); it does not need root and it never modifies the Debian ISO it starts from.
 #
 #   deploy/iso/build-iso.sh --debian-iso debian-13.x.y-amd64-netinst.iso --package ursanas-X.Y.Z-linux-x64.tar.gz \
 #                           [--output ursanas-X.Y.Z-installer.iso] [--sha256 <expected checksum of the Debian ISO>]
@@ -22,7 +23,7 @@ while [ $# -gt 0 ]; do
         --package)    PACKAGE=$2; shift 2 ;;
         --output)     OUTPUT=$2; shift 2 ;;
         --sha256)     SHA256=$2; shift 2 ;;
-        -h|--help)    sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help)    sed -n "2,11p" "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *)            die "unknown option: $1" ;;
     esac
 done
