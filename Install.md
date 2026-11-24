@@ -77,7 +77,7 @@ Instead of installing Linux and then running the installer, you can install both
 ### What you need
 
 - A machine, physical or virtual, **that you can erase: the installation erases the system disk** (several disks: the installer asks which one). UEFI is recommended. At least 16 GB of disk for the system, 2 CPU cores and 4 GB of memory.
-- Internet access during the installation: the installer downloads the packages (Debian mirror `deb.debian.org`) and `rclone`.
+- **Internet access during the installation.** This is not an offline installation. The installer downloads all the Debian packages (SSH, Samba, NFS, FTP, ZFS, Docker, KVM and the rest) from the Debian mirror `deb.debian.org`, and `rclone` from `downloads.rclone.org`; the Debian image itself only holds the base system. Without Internet, the installation fails or ends incomplete. UrsaNAS itself (the program and its installer) is already inside the ISO, in the version you gave when you built it: it is not downloaded, so the ISO installs that version even if a newer release exists (see [Updating](#updating)).
 - On Hyper-V: a **generation 2** machine with **Secure Boot switched off** (or with the *Microsoft UEFI Certificate Authority* template), and a fixed amount of memory (no *Dynamic Memory*).
 
 ### Building the ISO
