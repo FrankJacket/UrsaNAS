@@ -114,6 +114,7 @@ sealed class FakeUpdateAgentHandler : HttpMessageHandler
     public List<string> InstalledPackages = [];
     public bool AppInstallCalled;
     public bool PowerCalled;
+    public ImageUpdateReport? DockerReport; // null : pas de Docker sur ce NAS
 
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
     {
@@ -127,6 +128,8 @@ sealed class FakeUpdateAgentHandler : HttpMessageHandler
             ("POST", "system/update/install-app") => Install(),
             ("POST", "system/update/install-packages") => InstallPackages(request),
             ("POST", "system/power/reboot") or ("POST", "system/reboot") => Power(),
+            ("GET", "docker/status") when DockerReport is not null => Json(new DockerStatus(DockerState.Ready, "27", "2")),
+            ("POST", "docker/updates/check") when DockerReport is not null => Json(DockerReport),
             _ => new HttpResponseMessage(HttpStatusCode.NotFound),
         };
         return Task.FromResult(response);
@@ -168,6 +171,15 @@ public class UpdateSchedulerTests : IDisposable
         var entry = Assert.Single(await _repo.GetAuditAsync());
         Assert.Equal(("system", "Scheduled update check"), (entry.Actor, entry.Action));
         Assert.Contains("1.1.0", entry.Detail);
+    }
+
+    [Fact]
+    public async Task La_verification_planifiee_couvre_aussi_les_images_docker()
+    {
+        _handler.DockerReport = new(DateTime.UtcNow, [new("1", "web", "nginx", null, ImageUpdateState.UpdateAvailable), new("2", "db", "redis", null, ImageUpdateState.UpToDate)]);
+        await _scheduler.RunCheckAsync(default);
+        var entry = Assert.Single(await _repo.GetAuditAsync(), e => e.Action == "Scheduled Docker image check");
+        Assert.Contains("1 container(s)", entry.Detail);
     }
 
     [Fact]

@@ -112,6 +112,14 @@ public sealed class FakeCommandRunner : ICommandRunner
     ];
     bool _dockerDown; // « systemctl stop docker » : le démon ne répond plus
 
+    // Versions des images : « docker pull nginx » donne la nouvelle version (voir FakeRegistryClient) ; un conteneur garde celle de sa création.
+    bool _nginxPulled;
+    readonly Dictionary<string, string> _containerImageIds = new();
+
+    static string FullImage(string image) => image.Contains(':') ? image : image + ":latest";
+    string ImageId(string image) => "sha256:" + FullImage(image).Replace(':', '-') + (_nginxPulled && FullImage(image) == "nginx:latest" ? "-new" : "");
+    string UsedImageId(FakeContainer c) => _containerImageIds.GetValueOrDefault(c.Id) ?? "sha256:" + FullImage(c.Image).Replace(':', '-');
+
     static string Json(object o) => System.Text.Json.JsonSerializer.Serialize(o);
 
     CommandResult FakeSystemctl(IReadOnlyList<string> a)
@@ -175,7 +183,9 @@ public sealed class FakeCommandRunner : ICommandRunner
                 var name = a.Contains("--name") ? a[a.ToList().IndexOf("--name") + 1] : $"fake-{_containers.Count}";
                 if (_containers.Any(c => c.Name == name)) return Fail($"Error response from daemon: Conflict. The container name \"/{name}\" is already in use");
                 var net = a.ToList().IndexOf("--network") is var ni and >= 0 ? a[ni + 1] : "bridge";
-                _containers.Add(new(Guid.NewGuid().ToString("N")[..12], name, a[^1], a[0] == "run" ? "running" : "created", "", null, net));
+                var created = new FakeContainer(Guid.NewGuid().ToString("N")[..12], name, a[^1], a[0] == "run" ? "running" : "created", "", null, net);
+                _containers.Add(created);
+                _containerImageIds[created.Id] = ImageId(created.Image);
                 return Ok();
             case "rename":
                 var k = _containers.FindIndex(c => c.Id == a[1] || c.Name == a[1]);
@@ -183,10 +193,10 @@ public sealed class FakeCommandRunner : ICommandRunner
                 _containers[k] = _containers[k] with { Name = a[2] };
                 return Ok();
             case "update": return Ok(a[^1]);
-            case "inspect" when a.Count > 2: // plusieurs identifiants : seul le réseau nous intéresse (liste des conteneurs)
+            case "inspect" when a.Count > 2 && !a.Contains("--format"): // plusieurs identifiants : les réseaux et les images (listes)
                 return Ok(Json(_containers.Where(c => a.Skip(1).Contains(c.Id)).Select((c, i) => new
                 {
-                    Id = c.Id.PadRight(64, '0'),
+                    Id = c.Id.PadRight(64, '0'), Image = UsedImageId(c), Config = new { c.Image },
                     NetworkSettings = new
                     {
                         Networks = new Dictionary<string, object>
@@ -202,7 +212,7 @@ public sealed class FakeCommandRunner : ICommandRunner
                 if (ic is null) return Fail($"Error: No such object: {a[^1]}");
                 return Ok(Json(new
                 {
-                    Id = ic.Id.PadRight(64, '0'), Name = "/" + ic.Name, Image = "sha256:fake",
+                    Id = ic.Id.PadRight(64, '0'), Name = "/" + ic.Name, Image = UsedImageId(ic),
                     State = new { Running = ic.State == "running" },
                     Config = new { Image = ic.Image, Env = new[] { "PATH=/usr/bin", "TZ=UTC" }, Labels = ic.Project is null ? new Dictionary<string, string>() : new() { ["com.docker.compose.project"] = ic.Project } },
                     HostConfig = new
@@ -213,6 +223,13 @@ public sealed class FakeCommandRunner : ICommandRunner
                     Mounts = ic.Ports.Length == 0 ? [] : new[] { new { Type = "bind", Source = "/srv/media", Destination = "/media", RW = true } },
                     NetworkSettings = new { Networks = new Dictionary<string, object> { [ic.Net] = new { IPAddress = ic.State == "running" ? "172.17.0.2" : "", Gateway = "172.17.0.1", MacAddress = "" } } },
                 }) + "\n");
+            case "image" when a[1] == "inspect" && a.Contains("{{json .}}"):
+                if (a[^1].StartsWith("sha256:", StringComparison.Ordinal)) // l'image d'un conteneur, par son identifiant
+                    return Ok(Json(new { Id = a[^1], Config = new { Env = new[] { "PATH=/usr/bin" } } }) + "\n");
+                var full = FullImage(a[^1]);
+                if (!_images.Contains(full)) return Fail($"Error response from daemon: No such image: {a[^1]}");
+                var digest = _nginxPulled && full == "nginx:latest" ? FakeRegistryClient.NewDigest : FakeRegistryClient.SameDigest;
+                return Ok(Json(new { Id = ImageId(full), RepoDigests = new[] { full.Split(':')[0] + "@" + digest }, Config = new { Env = new[] { "PATH=/usr/bin" } } }) + "\n");
             case "image" when a[1] == "inspect" && a.Contains("--format"): // « l'image est-elle sur le NAS ? »
                 var wanted = a[^1].Contains(':') ? a[^1] : a[^1] + ":latest";
                 return _images.Contains(wanted) ? Ok("sha256:fake\n") : Fail($"Error response from daemon: No such image: {a[^1]}");
@@ -227,6 +244,7 @@ public sealed class FakeCommandRunner : ICommandRunner
             case "pull":
                 var img = a[1].Contains(':') ? a[1] : a[1] + ":latest";
                 if (!_images.Contains(img)) _images.Add(img);
+                if (img == "nginx:latest") _nginxPulled = true;
                 return Ok();
             case "rmi":
                 _images.RemoveAll(m => m == a[1] || Math.Abs(m.GetHashCode()).ToString("x8") == a[1]);

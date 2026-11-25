@@ -1,0 +1,25 @@
+@* L'état des mises à jour d'une image ; la raison d'une vérification impossible s'affiche au survol. *@
+<span class="ml-2" title="@(Reason is null ? null : L.Translate(Reason))">
+    <MudChip T="string" Size="Size.Small" Color="@Look.Color" Variant="@Look.Variant">@L[Look.Text]</MudChip>
+</span>
+
+@code {
+    [Parameter, EditorRequired] public ImageUpdateState State { get; set; }
+    [Parameter] public string? Reason { get; set; }
+
+    (string Text, Color Color, Variant Variant) Look => State switch
+    {
+        ImageUpdateState.UpdateAvailable => ("Update available", Color.Info, Variant.Filled),
+        ImageUpdateState.Recreate => ("To recreate", Color.Warning, Variant.Filled),
+        ImageUpdateState.UpToDate => ("Up to date", Color.Success, Variant.Outlined),
+        ImageUpdateState.Pinned => ("Pinned version", Color.Default, Variant.Outlined),
+        _ => ("Cannot be checked", Color.Default, Variant.Outlined),
+    };
+
+    /// <summary>L'état à montrer pour plusieurs conteneurs (une stack, une image) : le plus important l'emporte ; null s'il n'y en a aucun.</summary>
+    public static ContainerImageUpdate? Summary(IEnumerable<ContainerImageUpdate> containers) =>
+        containers.OrderBy(c => c.State switch
+        {
+            ImageUpdateState.UpdateAvailable => 0, ImageUpdateState.Recreate => 1, ImageUpdateState.Unverifiable => 2, ImageUpdateState.UpToDate => 3, _ => 4,
+        }).FirstOrDefault();
+}

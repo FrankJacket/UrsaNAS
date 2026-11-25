@@ -5,6 +5,11 @@ using Nas.Contracts;
 
 namespace Nas.Agent.Services;
 
+/// <summary>Une image présente sur le NAS ; <c>RepoDigests</c> est vide si elle y a été construite ou chargée.</summary>
+public sealed record LocalImage(string Id, IReadOnlyList<string> RepoDigests);
+
+public sealed record ContainerImage(string Id, string Name, string Image, string ImageId, string? Project, LocalImage? Local);
+
 /// <summary>Lecture de la sortie de la commande docker (formats « {{json .}} » : une ligne JSON par objet).</summary>
 public static class DockerParser
 {
@@ -64,6 +69,26 @@ public static class DockerParser
 
     public static IReadOnlyList<ImageInfo> ParseImages(string text) =>
         Lines(text).Select(e => new ImageInfo(S(e, "ID"), S(e, "Repository"), S(e, "Tag"), ParseSize(S(e, "Size")), S(e, "CreatedSince"))).ToList();
+
+    /// <summary>« docker inspect » de conteneurs (un tableau JSON) : l'image demandée et celle réellement utilisée.</summary>
+    public static IReadOnlyList<(string ContainerId, string Image, string ImageId)> ParseContainerImages(string inspectJson)
+    {
+        using var doc = JsonDocument.Parse(inspectJson);
+        if (doc.RootElement.ValueKind != JsonValueKind.Array) return [];
+        return doc.RootElement.EnumerateArray().Where(e => e.ValueKind == JsonValueKind.Object)
+            .Select(e => (ContainerId: Str(e, "Id"), Image: e.TryGetProperty("Config", out var c) ? Str(c, "Image") : "", ImageId: Str(e, "Image")))
+            .Where(x => x.ContainerId.Length > 0 && x.Image.Length > 0).ToList();
+    }
+
+    /// <summary>« docker image inspect » (un objet JSON) : identifiant et empreintes de registre de l'image.</summary>
+    public static LocalImage? ParseLocalImage(string text)
+    {
+        var e = Lines(text).FirstOrDefault();
+        if (e.ValueKind != JsonValueKind.Object || Str(e, "Id") is not { Length: > 0 } id) return null;
+        var digests = e.TryGetProperty("RepoDigests", out var d) && d.ValueKind == JsonValueKind.Array
+            ? d.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.String).Select(x => x.GetString()!).ToList() : [];
+        return new(id, digests);
+    }
 
     public static IReadOnlyList<DockerVolume> ParseVolumes(string text) =>
         Lines(text).Select(e => new DockerVolume(S(e, "Name"), S(e, "Driver"), S(e, "Mountpoint"))).ToList();
@@ -307,35 +332,128 @@ public sealed class DockerService(ICommandRunner run, IConfiguration cfg)
             if (DockerInspect.Unsupported(c, image).Count > 0)
                 throw new OperationException(Msg.F("This container uses settings that cannot be kept when it is recreated: only its restart policy can be changed here."));
 
-            var wasRunning = DockerInspect.Running(c);
-            var oldName = current.Name!;
-            var suffix = "-old-" + Guid.NewGuid().ToString("N")[..6];
-            var parked = oldName.Length + suffix.Length <= 64 ? oldName + suffix : "old-" + Guid.NewGuid().ToString("N")[..12];
+            await RecreateAsync(id, r, name, current.Name!, DockerInspect.Running(c), ct);
+        });
+    }
 
-            await EnsureNetworkAsync(r.Network, ct);
-            if (wasRunning) await Ok(["stop", id], "Stopping the container", ct);
-            await Ok(["rename", id, parked], "Renaming the container", ct);
+    // L'ancien conteneur est arrêté et renommé, le nouveau est créé ; s'il ne peut pas l'être, l'ancien est remis en place.
+    async Task RecreateAsync(string id, RunContainerRequest r, string name, string oldName, bool wasRunning, CancellationToken ct)
+    {
+        var suffix = "-old-" + Guid.NewGuid().ToString("N")[..6];
+        var parked = oldName.Length + suffix.Length <= 64 ? oldName + suffix : "old-" + Guid.NewGuid().ToString("N")[..12];
+
+        await EnsureNetworkAsync(r.Network, ct);
+        if (wasRunning) await Ok(["stop", id], "Stopping the container", ct);
+        await Ok(["rename", id, parked], "Renaming the container", ct);
+        try
+        {
+            await Ok(RunArgs(r, name, start: wasRunning), "Creating the container", ct);
+        }
+        catch (OperationException failure)
+        {
+            // Retour en arrière : on retire ce qui a pu être créé, puis l'ancien conteneur reprend son nom et son état.
             try
             {
-                await Ok(RunArgs(r, name, start: wasRunning), "Creating the container", ct);
+                await run.RunAsync(Bin, ["rm", "-f", name], ct: ct);
+                await Ok(["rename", parked, oldName], "Renaming the container", ct);
+                if (wasRunning) await Ok(["start", oldName], "Starting the container", ct);
             }
-            catch (OperationException failure)
+            catch (OperationException restoreFailure)
             {
-                // Retour en arrière : on retire ce qui a pu être créé, puis l'ancien conteneur reprend son nom et son état.
+                throw new OperationException(Msg.F("The container could not be recreated and the previous one could not be restored ({0}): {1}", restoreFailure.Message, failure.Message));
+            }
+            throw new OperationException(Msg.F("The container could not be recreated; the previous one was restored. {0}", failure.Message));
+        }
+        await Ok(["rm", parked], "Deleting the container", ct);
+    }
+
+    // ---- Versions des images
+
+    /// <summary>L'image que Docker a sur le NAS sous cette référence, ou null.</summary>
+    async Task<LocalImage?> LocalImageAsync(string image, CancellationToken ct)
+    {
+        if (Rules.ValidateImageRef(image) is not null) return null;
+        try { return DockerParser.ParseLocalImage(await Ok(["image", "inspect", "--format", "{{json .}}", image], "Reading the image", ct)); }
+        catch (OperationException) { return null; }
+    }
+
+    /// <summary>Pour chaque conteneur : l'image demandée, celle qu'il utilise et celle que le NAS a aujourd'hui sous ce nom.</summary>
+    public async Task<IReadOnlyList<ContainerImage>> ContainerImagesAsync(CancellationToken ct = default)
+    {
+        var list = await ContainersAsync(ct);
+        if (list.Count == 0) return [];
+        var used = DockerParser.ParseContainerImages(await Ok(["inspect", "--type", "container", .. list.Select(c => c.Id)], "Inspecting containers", ct));
+        var locals = new Dictionary<string, LocalImage?>(StringComparer.Ordinal);
+        var result = new List<ContainerImage>();
+        foreach (var c in list)
+        {
+            var found = used.FirstOrDefault(u => u.ContainerId.StartsWith(c.Id, StringComparison.Ordinal));
+            if (found.ContainerId is null) continue; // disparu entre les deux commandes
+            if (!locals.TryGetValue(found.Image, out var local)) locals[found.Image] = local = await LocalImageAsync(found.Image, ct);
+            result.Add(new(c.Id, c.Name, found.Image, found.ImageId, c.Project, local));
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Télécharge la dernière version de l'image d'un conteneur seul, puis le recrée avec ses réglages (retour à l'ancien si la création
+    /// échoue). Renvoie false s'il utilisait déjà cette version. Une image sans registre (construite sur place) n'est pas téléchargée.
+    /// </summary>
+    public async Task<bool> UpdateContainerImageAsync(string id, CancellationToken ct = default)
+    {
+        if (Rules.ValidateDockerName(id) is { } e0) throw new OperationException(e0);
+        var updated = false;
+        await Mutate(async () =>
+        {
+            // L'image inspectée est celle que le conteneur utilise : ses variables ne sont donc pas reprises comme des réglages.
+            var (c, image) = await InspectAsync(id, ct);
+            if (DockerInspect.Stack(c) is { } stack)
+                throw new OperationException(Msg.F("This container belongs to the stack “{0}”: update the stack instead.", stack));
+            if (DockerInspect.Unsupported(c, image).Count > 0)
+                throw new OperationException(Msg.F("This container uses settings that cannot be kept when it is recreated: it cannot be updated here."));
+            var settings = DockerInspect.Settings(c, image);
+            if (settings.Image.Contains('@')) throw new OperationException(Msg.F("This image is pinned to an exact version: there is nothing to update."));
+            if (Rules.ValidateRunContainer(settings) is { } e1) throw new OperationException(e1);
+
+            var local = await LocalImageAsync(settings.Image, ct);
+            if (local is null or { RepoDigests.Count: > 0 })
+            {
+                await Ok(["pull", settings.Image], "Downloading the image", ct);
+                local = await LocalImageAsync(settings.Image, ct);
+            }
+            if (local is null) throw new OperationException(Msg.F("The image is no longer on the NAS under this name."));
+            if (local.Id == (c.TryGetProperty("Image", out var used) ? used.GetString() : null)) return;
+
+            await RecreateAsync(id, settings, settings.Name!, settings.Name!, DockerInspect.Running(c), ct);
+            updated = true;
+        });
+        return updated;
+    }
+
+    /// <summary>
+    /// Supprime les anciennes images qu'une mise à jour vient de remplacer. Une image qui porte encore un nom est gardée, et « rmi » est
+    /// lancé sans « -f » : Docker refuse tant qu'un conteneur s'en sert. Renvoie le nombre d'images supprimées.
+    /// </summary>
+    public async Task<int> RemoveReplacedImagesAsync(IReadOnlyList<string> ids, CancellationToken ct = default)
+    {
+        if (ids.Count > 100 || ids.Any(i => !i.StartsWith("sha256:", StringComparison.Ordinal) || Rules.ValidateImageRef(i) is not null))
+            throw new OperationException(Msg.F("Invalid image identifier."));
+        var removed = 0;
+        await Mutate(async () =>
+        {
+            foreach (var id in ids.Distinct())
+            {
                 try
                 {
-                    await run.RunAsync(Bin, ["rm", "-f", name], ct: ct);
-                    await Ok(["rename", parked, oldName], "Renaming the container", ct);
-                    if (wasRunning) await Ok(["start", oldName], "Starting the container", ct);
+                    var tags = (await Ok(["image", "inspect", "--format", "{{json .RepoTags}}", id], "Reading the image", ct)).Trim();
+                    if (tags is not ("[]" or "null")) continue;
+                    await Ok(["rmi", id], "Deleting the image", ct);
+                    removed++;
                 }
-                catch (OperationException restoreFailure)
-                {
-                    throw new OperationException(Msg.F("The container could not be recreated and the previous one could not be restored ({0}): {1}", restoreFailure.Message, failure.Message));
-                }
-                throw new OperationException(Msg.F("The container could not be recreated; the previous one was restored. {0}", failure.Message));
+                catch (OperationException) { } // déjà partie, ou encore utilisée : elle reste
             }
-            await Ok(["rm", parked], "Deleting the container", ct);
         });
+        return removed;
     }
 
     // ---- Images
@@ -579,6 +697,8 @@ public sealed class DockerService(ICommandRunner run, IConfiguration cfg)
             {
                 case "up": await Ok([.. baseArgs, "up", "-d", "--remove-orphans"], "Starting the stack", ct); break;
                 case "down": await Ok([.. baseArgs, "down"], "Stopping the stack", ct); break;
+                // Tous les conteneurs sont recréés avec les images du NAS : rien n'est cherché dans les registres (sauf une image absente).
+                case "rebuild": await Ok([.. baseArgs, "up", "-d", "--force-recreate", "--remove-orphans"], "Rebuilding the stack", ct); break;
                 case "update":
                     await Ok([.. baseArgs, "pull"], "Updating the stack", ct);
                     await Ok([.. baseArgs, "up", "-d", "--remove-orphans"], "Updating the stack", ct);

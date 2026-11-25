@@ -62,6 +62,11 @@ public partial class Program
         builder.Services.AddSingleton<DiskFilesService>();
         builder.Services.AddSingleton<TransferService>();
         builder.Services.AddSingleton<DockerService>();
+        if (builder.Configuration["URSANAS_FAKE"] == "1")
+            builder.Services.AddSingleton<IRegistryClient, FakeRegistryClient>();
+        else
+            builder.Services.AddSingleton<IRegistryClient>(_ => new RegistryClient());
+        builder.Services.AddSingleton<DockerUpdateService>();
         builder.Services.AddSingleton<VmService>();
         builder.Services.AddSingleton<NetworkService>();
         builder.Services.AddSingleton<NetworkChangeService>();
@@ -227,6 +232,12 @@ public partial class Program
             Read(async () => { await d.UpdateContainerAsync(id, r, ct); return Results.NoContent(); }));
         app.MapPost("/docker/containers", (RunContainerRequest r, DockerService d, CancellationToken ct) =>
             Read(async () => { await d.RunContainerAsync(r, ct); return Results.NoContent(); }));
+        app.MapGet("/docker/updates", (DockerUpdateService u, CancellationToken ct) => Read(async () => Results.Ok(await u.ReportAsync(ct))));
+        app.MapPost("/docker/updates/check", (DockerUpdateService u, CancellationToken ct) => Read(async () => Results.Ok(await u.CheckAsync(ct))));
+        app.MapPost("/docker/containers/{id}/update-image", (string id, DockerService d, CancellationToken ct) =>
+            Read(async () => Results.Ok(new ContainerUpdateResult(await d.UpdateContainerImageAsync(id, ct)))));
+        app.MapPost("/docker/images/remove-replaced", (ReplacedImagesRequest r, DockerService d, CancellationToken ct) =>
+            Read(async () => Results.Ok(new RemovedImagesResult(await d.RemoveReplacedImagesAsync(r.Ids, ct)))));
         app.MapGet("/docker/images", (DockerService d, CancellationToken ct) => Read(async () => Results.Ok(await d.ImagesAsync(ct))));
         app.MapPost("/docker/images/pull", (PullImageRequest r, DockerService d, CancellationToken ct) =>
             Read(async () => { await d.PullImageAsync(r.Image, ct); return Results.NoContent(); }));

@@ -1,0 +1,32 @@
+@* Vérifier maintenant s'il existe de nouvelles versions des images, et quand cela a été fait pour la dernière fois. *@
+@inject AgentClient Agent
+@inject ISnackbar Snack
+
+<MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4">
+    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Sync" OnClick="Check" Disabled="checking">@L["Check for image updates"]</MudButton>
+    @if (checking) { <MudProgressCircular Size="Size.Small" Indeterminate="true" /> }
+    else if (Report?.CheckedAtUtc is { } at) { <MudText Typo="Typo.caption">@L["Checked on"] @Fmt.Dt(at)</MudText> }
+</MudStack>
+
+@code {
+    [Parameter] public ImageUpdateReport? Report { get; set; }
+    /// <summary>La page recharge ce qu'elle affiche.</summary>
+    [Parameter] public EventCallback Checked { get; set; }
+
+    bool checking;
+
+    async Task Check()
+    {
+        checking = true;
+        try
+        {
+            var report = await Agent.CheckImageUpdatesAsync();
+            var count = report.Containers.Count(c => c.State is ImageUpdateState.UpdateAvailable or ImageUpdateState.Recreate);
+            Snack.Add(count > 0 ? L["{0} container(s) with an image update", count] : L["No Docker image update found."], Severity.Info);
+            await Checked.InvokeAsync();
+        }
+        catch (AgentException e) { Snack.Add(L.Translate(e.Message), Severity.Error); }
+        catch (HttpRequestException) { Snack.Add(L["Agent unreachable."], Severity.Error); }
+        finally { checking = false; }
+    }
+}

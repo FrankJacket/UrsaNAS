@@ -421,6 +421,34 @@ public class AgentClient(HttpClient http)
     public async Task UpdateContainerAsync(string id, RunContainerRequest req, CancellationToken ct = default) =>
         await EnsureOkAsync(await http.PutAsJsonAsync($"docker/containers/{Uri.EscapeDataString(id)}", req, ct), ct);
 
+    public async Task<ImageUpdateReport> GetImageUpdatesAsync(CancellationToken ct = default)
+    {
+        using var r = await http.GetAsync("docker/updates", ct);
+        await EnsureOkAsync(r, ct);
+        return await r.Content.ReadFromJsonAsync<ImageUpdateReport>(ct) ?? new(null, []);
+    }
+
+    public async Task<ImageUpdateReport> CheckImageUpdatesAsync(CancellationToken ct = default)
+    {
+        using var r = await http.PostAsync("docker/updates/check", null, ct);
+        await EnsureOkAsync(r, ct);
+        return await r.Content.ReadFromJsonAsync<ImageUpdateReport>(ct) ?? new(null, []);
+    }
+
+    public async Task<ContainerUpdateResult> UpdateContainerImageAsync(string id, CancellationToken ct = default)
+    {
+        using var r = await http.PostAsync($"docker/containers/{Uri.EscapeDataString(id)}/update-image", null, ct);
+        await EnsureOkAsync(r, ct);
+        return await r.Content.ReadFromJsonAsync<ContainerUpdateResult>(ct) ?? throw new AgentException(Msg.F("The agent answered {0}.", 204));
+    }
+
+    public async Task<int> RemoveReplacedImagesAsync(IReadOnlyList<string> ids, CancellationToken ct = default)
+    {
+        using var r = await http.PostAsJsonAsync("docker/images/remove-replaced", new ReplacedImagesRequest(ids), ct);
+        await EnsureOkAsync(r, ct);
+        return (await r.Content.ReadFromJsonAsync<RemovedImagesResult>(ct))?.Removed ?? 0;
+    }
+
     public async Task PullImageAsync(string image, CancellationToken ct = default) =>
         await EnsureOkAsync(await http.PostAsJsonAsync("docker/images/pull", new PullImageRequest(image), ct), ct);
 

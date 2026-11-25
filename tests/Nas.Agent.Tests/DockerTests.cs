@@ -451,6 +451,20 @@ public sealed class DockerServiceTests : IDisposable
     });
 
     [Fact]
+    public async Task Reconstruire_une_stack_recree_tout_sans_interroger_les_registres()
+    {
+        var r = ComposeRunner();
+        var s = Svc(r);
+        await s.SaveStackAsync("blog", "services:\n  web:\n    image: nginx\n");
+        r.Calls.Clear();
+
+        await s.StackActionAsync("blog", "rebuild");
+
+        Assert.Contains(r.Calls, c => c.Contains("up") && c.Contains("--force-recreate"));
+        Assert.DoesNotContain(r.Calls, c => c.Contains("pull"));
+    }
+
+    [Fact]
     public async Task Une_stack_invalide_n_ecrase_pas_l_ancienne()
     {
         var s = Svc(ComposeRunner());

@@ -44,6 +44,9 @@ public sealed class DockerMonitor(AgentClient agent, DockerAvailability state, I
     }
 }
 
+/// <summary>Le résultat pour un conteneur ou une stack ; <c>Updated</c> false sans <c>Error</c> : il était déjà à jour.</summary>
+public sealed record ImageUpdateOutcome(string Name, bool Updated, string? Error);
+
 /// <summary>Les opérations Docker faites depuis l'interface : valide, demande à l'agent d'agir, journalise avec le nom de l'administrateur connecté.</summary>
 public class DockerOperations(AgentClient agent, Repo repo, AuthenticationStateProvider auth)
 {
@@ -58,7 +61,7 @@ public class DockerOperations(AgentClient agent, Repo repo, AuthenticationStateP
     static readonly Dictionary<string, string> StackAudit = new()
     {
         ["up"] = "Docker stack started", ["down"] = "Docker stack stopped",
-        ["update"] = "Docker stack updated", ["remove"] = "Docker stack deleted",
+        ["update"] = "Docker stack updated", ["remove"] = "Docker stack deleted", ["rebuild"] = "Docker stack rebuilt",
     };
 
     public async Task ContainerAsync(string id, string name, string action)
@@ -79,6 +82,48 @@ public class DockerOperations(AgentClient agent, Repo repo, AuthenticationStateP
         if (Rules.ValidateRunContainer(r) is { } e) throw new AgentException(e);
         await agent.UpdateContainerAsync(id, r);
         await repo.AuditAsync(await ActorAsync(), "Docker container modified", name);
+    }
+
+    /// <summary>Télécharge la dernière image d'un conteneur seul et le recrée ; false s'il était déjà à jour.</summary>
+    public async Task<bool> UpdateContainerImageAsync(string id, string name)
+    {
+        var updated = (await agent.UpdateContainerImageAsync(id)).Updated;
+        if (updated) await repo.AuditAsync(await ActorAsync(), "Docker container updated to a new image", name);
+        return updated;
+    }
+
+    /// <summary>
+    /// Applique une nouvelle image à tout ce qui l'utilise : les conteneurs seuls sont recréés, les stacks sont mises à jour (une fois chacune).
+    /// L'échec de l'un n'arrête pas les autres ; le résultat de chacun est renvoyé. L'ancienne image est ensuite supprimée si plus rien ne s'en sert.
+    /// </summary>
+    public async Task<IReadOnlyList<ImageUpdateOutcome>> UpdateImageUsersAsync(IReadOnlyList<ContainerImageUpdate> users)
+    {
+        var results = new List<ImageUpdateOutcome>();
+        async Task Apply(string name, Func<Task<bool>> update)
+        {
+            try { results.Add(new(name, await update(), null)); }
+            catch (AgentException e) { results.Add(new(name, false, e.Message)); }
+            catch (HttpRequestException) { results.Add(new(name, false, "Agent unreachable.")); }
+        }
+        foreach (var c in users.Where(u => u.Project is null))
+            await Apply(c.ContainerName, () => UpdateContainerImageAsync(c.ContainerId, c.ContainerName));
+        foreach (var stack in users.Select(u => u.Project).OfType<string>().Distinct())
+            await Apply(stack, async () => { await StackAsync(stack, "update"); return true; });
+        await RemoveReplacedImagesAsync(users, results);
+        return results;
+    }
+
+    // Le ménage ne change pas le résultat de la mise à jour : s'il échoue, l'ancienne image reste simplement sur le NAS.
+    async Task RemoveReplacedImagesAsync(IReadOnlyList<ContainerImageUpdate> users, IReadOnlyList<ImageUpdateOutcome> results)
+    {
+        var ids = users.Select(u => u.ImageId).OfType<string>().Distinct().ToList();
+        if (ids.Count == 0 || !results.Any(r => r.Updated)) return;
+        try
+        {
+            if (await agent.RemoveReplacedImagesAsync(ids) > 0)
+                await repo.AuditAsync(await ActorAsync(), "Docker replaced image deleted", string.Join(", ", users.Select(u => u.Image).Distinct()));
+        }
+        catch (Exception e) when (e is AgentException or HttpRequestException) { }
     }
 
     public async Task PullImageAsync(string image)

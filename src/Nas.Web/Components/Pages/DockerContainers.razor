@@ -29,6 +29,7 @@ else if (!loaded)
     @foreach (var c in containers)
     {
         var st = stats.GetValueOrDefault(c.Id);
+        var update = updates?.Containers.FirstOrDefault(u => u.ContainerId == c.Id);
         <MudExpansionPanel @key="c.Id" Dense="true">
             <TitleContent>
                 <div class="ctn-head">
@@ -36,7 +37,10 @@ else if (!loaded)
                         <b>@c.Name</b>
                         @if (c.Project is not null) { <MudChip T="string" Size="Size.Small" Class="ml-2">@c.Project</MudChip> }
                     </div>
-                    <div class="ctn-image">@c.Image</div>
+                    <div style="min-width:0">
+                        <div class="ctn-image">@c.Image</div>
+                        @if (update is { State: ImageUpdateState.UpdateAvailable or ImageUpdateState.Recreate }) { <DockerUpdateBadge State="update.State" /> }
+                    </div>
                     <div>
                         <MudChip T="string" Size="Size.Small" Color="@StateColor(c.State)">@c.State</MudChip>
                         <MudText Typo="Typo.caption" Class="d-block">@c.Status</MudText>
@@ -48,7 +52,8 @@ else if (!loaded)
             <ChildContent>
                 <MudSimpleTable Dense="true" Elevation="0" Class="net-details">
                     <tbody>
-                        <tr><th>@L["Image"]</th><td>@c.Image</td></tr>
+                        <tr><th>@L["Image"]</th><td>@c.Image @if (update is not null) { <DockerUpdateBadge State="update.State" /> }</td></tr>
+                        @if (update?.Reason is { } reason) { <tr><th></th><td>@L.Translate(reason)</td></tr> }
                         <tr><th>@L["Ports"]</th><td>@(c.Ports.Length > 0 ? c.Ports : L["None published: reach the container at its IP address."])</td></tr>
                         @foreach (var n in c.Networks ?? [])
                         {
@@ -91,6 +96,7 @@ else if (!loaded)
 
     IReadOnlyList<ContainerInfo> containers = [];
     Dictionary<string, ContainerStats> stats = new();
+    ImageUpdateReport? updates;
     string? error;
     bool loaded, busy;
 
@@ -108,6 +114,8 @@ else if (!loaded)
                     .Where(p => p.s is not null).ToDictionary(p => p.c.Id, p => p.s!);
             }
             catch (Exception e) when (e is AgentException or HttpRequestException) { stats = new(); } // les statistiques sont facultatives
+            try { updates = await Agent.GetImageUpdatesAsync(); }
+            catch (Exception e) when (e is AgentException or HttpRequestException) { updates = null; } // les mises à jour aussi
         }
         catch (AgentException e) { error = L.Translate(e.Message); }
         catch (HttpRequestException) { error = L["Agent unreachable: is the ursanas-agent service running?"]; }

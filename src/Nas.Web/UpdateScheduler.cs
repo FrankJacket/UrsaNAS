@@ -27,6 +27,25 @@ public sealed class UpdateScheduler(AgentClient agent, Repo repo, ILogger<Update
         {
             log.LogWarning(e, "Scheduled update check failed");
         }
+        await CheckDockerImagesAsync(ct);
+    }
+
+    // À part : un souci avec Docker ou un registre ne doit pas empêcher la vérification d'UrsaNAS et des paquets, ni l'inverse.
+    async Task CheckDockerImagesAsync(CancellationToken ct)
+    {
+        try
+        {
+            if ((await agent.GetDockerStatusAsync(ct)).State != DockerState.Ready) return;
+            var report = await agent.CheckImageUpdatesAsync(ct);
+            if (report.Containers.Count == 0) return;
+            var count = report.Containers.Count(c => c.State is ImageUpdateState.UpdateAvailable or ImageUpdateState.Recreate);
+            await repo.AuditAsync("system", "Scheduled Docker image check",
+                count > 0 ? Msg.F("{0} container(s) with an image update", count) : "No Docker image update found.");
+        }
+        catch (Exception e) when (e is AgentException or HttpRequestException)
+        {
+            log.LogWarning(e, "Scheduled Docker image check failed");
+        }
     }
 
     /// <summary>Installe ce que la dernière vérification a trouvé, selon les réglages ; redémarre ensuite si demandé et nécessaire.</summary>

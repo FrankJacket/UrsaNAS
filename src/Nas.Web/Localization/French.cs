@@ -1273,6 +1273,53 @@ public static class French
         ["custom user"] = "utilisateur personnalisé",
         ["custom working folder"] = "dossier de travail personnalisé",
 
+        // ---- Docker : nouvelles versions des images
+        ["Check for image updates"] = "Vérifier les mises à jour des images",
+        ["Update available"] = "Mise à jour disponible",
+        ["To recreate"] = "À recréer",
+        ["Up to date"] = "À jour",
+        ["Pinned version"] = "Version épinglée",
+        ["Cannot be checked"] = "Non vérifiable",
+        ["{0} container(s) with an image update"] = "{0} conteneur(s) avec une mise à jour d'image",
+        ["No Docker image update found."] = "Aucune mise à jour d'image Docker trouvée.",
+        ["Update {0}?"] = "Mettre à jour {0} ?",
+        ["The latest image is downloaded and these containers are recreated with the same settings: {0}."] =
+            "La dernière image est téléchargée et ces conteneurs sont recréés avec les mêmes réglages : {0}.",
+        ["These stacks are updated: {0}. Their other images are downloaded too, so other services can be recreated, and a stopped stack is started."] =
+            "Ces stacks sont mises à jour : {0}. Leurs autres images sont aussi téléchargées : d'autres services peuvent donc être recréés, et une stack arrêtée est démarrée.",
+        ["Volumes and folders of the NAS are kept; whatever was written inside a container itself is lost."] =
+            "Les volumes et les dossiers du NAS sont conservés ; ce qui a été écrit dans un conteneur lui-même est perdu.",
+        ["Updating {0}… This can take a few minutes."] = "Mise à jour de {0}… Cela peut prendre quelques minutes.",
+        ["Updated: {0}."] = "Mis à jour : {0}.",
+        ["The replaced image is then deleted, if nothing uses it any more."] = "L'image remplacée est ensuite supprimée, si plus rien ne s'en sert.",
+        ["Docker replaced image deleted"] = "Image Docker remplacée supprimée",
+        ["Invalid image identifier."] = "Identifiant d'image invalide.",
+        ["Rebuild"] = "Reconstruire",
+        ["Stack rebuilt."] = "Stack reconstruite.",
+        ["Rebuild {0}?"] = "Reconstruire {0} ?",
+        ["All the containers of the stack are recreated with the images already on the NAS, then started. Volumes and folders of the NAS are kept; whatever was written inside a container itself is lost."] =
+            "Tous les conteneurs de la stack sont recréés avec les images déjà présentes sur le NAS, puis démarrés. Les volumes et les dossiers du NAS sont conservés ; ce qui a été écrit dans un conteneur lui-même est perdu.",
+        ["Rebuilding the stack"] = "Reconstruction de la stack",
+        ["Docker stack rebuilt"] = "Stack Docker reconstruite",
+        ["Everything already uses the latest image."] = "Tout utilise déjà la dernière image.",
+        ["Scheduled Docker image check"] = "Vérification planifiée des images Docker",
+        ["Docker container updated to a new image"] = "Conteneur Docker mis à jour avec une nouvelle image",
+        ["The registry refuses more requests for now. Try again later."] = "Le registre refuse d'autres requêtes pour le moment. Réessayez plus tard.",
+        ["The registry does not give access to this image: it is private, local or no longer published."] =
+            "Le registre ne donne pas accès à cette image : elle est privée, locale ou n'est plus publiée.",
+        ["The registry answered {0}."] = "Le registre a répondu {0}.",
+        ["The registry did not give the fingerprint of the image."] = "Le registre n'a pas donné l'empreinte de l'image.",
+        ["The registry could not be reached."] = "Le registre est injoignable.",
+        ["The result of the check could not be saved: {0}"] = "Le résultat de la vérification n'a pas pu être enregistré : {0}",
+        ["The image is no longer on the NAS under this name."] = "L'image n'est plus sur le NAS sous ce nom.",
+        ["The image was built or loaded on this NAS: no registry to compare with."] =
+            "L'image a été construite ou chargée sur ce NAS : il n'y a pas de registre auquel la comparer.",
+        ["This image name cannot be checked."] = "Ce nom d'image ne peut pas être vérifié.",
+        ["This container belongs to the stack “{0}”: update the stack instead."] = "Ce conteneur appartient à la stack « {0} » : mettez plutôt à jour la stack.",
+        ["This container uses settings that cannot be kept when it is recreated: it cannot be updated here."] =
+            "Ce conteneur utilise des réglages qui ne peuvent pas être conservés s'il est recréé : il ne peut pas être mis à jour ici.",
+        ["This image is pinned to an exact version: there is nothing to update."] = "Cette image est épinglée à une version exacte : il n'y a rien à mettre à jour.",
+
         // ---- Docker : messages de l'agent
         ["Reading the container"] = "Lecture du conteneur",
         ["Reading the image"] = "Lecture de l'image",

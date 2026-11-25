@@ -20,14 +20,29 @@
     <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.CleaningServices" OnClick="Prune" Disabled="busy">@L["Clean unused images"]</MudButton>
 </MudStack>
 
+<DockerUpdateBar Report="updates" Checked="LoadAsync" />
+
+@if (updating is not null)
+{
+    <MudAlert Severity="Severity.Info" Class="mb-4">@L["Updating {0}… This can take a few minutes.", updating]</MudAlert>
+    <MudProgressLinear Indeterminate="true" Class="mb-4" />
+}
+
 <MudTable Items="images" Class="desk-grow" Hover="true" Dense="true" Loading="@(!loaded)">
     <HeaderContent><MudTh>@L["Image"]</MudTh><MudTh>@L["Identifier"]</MudTh><MudTh>@L["Size"]</MudTh><MudTh>@L["Created"]</MudTh><MudTh></MudTh></HeaderContent>
     <RowTemplate>
-        <MudTd><b>@Label(context)</b></MudTd>
+        <MudTd>
+            <b>@Label(context)</b>
+            @if (UpdateOf(context) is { } update) { <DockerUpdateBadge State="update.State" Reason="@update.Reason" /> }
+        </MudTd>
         <MudTd><code>@context.Id</code></MudTd>
         <MudTd>@Fmt.Size(context.SizeBytes, L.Lang)</MudTd>
         <MudTd>@context.Created</MudTd>
-        <MudTd Style="text-align:right">
+        <MudTd Style="text-align:right; white-space:nowrap">
+            @if (Outdated(context).Count > 0)
+            {
+                <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Info" StartIcon="@Icons.Material.Filled.SystemUpdateAlt" Class="mr-2" Disabled="busy" OnClick="() => Update(context)">@L["Update"]</MudButton>
+            }
             <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" Disabled="busy" OnClick="() => Delete(context)">@L["Delete"]</MudButton>
         </MudTd>
     </RowTemplate>
@@ -42,14 +57,56 @@
     [CascadingParameter(Name = "InWindow")] bool InWindow { get; set; }
 
     IReadOnlyList<ImageInfo> images = [];
+    ImageUpdateReport? updates;
     string? error;
     bool loaded, busy;
+
+    string? updating; // l'image en cours de mise à jour
+
+    // Le rapport parle des conteneurs : « nginx » et « nginx:latest » désignent la même ligne.
+    IEnumerable<ContainerImageUpdate> UsersOf(ImageInfo i) => updates?.Containers.Where(u => WithTag(u.Image) == Label(i)) ?? [];
+
+    ContainerImageUpdate? UpdateOf(ImageInfo i) => DockerUpdateBadge.Summary(UsersOf(i));
+
+    // Après un téléchargement, l'ancienne image reste listée sans nom : le bouton est sur la ligne qui porte le nom.
+    List<ContainerImageUpdate> Outdated(ImageInfo i) =>
+        UsersOf(i).Where(u => u.State is ImageUpdateState.UpdateAvailable or ImageUpdateState.Recreate).ToList();
+
+    async Task Update(ImageInfo i)
+    {
+        var users = Outdated(i);
+        var containers = users.Where(u => u.Project is null).Select(u => u.ContainerName).ToList();
+        var stacks = users.Select(u => u.Project).OfType<string>().Distinct().ToList();
+        var parts = new List<string>();
+        if (containers.Count > 0) parts.Add(L["The latest image is downloaded and these containers are recreated with the same settings: {0}.", string.Join(", ", containers)]);
+        if (stacks.Count > 0) parts.Add(L["These stacks are updated: {0}. Their other images are downloaded too, so other services can be recreated, and a stopped stack is started.", string.Join(", ", stacks)]);
+        parts.Add(L["Volumes and folders of the NAS are kept; whatever was written inside a container itself is lost."]);
+        parts.Add(L["The replaced image is then deleted, if nothing uses it any more."]);
+        var ok = await Dialogs.ShowMessageBoxAsync(L["Update {0}?", Label(i)], string.Join(" ", parts), yesText: L["Update"], cancelText: L["Cancel"]);
+        if (ok != true) return;
+
+        busy = true;
+        updating = Label(i);
+        var results = await Ops.UpdateImageUsersAsync(users);
+        foreach (var failed in results.Where(r => r.Error is not null))
+            Snack.Add($"{failed.Name} : {L.Translate(failed.Error!)}", Severity.Error, o => o.RequireInteraction = true);
+        var done = results.Where(r => r.Updated).Select(r => r.Name).ToList();
+        if (done.Count > 0) Snack.Add(L["Updated: {0}.", string.Join(", ", done)], Severity.Success);
+        else if (results.All(r => r.Error is null)) Snack.Add(L["Everything already uses the latest image."], Severity.Info);
+        updating = null;
+        busy = false;
+        await LoadAsync();
+    }
+
+    static string WithTag(string image) => image.LastIndexOf(':') > image.LastIndexOf('/') ? image : image + ":latest";
 
     protected override async Task LoadAsync()
     {
         try { images = (await Agent.GetImagesAsync()).OrderBy(i => i.Repository, StringComparer.OrdinalIgnoreCase).ToList(); error = null; }
         catch (AgentException e) { error = L.Translate(e.Message); }
         catch (HttpRequestException) { error = L["Agent unreachable: is the ursanas-agent service running?"]; }
+        try { updates = await Agent.GetImageUpdatesAsync(); }
+        catch (Exception e) when (e is AgentException or HttpRequestException) { updates = null; } // facultatif
         loaded = true;
     }
 
