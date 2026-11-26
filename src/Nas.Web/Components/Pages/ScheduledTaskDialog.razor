@@ -15,30 +15,64 @@
                 <MudSelect T="string" Value="task.Type" ValueChanged="SetType" Label="@L["Type"]" Disabled="@(busy || task.Id != 0)">
                     <MudSelectItem T="string" Value="@ScheduledTaskType.Snapshot">@L["ZFS snapshots"]</MudSelectItem>
                     <MudSelectItem T="string" Value="@ScheduledTaskType.Scrub">@L["Pool scrub"]</MudSelectItem>
+                    <MudSelectItem T="string" Value="@ScheduledTaskType.Script">@L["Custom script"]</MudSelectItem>
                 </MudSelect>
 
-                @if (!IsSnapshot)
+                @if (IsScript)
                 {
-                    <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">@L["The system already scrubs the pools by itself on the second Sunday of every month, shortly after midnight; those scrubs don't appear in the task history. A task is useful to scrub more often or at another time."]</MudAlert>
-                }
-
-                <MudText Typo="Typo.subtitle2" Class="mt-3">@(IsSnapshot ? L["Datasets"] : L["Pools"])</MudText>
-                <div style="max-height:220px; overflow:auto">
-                    @foreach (var item in Choices())
+                    <MudSelect T="string" @bind-Value="task.RunAs" Label="@L["Account that runs the script"]" Disabled="busy" Class="mt-3">
+                        @foreach (var item in Accounts())
+                        {
+                            var account = item;
+                            <MudSelectItem T="string" Value="@account">@account</MudSelectItem>
+                        }
+                    </MudSelect>
+                    @if (task.RunAs == ScriptRules.Root)
                     {
-                        var name = item;
-                        <MudCheckBox T="bool" Value="selected.Contains(name)" ValueChanged="v => Toggle(name, v)" Label="@name" Dense="true" Color="Color.Primary" Disabled="busy" Class="d-block" />
+                        <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">@L["As root, the script has full control of the NAS: a mistake can destroy data. Choose a user when that is enough."]</MudAlert>
                     }
-                </div>
-                @if (loaded && !Choices().Any())
-                {
-                    <MudText Typo="Typo.body2">@(IsSnapshot ? L["No dataset available. Create one from the Datasets window."] : L["No pools. Create one from the free disks."])</MudText>
-                }
+                    else if (!string.IsNullOrEmpty(task.RunAs))
+                    {
+                        <MudText Typo="Typo.caption" Class="d-block">@L["The script has the rights of this user. sudo does not work, and a NAS user has no personal folder: the script then starts in “/”."]</MudText>
+                    }
 
-                @if (IsSnapshot)
+                    <MudTextField T="string" @bind-Value="task.Script" Label="@L["Bash script"]" Variant="Variant.Outlined" Lines="14" MaxLength="@ScriptRules.MaxScriptLength"
+                                  Disabled="busy" Class="mt-3 script-text" UserAttributes="@NoSpellcheck" />
+                    <MudText Typo="Typo.caption" Class="d-block">@L["Don't write passwords in the script: its text is kept in the UrsaNAS database and in the configuration backup. What the script displays is kept in the task history."]</MudText>
+
+                    <MudNumericField T="int" @bind-Value="task.TimeoutMinutes" Label="@L["Time limit (minutes)"]" Min="1" Max="@ScriptRules.MaxTimeoutMinutes" HideSpinButtons="true" Disabled="busy" Class="mt-3"
+                                     HelperText="@L["When it is exceeded, the script and the processes it started are stopped."]" />
+                }
+                else
                 {
-                    <MudNumericField T="int" @bind-Value="task.Keep" Label="@L["Snapshots to keep for each dataset"]" Min="1" Max="1000" HideSpinButtons="true" Disabled="busy" Class="mt-3"
-                                     HelperText="@L["Older snapshots created by this task are deleted. Other snapshots are never touched. Child datasets are not included."]" />
+                    @if (IsScrub)
+                    {
+                        <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">@L["The system already scrubs the pools by itself on the second Sunday of every month, shortly after midnight; those scrubs don't appear in the task history. A task is useful to scrub more often or at another time."]</MudAlert>
+                    }
+
+                    @if (targetsError is not null)
+                    {
+                        <MudAlert Severity="Severity.Error" Dense="true" Class="mt-2">@targetsError</MudAlert>
+                    }
+
+                    <MudText Typo="Typo.subtitle2" Class="mt-3">@(IsSnapshot ? L["Datasets"] : L["Pools"])</MudText>
+                    <div style="max-height:220px; overflow:auto">
+                        @foreach (var item in Choices())
+                        {
+                            var name = item;
+                            <MudCheckBox T="bool" Value="selected.Contains(name)" ValueChanged="v => Toggle(name, v)" Label="@name" Dense="true" Color="Color.Primary" Disabled="busy" Class="d-block" />
+                        }
+                    </div>
+                    @if (loaded && !Choices().Any())
+                    {
+                        <MudText Typo="Typo.body2">@(IsSnapshot ? L["No dataset available. Create one from the Datasets window."] : L["No pools. Create one from the free disks."])</MudText>
+                    }
+
+                    @if (IsSnapshot)
+                    {
+                        <MudNumericField T="int" @bind-Value="task.Keep" Label="@L["Snapshots to keep for each dataset"]" Min="1" Max="1000" HideSpinButtons="true" Disabled="busy" Class="mt-3"
+                                         HelperText="@L["Older snapshots created by this task are deleted. Other snapshots are never touched. Child datasets are not included."]" />
+                    }
                 }
             </MudTabPanel>
 
@@ -139,6 +173,10 @@
     </DialogActions>
 </MudDialog>
 
+<style>
+    .script-text textarea { font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+</style>
+
 @code {
     [CascadingParameter] IMudDialogInstance Dialog { get; set; } = default!;
     [Parameter] public ScheduledTaskRow? Existing { get; set; }
@@ -148,11 +186,15 @@
     HashSet<string> selected = new(StringComparer.Ordinal);
     IReadOnlyList<string> datasets = [];
     IReadOnlyList<string> pools = [];
-    string? error;
+    IReadOnlyList<string> users = [];
+    string? error, targetsError;
     bool busy, loaded;
+    static readonly Dictionary<string, object?> NoSpellcheck = new() { ["spellcheck"] = "false" };
 
     System.Globalization.CultureInfo Culture => System.Globalization.CultureInfo.GetCultureInfo(L.Lang);
     bool IsSnapshot => task.Type == ScheduledTaskType.Snapshot;
+    bool IsScrub => task.Type == ScheduledTaskType.Scrub;
+    bool IsScript => task.Type == ScheduledTaskType.Script;
     TimeSpan? Time => ScheduleRule.TryTime(rule.Time, out var t) ? t.ToTimeSpan() : null;
 
     protected override async Task OnInitializedAsync()
@@ -163,20 +205,31 @@
             {
                 Id = Existing.Id, Name = Existing.Name, Type = Existing.Type, Targets = Existing.Targets, Keep = Existing.Keep,
                 CatchUp = Existing.CatchUp, Enabled = Existing.Enabled,
+                Script = Existing.Script, RunAs = Existing.RunAs, TimeoutMinutes = Existing.TimeoutMinutes,
             };
             rule = Existing.Rule();
             if (!RepeatKind.All.Contains(rule.Repeat)) rule = new ScheduleRule();
             selected = Existing.TargetList().ToHashSet(StringComparer.Ordinal);
         }
+        try { users = (await Agent.GetUsersAsync()).Select(u => u.Name).ToList(); }
+        catch (Exception e) when (e is AgentException or HttpRequestException or System.Text.Json.JsonException) { } // « root » reste proposé
         try
         {
             pools = (await Agent.GetPoolsAsync()).Select(p => p.Name).ToList();
             // La racine d'un pool n'est pas proposée : l'agent ne crée des instantanés que sur un jeu de données.
             datasets = (await Agent.GetDatasetsAsync()).Select(d => d.Name).Where(n => n.Contains('/')).ToList();
         }
-        catch (AgentException e) { error = L.Translate(e.Message); }
-        catch (HttpRequestException) { error = L["Agent unreachable."]; }
+        catch (AgentException e) { targetsError = L.Translate(e.Message); }
+        catch (HttpRequestException) { targetsError = L["Agent unreachable."]; }
         loaded = true;
+    }
+
+    /// <summary>« root » et les utilisateurs du NAS, plus le compte de la tâche s'il a disparu (pour qu'il reste visible).</summary>
+    IEnumerable<string> Accounts()
+    {
+        var all = users.Prepend(ScriptRules.Root).ToList();
+        if (!string.IsNullOrEmpty(task.RunAs) && !all.Contains(task.RunAs)) all.Add(task.RunAs);
+        return all;
     }
 
     /// <summary>Les cibles qui existent, plus celles de la tâche qui ont disparu (pour pouvoir les décocher).</summary>

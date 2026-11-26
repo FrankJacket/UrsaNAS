@@ -24,7 +24,7 @@
         }
         <MudTd>
             <MudText Typo="Typo.body2">@task.Name</MudText>
-            <MudText Typo="Typo.caption" Class="d-block" Style="overflow-wrap:anywhere">@string.Join(", ", task.TargetList())</MudText>
+            <MudText Typo="Typo.caption" Class="d-block" Style="overflow-wrap:anywhere">@(task.Type == ScheduledTaskType.Script ? L["Account: {0}", task.RunAs] : string.Join(", ", task.TargetList()))</MudText>
         </MudTd>
         <MudTd>@TypeText(task.Type)</MudTd>
         <MudTd>@ScheduleDescription.Describe(task.Rule(), L)</MudTd>
@@ -42,9 +42,18 @@
         </MudTd>
         <MudTd><MudSwitch T="bool" Value="task.Enabled" ValueChanged="v => SetEnabled(task, v)" Color="Color.Primary" /></MudTd>
         <MudTd Style="white-space:nowrap">
-            <MudTooltip Text="@L["Run now"]">
-                <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Small" Color="Color.Primary" Disabled="running" OnClick="() => RunNow(task)" />
-            </MudTooltip>
+            @if (running && task.Type == ScheduledTaskType.Script)
+            {
+                <MudTooltip Text="@L["Stop"]">
+                    <MudIconButton Icon="@Icons.Material.Filled.Stop" Size="Size.Small" Color="Color.Warning" OnClick="() => Stop(task)" />
+                </MudTooltip>
+            }
+            else
+            {
+                <MudTooltip Text="@L["Run now"]">
+                    <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Small" Color="Color.Primary" Disabled="running" OnClick="() => RunNow(task)" />
+                </MudTooltip>
+            }
             <MudTooltip Text="@L["History"]">
                 <MudIconButton Icon="@Icons.Material.Filled.History" Size="Size.Small" OnClick="() => History(task)" />
             </MudTooltip>
@@ -76,7 +85,14 @@
 
     static readonly DialogOptions Wide = new() { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseButton = true, BackdropClick = false };
 
-    string TypeText(string type) => type == ScheduledTaskType.Scrub ? L["Pool scrub"] : L["ZFS snapshots"];
+    string TypeText(string type) => type switch
+    {
+        ScheduledTaskType.Scrub => L["Pool scrub"],
+        ScheduledTaskType.Script => L["Custom script"],
+        _ => L["ZFS snapshots"],
+    };
+
+    Task Stop(ScheduledTaskRow task) => Run(() => Ops.StopAsync(task.Id), L["Stop requested."]);
 
     async Task Edit(ScheduledTaskRow? task)
     {
@@ -91,7 +107,7 @@
 
     async Task History(ScheduledTaskRow task)
     {
-        var parameters = new DialogParameters<ScheduledTaskHistoryDialog> { { x => x.TaskId, task.Id } };
+        var parameters = new DialogParameters<ScheduledTaskHistoryDialog> { { x => x.TaskId, task.Id }, { x => x.IsScript, task.Type == ScheduledTaskType.Script } };
         await Dialogs.ShowAsync<ScheduledTaskHistoryDialog>(L["History of {0}", task.Name], parameters,
             new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseButton = true });
     }
@@ -99,7 +115,9 @@
     async Task Delete(ScheduledTaskRow task)
     {
         var ok = await Dialogs.ShowMessageBoxAsync(L["Delete task {0}?", task.Name],
-            L["The task and its history are removed. Snapshots it already created are kept, and a scrub already started goes on."],
+            task.Type == ScheduledTaskType.Script
+                ? L["The task, its script and its history are removed."]
+                : L["The task and its history are removed. Snapshots it already created are kept, and a scrub already started goes on."],
             yesText: L["Delete"], cancelText: L["Cancel"]);
         if (ok == true) await Run(() => Ops.DeleteAsync(task.Id), L["Task deleted."]);
     }

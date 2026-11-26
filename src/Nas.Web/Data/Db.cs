@@ -64,6 +64,9 @@ public class Db
             HasError INTEGER NOT NULL DEFAULT 0, HasCancel INTEGER NOT NULL DEFAULT 0, HasInterrupt INTEGER NOT NULL DEFAULT 0);
         CREATE INDEX IF NOT EXISTS IX_ScheduledTaskRuns_Task ON ScheduledTaskRuns(TaskId, Id);
         """);
+        AddColumn(c, "ScheduledTasks", "Script", "TEXT NOT NULL DEFAULT ''"); // tâches « script » : le texte Bash
+        AddColumn(c, "ScheduledTasks", "RunAs", "TEXT NOT NULL DEFAULT ''"); // le compte qui l'exécute
+        AddColumn(c, "ScheduledTasks", "TimeoutMinutes", "INTEGER NOT NULL DEFAULT 60");
     }
 
     static void AddColumn(SqliteConnection c, string table, string column, string ddl)

@@ -18,10 +18,19 @@
 
         @if (runs.FirstOrDefault(r => r.Id == selectedId) is { } run)
         {
-            <MudText Typo="Typo.subtitle2" Class="mt-4">@L["Details"] — @Fmt.Dt(run.StartedUtc)</MudText>
-            @if (run.Details is null)
+            <MudText Typo="Typo.subtitle2" Class="mt-4">@(IsScript ? L["Output"] : L["Details"]) — @Fmt.Dt(run.StartedUtc)</MudText>
+            @if (IsScript && run.Status == TaskRunStatus.Running)
+            {
+                <MudText Typo="Typo.body2">@L["The output appears when the script has finished."]</MudText>
+            }
+            else if (run.Details is null)
             {
                 <MudText Typo="Typo.body2">@L["Nothing to report."]</MudText>
+            }
+            else if (IsScript)
+            {
+                @* La sortie d'un script est montrée telle quelle : jamais traduite. *@
+                <pre class="script-output">@run.Details</pre>
             }
             else
             {
@@ -39,9 +48,15 @@
     </DialogActions>
 </MudDialog>
 
+<style>
+    .script-output { margin: 0; max-height: 260px; overflow: auto; white-space: pre-wrap; word-break: break-all; font: 12px/1.45 ui-monospace, Consolas, monospace;
+                     background: var(--mud-palette-background-gray); padding: 8px; border-radius: 6px; }
+</style>
+
 @code {
     [CascadingParameter] IMudDialogInstance Dialog { get; set; } = default!;
     [Parameter] public int TaskId { get; set; }
+    [Parameter] public bool IsScript { get; set; }
 
     List<ScheduledRunRow> runs = new();
     int selectedId;

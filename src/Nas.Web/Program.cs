@@ -15,7 +15,8 @@ using Nas.Web.Data;
 using Nas.Web.Localization;
 
 var b = WebApplication.CreateBuilder(args);
-b.Services.AddRazorComponents().AddInteractiveServerComponents();
+// La limite par défaut (32 Ko) couperait la connexion à l'enregistrement d'un long script collé dans l'éditeur.
+b.Services.AddRazorComponents().AddInteractiveServerComponents().AddHubOptions(o => o.MaximumReceiveMessageSize = 256 * 1024);
 b.Services.AddMudServices();
 b.Services.AddScoped<ThemeState>();
 b.Services.AddScoped<DesktopState>();

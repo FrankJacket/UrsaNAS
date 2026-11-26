@@ -1,11 +1,12 @@
 using System.Text.Json;
 using Dapper;
+using Nas.Contracts;
 
 namespace Nas.Web.Data;
 
 public static class ScheduledTaskType
 {
-    public const string Snapshot = "snapshot", Scrub = "scrub";
+    public const string Snapshot = "snapshot", Scrub = "scrub", Script = "script";
 }
 
 public static class TaskRunStatus
@@ -28,6 +29,11 @@ public sealed class ScheduledTaskRow
     /// Aléatoire plutôt que l'identifiant, qui recommence à 1 après une réinstallation.
     /// </summary>
     public string SnapshotTag { get; set; } = "";
+    /// <summary>Scripts : le texte Bash.</summary>
+    public string Script { get; set; } = "";
+    /// <summary>Scripts : « root » ou un utilisateur du NAS ; aucun choix par défaut.</summary>
+    public string RunAs { get; set; } = "";
+    public int TimeoutMinutes { get; set; } = ScriptRules.DefaultTimeoutMinutes;
     /// <summary>JSON de <see cref="ScheduleRule"/>.</summary>
     public string Schedule { get; set; } = JsonSerializer.Serialize(new ScheduleRule());
     /// <summary>Exécuter une fois au retour après des occurrences manquées.</summary>
@@ -61,7 +67,7 @@ public sealed class ScheduledRunRow
     public string? Message { get; set; }
     /// <summary>Une ligne par cible traitée.</summary>
     public string? Details { get; set; }
-    /// <summary>Opération qui continue après son lancement : les pools dont le scrub est encore attendu, un par ligne.</summary>
+    /// <summary>Opération qui continue après son lancement : les pools dont le scrub est encore attendu (un par ligne), ou « script:identifiant ».</summary>
     public string Pending { get; set; } = "";
     /// <summary>Résultats déjà connus pendant l'attente : ils comptent dans le résultat final.</summary>
     public bool HasError { get; set; }
@@ -74,7 +80,7 @@ public sealed record TaskHealth(int TaskId, string Name, bool Enabled, string? L
 
 public class ScheduledTaskRepo(Db db)
 {
-    const string TaskColumns = "Id,Name,Type,Targets,Keep,SnapshotTag,Schedule,CatchUp,Enabled,CreatedUtc,NextRunUtc";
+    const string TaskColumns = "Id,Name,Type,Targets,Keep,SnapshotTag,Schedule,CatchUp,Enabled,CreatedUtc,NextRunUtc,Script,RunAs,TimeoutMinutes";
     public const int KeptRuns = 50;
 
     public async Task<List<ScheduledTaskRow>> GetTasksAsync()
@@ -95,12 +101,13 @@ public class ScheduledTaskRepo(Db db)
         using var c = db.Open();
         if (t.Id == 0)
             return await c.ExecuteScalarAsync<int>("""
-                INSERT INTO ScheduledTasks(Name,Type,Targets,Keep,SnapshotTag,Schedule,CatchUp,Enabled,CreatedUtc,NextRunUtc)
-                VALUES(@Name,@Type,@Targets,@Keep,@SnapshotTag,@Schedule,@CatchUp,@Enabled,@CreatedUtc,@NextRunUtc);
+                INSERT INTO ScheduledTasks(Name,Type,Targets,Keep,SnapshotTag,Schedule,CatchUp,Enabled,CreatedUtc,NextRunUtc,Script,RunAs,TimeoutMinutes)
+                VALUES(@Name,@Type,@Targets,@Keep,@SnapshotTag,@Schedule,@CatchUp,@Enabled,@CreatedUtc,@NextRunUtc,@Script,@RunAs,@TimeoutMinutes);
                 SELECT last_insert_rowid();
                 """, t);
         await c.ExecuteAsync("""
-            UPDATE ScheduledTasks SET Name=@Name,Type=@Type,Targets=@Targets,Keep=@Keep,Schedule=@Schedule,CatchUp=@CatchUp,Enabled=@Enabled,NextRunUtc=@NextRunUtc WHERE Id=@Id
+            UPDATE ScheduledTasks SET Name=@Name,Type=@Type,Targets=@Targets,Keep=@Keep,Schedule=@Schedule,CatchUp=@CatchUp,Enabled=@Enabled,NextRunUtc=@NextRunUtc,
+              Script=@Script,RunAs=@RunAs,TimeoutMinutes=@TimeoutMinutes WHERE Id=@Id
             """, t);
         return t.Id;
     }

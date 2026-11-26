@@ -168,6 +168,18 @@ sealed class FakeZfsAgentHandler : HttpMessageHandler
     public List<string> Scrubbed { get; } = [];
     public string Scan { get; set; } = "";
     public bool Unreachable { get; set; }
+    public bool PoolsBroken { get; set; }
+    public List<ScriptRunRequest> ScriptStarts { get; } = [];
+    public Dictionary<string, ScriptRunStatus> ScriptRuns { get; } = [];
+    public List<string> ScriptCancels { get; } = [];
+    public string? ScriptRefusal { get; set; }
+
+    /// <summary>Termine le dernier script lancé.</summary>
+    public void EndScript(string state, int? exitCode = null, string output = "")
+    {
+        var id = ScriptStarts[^1].Id;
+        ScriptRuns[id] = new(id, state, exitCode, output, DateTime.UtcNow, TimeoutMinutes: ScriptStarts[^1].TimeoutMinutes);
+    }
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
     {
@@ -177,6 +189,23 @@ sealed class FakeZfsAgentHandler : HttpMessageHandler
         static HttpResponseMessage Done() => new(HttpStatusCode.NoContent);
         switch (request.Method.Method, path)
         {
+            case ("GET", "scripts/runs"):
+                return Json(ScriptRuns.Values.ToList());
+            case ("POST", "scripts/runs"):
+                var start = (await request.Content!.ReadFromJsonAsync<ScriptRunRequest>(ct))!;
+                if (ScriptRefusal is not null)
+                    return new(HttpStatusCode.BadRequest) { Content = JsonContent.Create(new { detail = ScriptRefusal }) };
+                ScriptStarts.Add(start);
+                ScriptRuns[start.Id] = new(start.Id, ScriptState.Running);
+                return Done();
+            case ("POST", _) when path.StartsWith("scripts/runs/", StringComparison.Ordinal) && path.EndsWith("/cancel", StringComparison.Ordinal):
+                ScriptCancels.Add(path.Split('/')[2]);
+                return Done();
+            case ("DELETE", _) when path.StartsWith("scripts/runs/", StringComparison.Ordinal):
+                ScriptRuns.Remove(path.Split('/')[2]);
+                return Done();
+            case ("GET", "zfs/pools") when PoolsBroken:
+                return new(HttpStatusCode.BadRequest) { Content = JsonContent.Create(new { detail = "zpool not found" }) };
             case ("GET", "zfs/pools"):
                 return Json(new[] { new PoolInfo("tank", "ONLINE", 100, 10, 90, Scan, "No known data errors", []) });
             case ("GET", "zfs/snapshots"):
@@ -381,6 +410,108 @@ public class ScheduledTaskCoordinatorTests : IDisposable
         Assert.Equal(TaskRunStatus.Skipped, (await LastRunAsync(id)).Status);
         Assert.Empty(_agent.Scrubbed);
         Assert.Empty(await _repo.GetActiveAlertsAsync());
+    }
+
+    async Task<int> AddScriptAsync(DateTime? nextRun = null) =>
+        await _tasks.SaveTaskAsync(new ScheduledTaskRow
+        {
+            Name = "copie", Type = ScheduledTaskType.Script, Script = "echo bonjour\n", RunAs = "alice", TimeoutMinutes = 5, NextRunUtc = nextRun,
+        });
+
+    [Fact]
+    public async Task Un_script_reste_en_cours_puis_son_resultat_et_sa_sortie_sont_notes()
+    {
+        var id = await AddScriptAsync();
+        await _coordinator.RunNowAsync(id, "alice");
+
+        var sent = Assert.Single(_agent.ScriptStarts);
+        Assert.Equal(("echo bonjour\n", "alice", 5), (sent.Script, sent.RunAs, sent.TimeoutMinutes));
+        var run = await LastRunAsync(id);
+        Assert.Equal((TaskRunStatus.Running, ScheduledTaskCoordinator.ScriptPrefix + sent.Id), (run.Status, run.Pending));
+        await Assert.ThrowsAsync<AgentException>(() => _coordinator.RunNowAsync(id, "alice"));
+
+        _agent.PoolsBroken = true; // un ZFS en panne ne retient pas le résultat d'un script
+        _agent.EndScript(ScriptState.Succeeded, 0, "bonjour\n");
+        await _coordinator.TickAsync(DateTime.UtcNow, Zone);
+
+        run = await LastRunAsync(id);
+        Assert.Equal((TaskRunStatus.Success, "Script completed.", "bonjour\n", ""), (run.Status, run.Message, run.Details, run.Pending));
+        Assert.NotNull(run.EndedUtc);
+        Assert.Empty(_agent.ScriptRuns); // acquitté
+    }
+
+    [Theory]
+    [InlineData(ScriptState.Failed, 3, TaskRunStatus.Failed, "The script ended with code 3.", 1)]
+    [InlineData(ScriptState.TimedOut, null, TaskRunStatus.Failed, "The script exceeded its time limit of 5 minute(s).", 1)]
+    [InlineData(ScriptState.Stopped, null, TaskRunStatus.Cancelled, "Stopped by an administrator.", 0)]
+    public async Task Le_resultat_d_un_script_decide_de_l_alerte(string state, int? code, string status, string message, int alerts)
+    {
+        var id = await AddScriptAsync();
+        await _coordinator.RunNowAsync(id, "alice");
+        _agent.EndScript(state, code);
+        await _coordinator.TickAsync(DateTime.UtcNow, Zone);
+
+        var run = await LastRunAsync(id);
+        Assert.Equal((status, message), (run.Status, run.Message));
+        Assert.Null(run.Details);
+        Assert.Equal(alerts, (await _repo.GetActiveAlertsAsync()).Count);
+    }
+
+    [Fact]
+    public async Task Un_script_refuse_par_l_agent_echoue_tout_de_suite()
+    {
+        _agent.ScriptRefusal = "User “alice” does not exist.";
+        var id = await AddScriptAsync();
+        await _coordinator.RunNowAsync(id, "alice");
+
+        var run = await LastRunAsync(id);
+        Assert.Equal((TaskRunStatus.Failed, _agent.ScriptRefusal, ""), (run.Status, run.Message, run.Pending));
+        Assert.Null(run.Details);
+    }
+
+    [Fact]
+    public async Task Un_script_que_l_agent_ne_connait_plus_est_interrompu()
+    {
+        var id = await AddScriptAsync();
+        await _coordinator.RunNowAsync(id, "alice");
+        _agent.ScriptRuns.Clear(); // l'agent a redémarré
+        await _coordinator.TickAsync(DateTime.UtcNow, Zone);
+
+        Assert.Equal(TaskRunStatus.Interrupted, (await LastRunAsync(id)).Status);
+    }
+
+    [Fact]
+    public async Task Un_script_en_cours_s_arrete_avant_de_pouvoir_supprimer_la_tache()
+    {
+        var id = await AddScriptAsync();
+        await Assert.ThrowsAsync<AgentException>(() => _coordinator.StopAsync(id, "alice"));
+        await _coordinator.RunNowAsync(id, "alice");
+        await Assert.ThrowsAsync<AgentException>(() => _coordinator.DeleteAsync(id));
+
+        await _coordinator.StopAsync(id, "alice");
+        Assert.Equal(_agent.ScriptStarts[0].Id, Assert.Single(_agent.ScriptCancels));
+        _agent.EndScript(ScriptState.Stopped);
+        await _coordinator.TickAsync(DateTime.UtcNow, Zone);
+
+        Assert.Equal("copie", await _coordinator.DeleteAsync(id));
+        Assert.Null(await _tasks.GetTaskAsync(id));
+    }
+
+    [Fact]
+    public async Task Une_tache_de_script_garde_ses_reglages()
+    {
+        var id = await AddScriptAsync();
+        var t = (await _tasks.GetTaskAsync(id))!;
+        t.Script = "echo salut\n";
+        t.RunAs = "root";
+        t.TimeoutMinutes = 90;
+        await _tasks.SaveTaskAsync(t);
+
+        t = (await _tasks.GetTaskAsync(id))!;
+        Assert.Equal(("echo salut\n", "root", 90), (t.Script, t.RunAs, t.TimeoutMinutes));
+        Assert.Null(ScheduledTaskCoordinator.Validate(t));
+        t.RunAs = "";
+        Assert.NotNull(ScheduledTaskCoordinator.Validate(t));
     }
 
     [Fact]

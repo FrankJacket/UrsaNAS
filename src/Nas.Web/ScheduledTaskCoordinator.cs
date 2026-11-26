@@ -18,6 +18,9 @@ public class ScheduledTaskCoordinator(AgentClient agent, Repo repo, ScheduledTas
     public static readonly TimeSpan Grace = TimeSpan.FromMinutes(5);
 
     const string InProgress = "Scrub in progress.";
+    const string ScriptInProgress = "Script in progress.";
+    /// <summary>Début de <see cref="ScheduledRunRow.Pending"/> pour un script ; un nom de pool ne contient jamais de « : ».</summary>
+    public const string ScriptPrefix = "script:";
 
     // Statique : l'interface et le planificateur ne doivent pas démarrer la même tâche en même temps.
     static readonly SemaphoreSlim Gate = new(1, 1);
@@ -25,6 +28,8 @@ public class ScheduledTaskCoordinator(AgentClient agent, Repo repo, ScheduledTas
     public static string? Validate(ScheduledTaskRow t)
     {
         if (t.Name.Trim().Length is 0 or > 100) return Msg.F("Enter a name (100 characters at most).");
+        if (t.Type == ScheduledTaskType.Script)
+            return ScriptRules.Validate(t.Script, t.RunAs, t.TimeoutMinutes) ?? t.Rule().Validate();
         if (t.Type is not (ScheduledTaskType.Snapshot or ScheduledTaskType.Scrub)) return Msg.F("Unknown task type.");
         var targets = t.TargetList();
         if (targets.Length == 0)
@@ -81,6 +86,36 @@ public class ScheduledTaskCoordinator(AgentClient agent, Repo repo, ScheduledTas
         finally { Gate.Release(); }
     }
 
+    /// <summary>Demande à l'agent d'arrêter le script en cours ; le résultat est noté au passage suivant du planificateur.</summary>
+    public async Task StopAsync(int taskId, string actor, CancellationToken ct = default)
+    {
+        await Gate.WaitAsync(ct);
+        try
+        {
+            var run = (await tasks.GetOpenRunsAsync()).FirstOrDefault(r => r.TaskId == taskId && ScriptId(r) is not null)
+                ?? throw new AgentException(Msg.F("No script is running for this task."));
+            await agent.CancelScriptAsync(ScriptId(run)!, ct);
+            await repo.AuditAsync(actor, "Scheduled task stopped manually", run.TaskName);
+        }
+        finally { Gate.Release(); }
+    }
+
+    /// <summary>Supprime la tâche et son historique ; renvoie son nom. Dans le verrou : le planificateur ne peut pas la lancer pendant ce temps.</summary>
+    public async Task<string> DeleteAsync(int taskId, CancellationToken ct = default)
+    {
+        await Gate.WaitAsync(ct);
+        try
+        {
+            var t = await tasks.GetTaskAsync(taskId) ?? throw new AgentException(Msg.F("Task not found."));
+            // Sans suivi, un script continuerait sans que personne puisse l'arrêter ni voir son résultat.
+            if (t.Type == ScheduledTaskType.Script && await tasks.IsRunningAsync(taskId))
+                throw new AgentException(Msg.F("A script is running: stop it before deleting the task."));
+            await tasks.DeleteTaskAsync(taskId);
+            return t.Name;
+        }
+        finally { Gate.Release(); }
+    }
+
     // ---- Exécution
 
     async Task StartCoreAsync(ScheduledTaskRow t, string reason, CancellationToken ct)
@@ -92,6 +127,7 @@ public class ScheduledTaskCoordinator(AgentClient agent, Repo repo, ScheduledTas
         {
             if (t.Type == ScheduledTaskType.Snapshot) await RunSnapshotsAsync(t, run, lines, ct);
             else if (t.Type == ScheduledTaskType.Scrub) await StartScrubsAsync(t, run, lines, ct);
+            else if (t.Type == ScheduledTaskType.Script) await StartScriptAsync(t, run, ct);
             else Fail(run, lines, Msg.F("Unknown task type."));
         }
         catch (AgentException e) { Fail(run, lines, e.Message); }
@@ -198,22 +234,102 @@ public class ScheduledTaskCoordinator(AgentClient agent, Repo repo, ScheduledTas
         return clean ? ScrubState.Succeeded : ScrubState.Errors;
     }
 
-    /// <summary>Appelé dans le verrou : conclut les scrubs terminés et marque « Interrompue » une exécution que plus rien ne fera avancer.</summary>
+    /// <summary>Lance un script. Son identifiant est enregistré avant l'appel : une interface arrêtée à cet instant le retrouvera.</summary>
+    async Task StartScriptAsync(ScheduledTaskRow t, ScheduledRunRow run, CancellationToken ct)
+    {
+        var id = Guid.NewGuid().ToString("N");
+        run.Pending = ScriptPrefix + id;
+        run.Message = ScriptInProgress;
+        await tasks.UpdateRunAsync(run);
+        try { await agent.StartScriptAsync(new ScriptRunRequest(id, t.Script, t.RunAs, t.TimeoutMinutes), ct); }
+        catch (AgentException e) { NotStarted(run, e.Message); }
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
+        {
+            // La réponse s'est perdue : au cas où le script serait parti, il est arrêté.
+            try { await agent.CancelScriptAsync(id, CancellationToken.None); }
+            catch (Exception x) when (x is AgentException or HttpRequestException or TaskCanceledException) { }
+            NotStarted(run, "Agent unreachable.");
+        }
+    }
+
+    // Pas de ligne de détail : pour un script, le détail est sa sortie.
+    static void NotStarted(ScheduledRunRow run, string error)
+    {
+        run.Pending = "";
+        run.HasError = true;
+        run.Message = error;
+    }
+
+    static string? ScriptId(ScheduledRunRow run) => run.Pending.StartsWith(ScriptPrefix, StringComparison.Ordinal) ? run.Pending[ScriptPrefix.Length..] : null;
+
+    /// <summary>Appelé dans le verrou : conclut les opérations terminées et marque « Interrompue » une exécution que plus rien ne fera avancer.</summary>
     async Task SyncCoreAsync(CancellationToken ct)
     {
         var open = await tasks.GetOpenRunsAsync();
+        foreach (var run in open.Where(r => r.Pending.Length == 0).ToList()) // une exécution immédiate coupée par un arrêt de l'interface
+        {
+            run.Status = TaskRunStatus.Interrupted;
+            run.Message = "Interrupted.";
+            await FinishAsync(run);
+            open.Remove(run);
+        }
+        // Séparés : un ZFS en panne ne doit pas retenir le résultat des scripts.
+        await SyncScriptsAsync(open.Where(r => ScriptId(r) is not null).ToList(), ct);
+        await SyncScrubsAsync(open.Where(r => ScriptId(r) is null).ToList(), ct);
+    }
+
+    async Task SyncScriptsAsync(List<ScheduledRunRow> open, CancellationToken ct)
+    {
         if (open.Count == 0) return;
+        IReadOnlyList<ScriptRunStatus> statuses;
+        try { statuses = await agent.GetScriptRunsAsync(ct); }
+        catch (AgentException) { return; } // état inconnu : on réessaiera
+        foreach (var run in open)
+        {
+            var status = statuses.FirstOrDefault(s => s.Id == ScriptId(run));
+            if (status is null) // les exécutions vivent dans la mémoire de l'agent
+            {
+                run.Pending = "";
+                run.Status = TaskRunStatus.Interrupted;
+                run.Message = "The agent was restarted while the script was running.";
+                await FinishAsync(run);
+            }
+            else if (status.State != ScriptState.Running)
+            {
+                ReadScript(run, status);
+                await FinishAsync(run);
+            }
+        }
+        // Les résultats sont enregistrés : l'agent peut oublier les scripts terminés, y compris ceux que plus aucune exécution n'attend.
+        foreach (var done in statuses.Where(s => s.State != ScriptState.Running))
+        {
+            try { await agent.AcknowledgeScriptAsync(done.Id, ct); }
+            catch (AgentException) { }
+        }
+    }
+
+    static void ReadScript(ScheduledRunRow run, ScriptRunStatus s)
+    {
+        run.Pending = "";
+        run.EndedUtc = s.EndedUtc;
+        run.Details = s.Output.Length == 0 ? null : s.Output;
+        (run.Status, run.Message) = s.State switch
+        {
+            ScriptState.Succeeded => (TaskRunStatus.Success, "Script completed."),
+            ScriptState.Stopped => (TaskRunStatus.Cancelled, "Stopped by an administrator."),
+            ScriptState.TimedOut => (TaskRunStatus.Failed, Msg.F("The script exceeded its time limit of {0} minute(s).", s.TimeoutMinutes)),
+            _ => (TaskRunStatus.Failed, s.Error is null
+                ? Msg.F("The script ended with code {0}.", s.ExitCode)
+                : Msg.F("The script could not be followed: {0}", s.Error)),
+        };
+    }
+
+    async Task SyncScrubsAsync(List<ScheduledRunRow> open, CancellationToken ct)
+    {
         IReadOnlyList<PoolInfo>? pools = null;
         foreach (var run in open)
         {
             var pending = run.Pending.Split('\n', StringSplitOptions.RemoveEmptyEntries).ToList();
-            if (pending.Count == 0) // une exécution immédiate coupée par un arrêt de l'interface
-            {
-                run.Status = TaskRunStatus.Interrupted;
-                run.Message = "Interrupted.";
-                await FinishAsync(run);
-                continue;
-            }
             if (pools is null)
             {
                 try { pools = await agent.GetPoolsAsync(ct); }
@@ -264,7 +380,7 @@ public class ScheduledTaskCoordinator(AgentClient agent, Repo repo, ScheduledTas
 
     async Task FinishAsync(ScheduledRunRow run)
     {
-        run.EndedUtc = DateTime.UtcNow;
+        run.EndedUtc ??= DateTime.UtcNow;
         if (run.Status == TaskRunStatus.Running)
             run.Status = run.HasError ? TaskRunStatus.Failed
                 : run.HasCancel ? TaskRunStatus.Cancelled
@@ -294,7 +410,7 @@ public class ScheduledTaskCoordinator(AgentClient agent, Repo repo, ScheduledTas
     static DateTime Utc(DateTime d) => DateTime.SpecifyKind(d, DateTimeKind.Utc);
 }
 
-/// <summary>Passe toutes les 20 secondes : suit les opérations en cours et lance les tâches dues (heure du serveur).</summary>
+/// <summary>Passe toutes les 5 secondes :suit les opérations en cours et lance les tâches dues (heure du serveur).</summary>
 public sealed class ScheduledTaskMonitor(IServiceScopeFactory scopes, IConfiguration cfg, ILogger<ScheduledTaskMonitor> log) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken ct)
@@ -302,7 +418,7 @@ public sealed class ScheduledTaskMonitor(IServiceScopeFactory scopes, IConfigura
         try { await Task.Delay(TimeSpan.FromSeconds(cfg.GetValue("ScheduledTasks:StartDelaySeconds", 20)), ct); }
         catch (OperationCanceledException) { return; }
 
-        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(cfg.GetValue("ScheduledTasks:IntervalSeconds", 20)));
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(cfg.GetValue("ScheduledTasks:IntervalSeconds", 5)));
         do
         {
             try

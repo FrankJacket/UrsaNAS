@@ -290,6 +290,19 @@ public class AgentClient(HttpClient http)
 
     public Task<IReadOnlyList<SmartInfo>> GetSmartAsync(CancellationToken ct = default) => GetListAsync<SmartInfo>("smart", ct);
 
+    // ---- Scripts des tâches planifiées
+
+    public Task<IReadOnlyList<ScriptRunStatus>> GetScriptRunsAsync(CancellationToken ct = default) => GetListAsync<ScriptRunStatus>("scripts/runs", ct);
+
+    public async Task StartScriptAsync(ScriptRunRequest req, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PostAsJsonAsync("scripts/runs", req, ct), ct);
+
+    public async Task CancelScriptAsync(string id, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PostAsync($"scripts/runs/{Uri.EscapeDataString(id)}/cancel", null, ct), ct);
+
+    public async Task AcknowledgeScriptAsync(string id, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.DeleteAsync($"scripts/runs/{Uri.EscapeDataString(id)}", ct), ct);
+
     // ---- ZFS
     public Task<IReadOnlyList<PoolInfo>> GetPoolsAsync(CancellationToken ct = default) => GetListAsync<PoolInfo>("zfs/pools", ct);
     public Task<IReadOnlyList<DatasetInfo>> GetDatasetsAsync(CancellationToken ct = default) => GetListAsync<DatasetInfo>("zfs/datasets", ct);

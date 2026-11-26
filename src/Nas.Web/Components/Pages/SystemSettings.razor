@@ -233,7 +233,7 @@
             <MudText Typo="Typo.body2" Class="mb-3">
                 @L["Downloads a ZIP file with what is useful to reconfigure this NAS after a full reset: shares, local users and groups, network settings, backup job and scheduled task definitions, and the FTP, e-mail alert and update schedule settings."]
             </MudText>
-            <MudText Typo="Typo.body2" Class="mb-3">@L["No password is ever included: user and e-mail passwords must be re-entered after a restore."]</MudText>
+            <MudText Typo="Typo.body2" Class="mb-3">@L["No account or e-mail password is included: they must be re-entered after a restore. The text of your scheduled scripts is included as written."]</MudText>
             <MudSwitch T="bool" @bind-Value="protectZip" Label="@L["Protect the ZIP file with a password"]" Color="Color.Primary" Disabled="backupBusy" />
             @if (protectZip)
             {

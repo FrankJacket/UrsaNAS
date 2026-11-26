@@ -13,6 +13,12 @@ public class ScheduledTaskOperations(ScheduledTaskCoordinator coordinator, Sched
     public async Task SaveAsync(ScheduledTaskRow task)
     {
         task.Name = task.Name.Trim();
+        if (task.Type == ScheduledTaskType.Script)
+        {
+            task.Script = ScriptRules.Normalize(task.Script);
+            task.Targets = "";
+        }
+        else (task.Script, task.RunAs) = ("", "");
         if (ScheduledTaskCoordinator.Validate(task) is { } e) throw new AgentException(e);
 
         var isNew = task.Id == 0;
@@ -52,13 +58,14 @@ public class ScheduledTaskOperations(ScheduledTaskCoordinator coordinator, Sched
             ?? throw new AgentException(Msg.F("This date and time are in the past."));
     }
 
-    /// <summary>Permis même pendant une exécution : un scrub déjà lancé continue sur le pool, les instantanés déjà créés restent.</summary>
+    /// <summary>Permis pendant un scrub, qui continue sur le pool ; un script en cours doit d'abord être arrêté.</summary>
     public async Task DeleteAsync(int id)
     {
-        var task = await tasks.GetTaskAsync(id) ?? throw new AgentException(Msg.F("Task not found."));
-        await tasks.DeleteTaskAsync(id);
-        await repo.AuditAsync(await ActorAsync(), "Scheduled task deleted", task.Name);
+        var name = await coordinator.DeleteAsync(id);
+        await repo.AuditAsync(await ActorAsync(), "Scheduled task deleted", name);
     }
 
     public async Task RunNowAsync(int id) => await coordinator.RunNowAsync(id, await ActorAsync());
+
+    public async Task StopAsync(int id) => await coordinator.StopAsync(id, await ActorAsync());
 }

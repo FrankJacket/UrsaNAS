@@ -92,6 +92,7 @@ public partial class Program
         builder.Services.AddSingleton<AclService>();
         builder.Services.AddSingleton<ZfsService>();
         builder.Services.AddSingleton<SmartService>();
+        builder.Services.AddSingleton<ScriptService>();
 
         var app = builder.Build();
 
@@ -99,6 +100,8 @@ public partial class Program
         try { app.Services.GetRequiredService<UserService>().EnsureSystemGroupsAsync().GetAwaiter().GetResult(); }
         catch (Exception e) when (e is OperationException or System.ComponentModel.Win32Exception)
         { app.Logger.LogWarning("System groups could not be prepared: {Message}", e.Message); }
+
+        app.Services.GetRequiredService<ScriptService>(); // dès le démarrage : supprime les fichiers de scripts laissés par un arrêt brutal
 
         app.UseWebSockets();
         app.MapGet("/terminal", (HttpContext ctx, IConfiguration cfg) => TerminalEndpoint.HandleAsync(ctx, cfg));
@@ -217,6 +220,13 @@ public partial class Program
             Read(() => { b.Start(job); return Task.FromResult(Results.NoContent()); }));
         app.MapPost("/backup/runs/{id:int}/cancel", (int id, BackupService b) => { b.Cancel(id); return Results.NoContent(); });
         app.MapDelete("/backup/runs/{id:int}", (int id, BackupService b) => { b.Acknowledge(id); return Results.NoContent(); });
+
+        // Scripts des tâches planifiées (pas de verrou global : un script peut durer des heures)
+        app.MapGet("/scripts/runs", (ScriptService s) => Results.Ok(s.Statuses()));
+        app.MapPost("/scripts/runs", (ScriptRunRequest r, ScriptService s, CancellationToken ct) =>
+            Read(async () => { await s.StartAsync(r, ct); return Results.NoContent(); }));
+        app.MapPost("/scripts/runs/{id}/cancel", (string id, ScriptService s) => { s.Cancel(id); return Results.NoContent(); });
+        app.MapDelete("/scripts/runs/{id}", (string id, ScriptService s) => { s.Acknowledge(id); return Results.NoContent(); });
 
         // Docker : chaque opération qui modifie quelque chose passe par le verrou propre à DockerService (un téléchargement peut être long).
         app.MapGet("/docker/status", async (DockerService d, CancellationToken ct) => Results.Ok(await d.StatusAsync(ct)));
