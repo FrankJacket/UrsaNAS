@@ -182,11 +182,14 @@
             @if (checkFreq != "off")
             {
                 
-                <MudTimePicker Time="@TimeSpan.Parse(checkTime)"
-                               TimeChanged="v=> checkTime = v.ToString()??string.Empty"
-                               Label="@L["Time"]" 
-                               Disabled="scheduleBusy"
-                               Style="max-width:320px" TimeFormat="@Culture.DateTimeFormat.ShortTimePattern" AmPm="@Culture.DateTimeFormat.ShortTimePattern.Contains("tt")" />
+                @* La largeur est limitée par le conteneur : un style sur le sélecteur tronquerait aussi son popup. *@
+                <div style="width:100%; max-width:320px">
+                    <MudTimePicker Time="@TimeSpan.Parse(checkTime)"
+                                   TimeChanged="v=> checkTime = v.ToString()??string.Empty"
+                                   Label="@L["Time"]"
+                                   Disabled="scheduleBusy"
+                                   TimeFormat="@Culture.DateTimeFormat.ShortTimePattern" AmPm="@Culture.DateTimeFormat.ShortTimePattern.Contains("tt")" />
+                </div>
             }
         </MudPaper>
 
@@ -208,8 +211,10 @@
                             <MudSelectItem Value="@d">@Culture.DateTimeFormat.GetDayName(d)</MudSelectItem>
                         }
                     </MudSelect>
-                    <MudTimePicker Time="@TimeSpan.Parse(autoTime)"
-                                   TimeChanged="v=> autoTime = v.ToString()??string.Empty" Label="@L["Time"]" Disabled="scheduleBusy" Style="max-width:280px" TimeFormat="@Culture.DateTimeFormat.ShortTimePattern" AmPm="@Culture.DateTimeFormat.ShortTimePattern.Contains("tt")" />
+                    <div style="width:100%; max-width:280px">
+                        <MudTimePicker Time="@TimeSpan.Parse(autoTime)"
+                                       TimeChanged="v=> autoTime = v.ToString()??string.Empty" Label="@L["Time"]" Disabled="scheduleBusy" TimeFormat="@Culture.DateTimeFormat.ShortTimePattern" AmPm="@Culture.DateTimeFormat.ShortTimePattern.Contains("tt")" />
+                    </div>
                 </MudStack>
                 <MudSwitch T="bool" @bind-Value="autoReboot" Label="@L["Restart automatically if needed, at this same time"]" Color="Color.Warning" Class="mt-2" Disabled="scheduleBusy" />
             }
@@ -226,7 +231,7 @@
 
         <MudPaper Class="pa-4" Style="max-width:620px">
             <MudText Typo="Typo.body2" Class="mb-3">
-                @L["Downloads a ZIP file with what is useful to reconfigure this NAS after a full reset: shares, local users and groups, network settings, backup job definitions, and the FTP, e-mail alert and update schedule settings."]
+                @L["Downloads a ZIP file with what is useful to reconfigure this NAS after a full reset: shares, local users and groups, network settings, backup job and scheduled task definitions, and the FTP, e-mail alert and update schedule settings."]
             </MudText>
             <MudText Typo="Typo.body2" Class="mb-3">@L["No password is ever included: user and e-mail passwords must be re-entered after a restore."]</MudText>
             <MudSwitch T="bool" @bind-Value="protectZip" Label="@L["Protect the ZIP file with a password"]" Color="Color.Primary" Disabled="backupBusy" />

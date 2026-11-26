@@ -38,6 +38,7 @@ public sealed class DesktopState
         new("terminal", "Terminal", "System", Icons.Material.Filled.Terminal, "/terminal/window", typeof(Components.Pages.TerminalView), 960, 580, Flush: true),
         new("appearance", "Appearance", "System", Icons.Material.Filled.Palette, "/appearance", typeof(Components.Pages.Appearance), 760, 520),
         new("system-settings", "System settings", "System", Icons.Material.Filled.SystemUpdateAlt, "/system-settings", typeof(Components.Pages.SystemSettings), 900, 680),
+        new("scheduled-tasks", "Scheduled tasks", "System", Icons.Material.Filled.Schedule, "/scheduled-tasks", typeof(Components.Pages.ScheduledTasks), 1200, 660),
 
         new("disks", "Disks", "Storage", Icons.Material.Filled.Dns, "/disks", typeof(Components.Pages.Disks), 1280, 800),
         new("pools", "ZFS pools", "Storage", Icons.Material.Filled.Layers, "/pools", typeof(Components.Pages.Pools), 1100, 640),

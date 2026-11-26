@@ -44,6 +44,7 @@ public sealed class AlertService(Repo repo, IMailSender mail, AlertState state)
             if (snapshot.Pools is null) unknown.Add("pool:");
             if (snapshot.Smart is null) unknown.Add("smart:");
             if (snapshot.Backups is null) unknown.Add("backup:");
+            if (snapshot.Tasks is null) unknown.Add("task:");
             if (snapshot.Remotes is null) unknown.Add("remote:");
             // Mises à jour : une lecture ratée ou un contrôle pas encore fait n'est pas « plus de mise à jour disponible ».
             if (snapshot.Updates?.App is null or { Error: not null }) unknown.Add("update:app");
@@ -51,17 +52,10 @@ public sealed class AlertService(Repo repo, IMailSender mail, AlertState state)
 
             var (raise, resolve) = AlertEngine.Step(current, active, _previous, unknown, immediate);
             _previous = current.Select(c => c.Code).ToHashSet(StringComparer.Ordinal);
+            // Une alerte ouverte directement pendant la collecte n'est pas dans cet état déjà périmé : on ne la ferme pas.
+            if (snapshot.CollectedUtc is { } collected) resolve.RemoveAll(a => a.RaisedAt > collected);
 
-            // Une alerte qui clignote (fermée puis rouverte en moins de RepeatQuiet) n'est avisée qu'une fois : sa première ouverture
-            // a déjà été envoyée, et le retour à la normale de ses ouvertures suivantes ne l'est pas non plus.
-            foreach (var c in raise)
-            {
-                var repeat = await repo.WasResolvedRecentlyAsync(c.Code, RepeatQuiet);
-                await repo.RaiseAlertAsync(c);
-                await repo.AuditAsync("system", "Alert", c.Title);
-                if (!repeat)
-                    await NotifyAsync(Msg.F(c.Severity == AlertRules.Critical ? "CRITICAL: {0}" : "Warning: {0}", c.Title), c.Detail, ct);
-            }
+            foreach (var c in raise) await RaiseCoreAsync(c, ct);
             foreach (var a in resolve)
             {
                 var repeat = await repo.WasResolvedRecentlyAsync(a.Code, RepeatQuiet, beforeId: a.Id);
@@ -75,6 +69,34 @@ public sealed class AlertService(Repo repo, IMailSender mail, AlertState state)
             state.Set(now.Count, now.Count(a => a.Severity == AlertRules.Critical));
         }
         finally { _gate.Release(); }
+    }
+
+    /// <summary>
+    /// Ouvre tout de suite l'alerte d'un événement certain (l'échec d'une tâche), sans attendre deux constats ; sans effet si elle est déjà ouverte.
+    /// Les contrôles périodiques la ferment ensuite quand le problème n'est plus constaté.
+    /// </summary>
+    public async Task RaiseNowAsync(Candidate c, CancellationToken ct = default)
+    {
+        await _gate.WaitAsync(ct);
+        try
+        {
+            if ((await repo.GetActiveAlertsAsync()).Any(a => a.Code == c.Code)) return;
+            await RaiseCoreAsync(c, ct);
+            var now = await repo.GetActiveAlertsAsync();
+            state.Set(now.Count, now.Count(a => a.Severity == AlertRules.Critical));
+        }
+        finally { _gate.Release(); }
+    }
+
+    // Une alerte qui clignote (fermée puis rouverte en moins de RepeatQuiet) n'est avisée qu'une fois : sa première ouverture
+    // a déjà été envoyée, et le retour à la normale de ses ouvertures suivantes ne l'est pas non plus.
+    async Task RaiseCoreAsync(Candidate c, CancellationToken ct)
+    {
+        var repeat = await repo.WasResolvedRecentlyAsync(c.Code, RepeatQuiet);
+        await repo.RaiseAlertAsync(c);
+        await repo.AuditAsync("system", "Alert", c.Title);
+        if (!repeat)
+            await NotifyAsync(Msg.F(c.Severity == AlertRules.Critical ? "CRITICAL: {0}" : "Warning: {0}", c.Title), c.Detail, ct);
     }
 
     /// <summary>Un échec d'envoi est journalisé mais ne bloque ni le contrôle ni l'alerte.</summary>
@@ -147,6 +169,7 @@ public sealed class AlertMonitor(IServiceScopeFactory scopes, AlertService alert
     async Task<HealthSnapshot> CollectAsync(bool forceSmart, CancellationToken ct)
     {
         using var scope = scopes.CreateScope();
+        var collectedUtc = DateTime.UtcNow;
         var agent = scope.ServiceProvider.GetRequiredService<AgentClient>();
         IReadOnlyList<Nas.Contracts.PoolInfo>? pools = null;
         try
@@ -169,7 +192,10 @@ public sealed class AlertMonitor(IServiceScopeFactory scopes, AlertService alert
             UpdateStatus? updates = null;
             try { updates = await agent.GetUpdateStatusAsync(ct); } // relu depuis le cache de l'agent : pas de nouvel appel à GitHub ou apt ici
             catch (AgentException) { }
-            return new HealthSnapshot(true, pools, _smart, backups, remotes, updates);
+            IReadOnlyList<TaskHealth>? scheduled = null;
+            try { scheduled = await scope.ServiceProvider.GetRequiredService<ScheduledTaskRepo>().GetHealthAsync(); }
+            catch (Microsoft.Data.Sqlite.SqliteException) { } // base illisible : on ne sait pas, on ne ferme rien
+            return new HealthSnapshot(true, pools, _smart, backups, remotes, updates, scheduled, collectedUtc);
         }
         catch (Exception e) when (e is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
         {

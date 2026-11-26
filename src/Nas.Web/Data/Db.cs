@@ -55,6 +55,15 @@ public class Db
             Unchanged INTEGER NOT NULL DEFAULT 0, Deleted INTEGER NOT NULL DEFAULT 0, Errors INTEGER NOT NULL DEFAULT 0, Message TEXT NULL, Details TEXT NULL);
         CREATE INDEX IF NOT EXISTS IX_BackupRuns_Job ON BackupRuns(JobId, Id);
         """);
+        c.Execute("""
+        CREATE TABLE IF NOT EXISTS ScheduledTasks(Id INTEGER PRIMARY KEY AUTOINCREMENT, Name TEXT NOT NULL, Type TEXT NOT NULL, Targets TEXT NOT NULL, Keep INTEGER NOT NULL DEFAULT 14,
+            SnapshotTag TEXT NOT NULL DEFAULT '', Schedule TEXT NOT NULL, CatchUp INTEGER NOT NULL DEFAULT 0, Enabled INTEGER NOT NULL DEFAULT 1, CreatedUtc TEXT NOT NULL,
+            NextRunUtc TEXT NULL); -- Targets : une cible par ligne ; Schedule : JSON de ScheduleRule
+        CREATE TABLE IF NOT EXISTS ScheduledTaskRuns(Id INTEGER PRIMARY KEY AUTOINCREMENT, TaskId INTEGER NOT NULL, TaskName TEXT NOT NULL, StartedUtc TEXT NOT NULL, EndedUtc TEXT NULL,
+            Status TEXT NOT NULL, Reason TEXT NOT NULL DEFAULT '', Message TEXT NULL, Details TEXT NULL, Pending TEXT NOT NULL DEFAULT '',
+            HasError INTEGER NOT NULL DEFAULT 0, HasCancel INTEGER NOT NULL DEFAULT 0, HasInterrupt INTEGER NOT NULL DEFAULT 0);
+        CREATE INDEX IF NOT EXISTS IX_ScheduledTaskRuns_Task ON ScheduledTaskRuns(TaskId, Id);
+        """);
     }
 
     static void AddColumn(SqliteConnection c, string table, string column, string ddl)

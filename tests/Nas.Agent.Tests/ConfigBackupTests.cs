@@ -48,7 +48,7 @@ public class ConfigBackupTests : IDisposable
         _repo = new Repo(db);
         _backups = new BackupRepo(db);
         var agent = new AgentClient(new HttpClient(_handler) { BaseAddress = new Uri("http://agent/") });
-        _ops = new ConfigBackupOperations(_repo, _backups, agent);
+        _ops = new ConfigBackupOperations(_repo, _backups, new ScheduledTaskRepo(db), agent);
     }
 
     public void Dispose() { try { Directory.Delete(_dir, true); } catch (IOException) { } }
@@ -87,6 +87,7 @@ public class ConfigBackupTests : IDisposable
         Assert.Contains("shares.json", entries.Keys);
         Assert.Contains("folder-acls.json", entries.Keys);
         Assert.Contains("backup-jobs.json", entries.Keys);
+        Assert.Contains("scheduled-tasks.json", entries.Keys);
         Assert.Contains("ftp-settings.json", entries.Keys);
         Assert.Contains("update-schedule.json", entries.Keys);
         Assert.Contains("mail-settings.json", entries.Keys);

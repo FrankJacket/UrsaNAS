@@ -5,7 +5,7 @@ namespace Nas.Web.Alerting;
 
 /// <summary>Ce que l'interface a pu observer lors d'un contrôle. <c>null</c> = on n'a pas pu le savoir (agent muet, ZFS absent).</summary>
 public sealed record HealthSnapshot(bool AgentReachable, IReadOnlyList<PoolInfo>? Pools, IReadOnlyList<SmartInfo>? Smart, IReadOnlyList<BackupHealth>? Backups = null,
-    IReadOnlyList<RemoteStorage>? Remotes = null, UpdateStatus? Updates = null);
+    IReadOnlyList<RemoteStorage>? Remotes = null, UpdateStatus? Updates = null, IReadOnlyList<TaskHealth>? Tasks = null, DateTime? CollectedUtc = null);
 
 /// <summary>Un problème constaté. <c>Code</c> l'identifie de façon stable d'un contrôle à l'autre (ex. <c>pool:tank:health</c>).</summary>
 public sealed record Candidate(string Code, string Severity, string Title, string Detail);
@@ -72,6 +72,9 @@ public static class AlertRules
                     "Check that the backup disk is connected."));
         }
 
+        foreach (var t in (s.Tasks ?? []).Where(t => t.Enabled && t.LastStatus == TaskRunStatus.Failed))
+            result.Add(TaskFailed(t.TaskId, t.Name));
+
         // Une connexion enregistrée mais non montée : serveur éteint, réseau coupé, jeton refusé… (l'alerte est fermée dès que le montage revient)
         foreach (var r in (s.Remotes ?? []).Where(r => !r.Mounted))
             result.Add(new($"remote:{r.Name}:down", Warning, Msg.F("Remote storage {0}: not connected", r.Name),
@@ -94,6 +97,10 @@ public static class AlertRules
                 "Open System settings to install them."));
         return result;
     }
+
+    /// <summary>Le dernier résultat concluant d'une tâche planifiée est un échec ; la réussite suivante ferme l'alerte.</summary>
+    public static Candidate TaskFailed(int taskId, string name) =>
+        new($"task:{taskId}:failed", Critical, Msg.F("Scheduled task {0}: the last run failed", name), "Open the Scheduled tasks window to read the error.");
 
     /// <summary>Les compteurs de zpool status sont du texte (« 0 », « 12 », « 1.2K »).</summary>
     static bool IsNonZero(string counter) => !string.IsNullOrEmpty(counter) && counter != "0";

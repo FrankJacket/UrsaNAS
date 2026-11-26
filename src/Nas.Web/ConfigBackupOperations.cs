@@ -11,7 +11,7 @@ namespace Nas.Web;
 /// Jamais de mot de passe dedans (comptes NAS, SMTP) : seuls les noms, groupes et réglages sont repris.
 /// Appelée depuis une route HTTP ordinaire (pas un composant Blazor) : l'acteur vient du <see cref="HttpContext"/>, jamais d'<c>AuthenticationStateProvider</c>.
 /// </summary>
-public sealed class ConfigBackupOperations(Repo repo, BackupRepo backups, AgentClient agent)
+public sealed class ConfigBackupOperations(Repo repo, BackupRepo backups, ScheduledTaskRepo scheduled, AgentClient agent)
 {
     static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = true };
 
@@ -27,6 +27,7 @@ public sealed class ConfigBackupOperations(Repo repo, BackupRepo backups, AgentC
         foreach (var s in shares) folderAcls[s.Name] = await repo.GetFolderAclsAsync(s.Name);
         files["folder-acls.json"] = Serialize(folderAcls);
         files["backup-jobs.json"] = Serialize(await backups.GetJobsAsync());
+        files["scheduled-tasks.json"] = Serialize(await scheduled.GetTasksAsync());
         files["ftp-settings.json"] = Serialize(await repo.GetFtpSettingsAsync());
         files["update-schedule.json"] = Serialize(await repo.GetUpdateScheduleAsync());
         files["mail-settings.json"] = Serialize((await repo.GetMailSettingsAsync()) with { Password = "" }); // le mot de passe SMTP doit être ressaisi après restauration

@@ -1,0 +1,226 @@
+@inject ScheduledTaskOperations Ops
+@inject AgentClient Agent
+
+@* Création ou modification d'une tâche planifiée. *@
+<MudDialog>
+    <DialogContent>
+        @if (error is not null)
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-3">@error</MudAlert>
+        }
+        <MudTextField @bind-Value="task.Name" Label="@L["Task name"]" Immediate="true" Disabled="busy" AutoFocus="@(task.Id == 0)" Class="mb-3" />
+
+        <MudTabs Elevation="0" Rounded="true" TabPanelsClass="pt-3" KeepPanelsAlive="true">
+            <MudTabPanel Text="@L["Task"]">
+                <MudSelect T="string" Value="task.Type" ValueChanged="SetType" Label="@L["Type"]" Disabled="@(busy || task.Id != 0)">
+                    <MudSelectItem T="string" Value="@ScheduledTaskType.Snapshot">@L["ZFS snapshots"]</MudSelectItem>
+                    <MudSelectItem T="string" Value="@ScheduledTaskType.Scrub">@L["Pool scrub"]</MudSelectItem>
+                </MudSelect>
+
+                @if (!IsSnapshot)
+                {
+                    <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">@L["The system already scrubs the pools by itself on the second Sunday of every month, shortly after midnight; those scrubs don't appear in the task history. A task is useful to scrub more often or at another time."]</MudAlert>
+                }
+
+                <MudText Typo="Typo.subtitle2" Class="mt-3">@(IsSnapshot ? L["Datasets"] : L["Pools"])</MudText>
+                <div style="max-height:220px; overflow:auto">
+                    @foreach (var item in Choices())
+                    {
+                        var name = item;
+                        <MudCheckBox T="bool" Value="selected.Contains(name)" ValueChanged="v => Toggle(name, v)" Label="@name" Dense="true" Color="Color.Primary" Disabled="busy" Class="d-block" />
+                    }
+                </div>
+                @if (loaded && !Choices().Any())
+                {
+                    <MudText Typo="Typo.body2">@(IsSnapshot ? L["No dataset available. Create one from the Datasets window."] : L["No pools. Create one from the free disks."])</MudText>
+                }
+
+                @if (IsSnapshot)
+                {
+                    <MudNumericField T="int" @bind-Value="task.Keep" Label="@L["Snapshots to keep for each dataset"]" Min="1" Max="1000" HideSpinButtons="true" Disabled="busy" Class="mt-3"
+                                     HelperText="@L["Older snapshots created by this task are deleted. Other snapshots are never touched. Child datasets are not included."]" />
+                }
+            </MudTabPanel>
+
+            <MudTabPanel Text="@L["Schedule"]">
+                <MudSelect T="string" Value="rule.Repeat" ValueChanged="v => rule = rule with { Repeat = v ?? RepeatKind.Daily }" Label="@L["Repeat"]" Disabled="busy">
+                    <MudSelectItem T="string" Value="@RepeatKind.Once">@L["Only once"]</MudSelectItem>
+                    <MudSelectItem T="string" Value="@RepeatKind.Hours">@L["Every few hours"]</MudSelectItem>
+                    <MudSelectItem T="string" Value="@RepeatKind.Daily">@L["Every day"]</MudSelectItem>
+                    <MudSelectItem T="string" Value="@RepeatKind.Weekly">@L["Every week"]</MudSelectItem>
+                    <MudSelectItem T="string" Value="@RepeatKind.MonthlyDay">@L["Every month"]</MudSelectItem>
+                    <MudSelectItem T="string" Value="@RepeatKind.MonthlyWeekday">@L["Every month, by weekday"]</MudSelectItem>
+                </MudSelect>
+
+                @if (rule.Repeat == RepeatKind.Once)
+                {
+                    @* La largeur est limitée par le conteneur : un style sur le sélecteur tronquerait aussi son popup. *@
+                    <div style="width:100%; max-width:280px">
+                        <MudDatePicker Date="@rule.Date?.ToDateTime(TimeOnly.MinValue)" DateChanged="SetDate" Label="@L["Date"]" Disabled="busy"
+                                       Culture="Culture" DateFormat="@Culture.DateTimeFormat.ShortDatePattern" />
+                    </div>
+                }
+                @if (rule.Repeat == RepeatKind.Hours)
+                {
+                    <MudSelect T="int" Value="rule.EveryHours" ValueChanged="v => rule = rule with { EveryHours = v }" Label="@L["Number of hours"]" Disabled="busy" Style="max-width:280px">
+                        @foreach (var step in ScheduleRule.HourSteps)
+                        {
+                            <MudSelectItem T="int" Value="step">@step</MudSelectItem>
+                        }
+                    </MudSelect>
+                    <MudNumericField T="int" Value="rule.Minute" ValueChanged="v => rule = rule with { Minute = Math.Clamp(v, 0, 59) }" Label="@L["Minute of the hour"]"
+                                     Min="0" Max="59" Immediate="true" Disabled="busy" Style="max-width:280px" HelperText="@L["Hours are counted from midnight."]" />
+                }
+                @if (rule.Repeat == RepeatKind.Weekly)
+                {
+                    <div class="d-flex flex-wrap mt-2">
+                        @foreach (var d in ScheduleDescription.WeekDays)
+                        {
+                            var day = d;
+                            <MudCheckBox T="bool" Value="rule.HasDay(day)" ValueChanged="v => SetDay(day, v)" Label="@Culture.DateTimeFormat.GetDayName(day)" Dense="true" Color="Color.Primary" Disabled="busy" />
+                        }
+                    </div>
+                }
+                @if (rule.Repeat == RepeatKind.MonthlyDay)
+                {
+                    <MudSelect T="int" Value="rule.MonthDay" ValueChanged="v => rule = rule with { MonthDay = v }" Label="@L["Day of the month"]" Disabled="busy" Style="max-width:280px"
+                               ToStringFunc="@(v => v == ScheduleRule.LastDay ? L["Last day"] : v.ToString())"
+                               HelperText="@L["In a shorter month, the task runs on its last day."]">
+                        @for (var i = 1; i <= 31; i++)
+                        {
+                            var value = i;
+                            <MudSelectItem T="int" Value="value">@value</MudSelectItem>
+                        }
+                        <MudSelectItem T="int" Value="@ScheduleRule.LastDay">@L["Last day"]</MudSelectItem>
+                    </MudSelect>
+                }
+                @if (rule.Repeat == RepeatKind.MonthlyWeekday)
+                {
+                    <MudStack Row="true">
+                        <MudSelect T="int" Value="rule.WeekRank" ValueChanged="v => rule = rule with { WeekRank = v }" Label="@L["Which one"]" Disabled="busy" Style="max-width:200px"
+                                   ToStringFunc="@(v => ScheduleDescription.Rank(v, L))">
+                            @for (var i = 1; i <= ScheduleRule.LastRank; i++)
+                            {
+                                var value = i;
+                                <MudSelectItem T="int" Value="value">@ScheduleDescription.Rank(value, L)</MudSelectItem>
+                            }
+                        </MudSelect>
+                        <MudSelect T="DayOfWeek" Value="rule.WeekDay" ValueChanged="v => rule = rule with { WeekDay = v }" Label="@L["Day"]" Disabled="busy" Style="max-width:200px"
+                                   ToStringFunc="@(v => Culture.DateTimeFormat.GetDayName(v))">
+                            @foreach (var d in ScheduleDescription.WeekDays)
+                            {
+                                <MudSelectItem T="DayOfWeek" Value="d">@Culture.DateTimeFormat.GetDayName(d)</MudSelectItem>
+                            }
+                        </MudSelect>
+                    </MudStack>
+                }
+                @if (rule.Repeat != RepeatKind.Hours)
+                {
+                    <div style="width:100%; max-width:280px">
+                        <MudTimePicker Time="@Time" TimeChanged="SetTime" Label="@L["Time"]" Disabled="busy"
+                                       TimeFormat="@Culture.DateTimeFormat.ShortTimePattern" AmPm="@Culture.DateTimeFormat.ShortTimePattern.Contains("tt")" />
+                    </div>
+                }
+
+                <MudAlert Severity="Severity.Info" Dense="true" Class="mt-3">
+                    <div>@ScheduleDescription.Describe(rule, L)</div>
+                    <div>@(rule.NextAfter(DateTime.UtcNow, TimeZoneInfo.Local) is { } next ? L["Next run: {0}", Fmt.Dt(next)] : L["No upcoming run."])</div>
+                </MudAlert>
+                <MudText Typo="Typo.caption" Class="d-block">@L["Times below are the server's own clock"]: @TimeZoneInfo.Local.Id</MudText>
+
+                <MudSwitch T="bool" @bind-Value="task.CatchUp" Label="@L["Run once as soon as possible after a missed time"]" Color="Color.Primary" Disabled="busy" Class="mt-2" />
+                <MudSwitch T="bool" @bind-Value="task.Enabled" Label="@L["Enabled"]" Color="Color.Primary" Disabled="busy" />
+            </MudTabPanel>
+        </MudTabs>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => Dialog.Cancel()" Disabled="busy">@L["Cancel"]</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save" Disabled="busy">@L["Save"]</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance Dialog { get; set; } = default!;
+    [Parameter] public ScheduledTaskRow? Existing { get; set; }
+
+    ScheduledTaskRow task = new();
+    ScheduleRule rule = new();
+    HashSet<string> selected = new(StringComparer.Ordinal);
+    IReadOnlyList<string> datasets = [];
+    IReadOnlyList<string> pools = [];
+    string? error;
+    bool busy, loaded;
+
+    System.Globalization.CultureInfo Culture => System.Globalization.CultureInfo.GetCultureInfo(L.Lang);
+    bool IsSnapshot => task.Type == ScheduledTaskType.Snapshot;
+    TimeSpan? Time => ScheduleRule.TryTime(rule.Time, out var t) ? t.ToTimeSpan() : null;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Existing is not null)
+        {
+            task = new ScheduledTaskRow
+            {
+                Id = Existing.Id, Name = Existing.Name, Type = Existing.Type, Targets = Existing.Targets, Keep = Existing.Keep,
+                CatchUp = Existing.CatchUp, Enabled = Existing.Enabled,
+            };
+            rule = Existing.Rule();
+            if (!RepeatKind.All.Contains(rule.Repeat)) rule = new ScheduleRule();
+            selected = Existing.TargetList().ToHashSet(StringComparer.Ordinal);
+        }
+        try
+        {
+            pools = (await Agent.GetPoolsAsync()).Select(p => p.Name).ToList();
+            // La racine d'un pool n'est pas proposée : l'agent ne crée des instantanés que sur un jeu de données.
+            datasets = (await Agent.GetDatasetsAsync()).Select(d => d.Name).Where(n => n.Contains('/')).ToList();
+        }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable."]; }
+        loaded = true;
+    }
+
+    /// <summary>Les cibles qui existent, plus celles de la tâche qui ont disparu (pour pouvoir les décocher).</summary>
+    IEnumerable<string> Choices()
+    {
+        var existing = IsSnapshot ? datasets : pools;
+        return existing.Concat(selected.Where(s => !existing.Contains(s)).Order(StringComparer.Ordinal));
+    }
+
+    void SetType(string? type)
+    {
+        task.Type = type ?? ScheduledTaskType.Snapshot;
+        selected.Clear();
+    }
+
+    void Toggle(string name, bool on)
+    {
+        if (on) selected.Add(name);
+        else selected.Remove(name);
+    }
+
+    void SetDate(DateTime? d) => rule = rule with { Date = d is { } value ? DateOnly.FromDateTime(value) : null };
+
+    void SetTime(TimeSpan? t)
+    {
+        if (t is { } value) rule = rule with { Time = value.ToString(@"hh\:mm") };
+    }
+
+    void SetDay(DayOfWeek day, bool on) => rule = rule with { Days = on ? rule.Days | (1 << (int)day) : rule.Days & ~(1 << (int)day) };
+
+    async Task Save()
+    {
+        error = null;
+        busy = true;
+        try
+        {
+            task.Targets = string.Join('\n', selected.Order(StringComparer.Ordinal));
+            task.SetRule(rule);
+            await Ops.SaveAsync(task);
+            Dialog.Close(DialogResult.Ok(task.Name));
+            return;
+        }
+        catch (AgentException e) { error = L.Translate(e.Message); }
+        catch (HttpRequestException) { error = L["Agent unreachable."]; }
+        busy = false;
+    }
+}

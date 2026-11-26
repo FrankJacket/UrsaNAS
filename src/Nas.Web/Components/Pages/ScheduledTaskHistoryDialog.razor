@@ -1,0 +1,57 @@
+@inherits AutoRefreshBase
+@inject ScheduledTaskRepo Tasks
+
+@* Les dernières exécutions d'une tâche planifiée ; une ligne choisie montre son détail. *@
+<MudDialog>
+    <DialogContent>
+        <MudTable Items="runs" T="ScheduledRunRow" Hover="true" Dense="true" OnRowClick="Select" RowStyle="cursor:pointer" Style="max-height:360px; overflow:auto">
+            <HeaderContent><MudTh>@L["Started"]</MudTh><MudTh>@L["Trigger"]</MudTh><MudTh>@L["Result"]</MudTh><MudTh>@L["Duration"]</MudTh><MudTh>@L["Message"]</MudTh></HeaderContent>
+            <RowTemplate>
+                <MudTd>@Fmt.Dt(context.StartedUtc)</MudTd>
+                <MudTd>@L.Translate(context.Reason)</MudTd>
+                <MudTd><MudChip T="string" Size="Size.Small" Color="@TaskRunDisplay.Color(context.Status)">@TaskRunDisplay.Text(context.Status, L)</MudChip></MudTd>
+                <MudTd>@(context.EndedUtc is { } end ? Duration(end - context.StartedUtc) : "—")</MudTd>
+                <MudTd>@L.Translate(context.Message)</MudTd>
+            </RowTemplate>
+            <NoRecordsContent><MudText Class="pa-4">@L["Never run."]</MudText></NoRecordsContent>
+        </MudTable>
+
+        @if (runs.FirstOrDefault(r => r.Id == selectedId) is { } run)
+        {
+            <MudText Typo="Typo.subtitle2" Class="mt-4">@L["Details"] — @Fmt.Dt(run.StartedUtc)</MudText>
+            @if (run.Details is null)
+            {
+                <MudText Typo="Typo.body2">@L["Nothing to report."]</MudText>
+            }
+            else
+            {
+                <div style="max-height:200px; overflow:auto">
+                    @foreach (var line in run.Details.Split('\n'))
+                    {
+                        <MudText Typo="Typo.body2" Style="overflow-wrap:anywhere">@L.Translate(line)</MudText>
+                    }
+                </div>
+            }
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => Dialog.Close()">@L["Close"]</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance Dialog { get; set; } = default!;
+    [Parameter] public int TaskId { get; set; }
+
+    List<ScheduledRunRow> runs = new();
+    int selectedId;
+
+    protected override TimeSpan Interval => TimeSpan.FromSeconds(5);
+
+    protected override async Task LoadAsync() => runs = await Tasks.GetRunsAsync(TaskId);
+
+    void Select(TableRowClickEventArgs<ScheduledRunRow> e) => selectedId = e.Item!.Id;
+
+    static string Duration(TimeSpan t) =>
+        t.TotalHours >= 1 ? $"{(int)t.TotalHours} h {t.Minutes:00} min" : t.TotalMinutes >= 1 ? $"{t.Minutes} min {t.Seconds:00} s" : $"{Math.Max(0, t.Seconds)} s";
+}

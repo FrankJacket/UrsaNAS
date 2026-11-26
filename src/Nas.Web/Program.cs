@@ -79,6 +79,11 @@ b.Services.AddScoped<BackupCoordinator>();
 b.Services.AddScoped<BackupOperations>();
 b.Services.AddHostedService<BackupMonitor>();
 
+b.Services.AddSingleton<ScheduledTaskRepo>();
+b.Services.AddScoped<ScheduledTaskCoordinator>();
+b.Services.AddScoped<ScheduledTaskOperations>();
+b.Services.AddHostedService<ScheduledTaskMonitor>();
+
 // L'interface ne touche jamais au système : elle parle à l'agent par socket Unix (ou par URL en développement).
 var agentUrl = b.Configuration["Agent:Url"];
 b.Services.AddHttpClient<AgentClient>(c =>

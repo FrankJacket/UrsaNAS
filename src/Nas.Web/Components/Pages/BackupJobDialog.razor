@@ -58,9 +58,12 @@
                 </MudSelect>
                 @if (job.ScheduleMode == BackupSchedule.Daily)
                 {
-                    <MudTimePicker Time="@TimeSpan.Parse(job.DailyTime)" TimeChanged="OnDailyTimeChanged"
-                                   Label="@L["Time"]" Disabled="busy" Style="max-width:280px"
-                                   TimeFormat="@Culture.DateTimeFormat.ShortTimePattern" AmPm="@Culture.DateTimeFormat.ShortTimePattern.Contains("tt")" />
+                    @* La largeur est limitée par le conteneur : un style sur le sélecteur tronquerait aussi son popup. *@
+                    <div style="width:100%; max-width:280px">
+                        <MudTimePicker Time="@TimeSpan.Parse(job.DailyTime)" TimeChanged="OnDailyTimeChanged"
+                                       Label="@L["Time"]" Disabled="busy"
+                                       TimeFormat="@Culture.DateTimeFormat.ShortTimePattern" AmPm="@Culture.DateTimeFormat.ShortTimePattern.Contains("tt")" />
+                    </div>
                 }
                 <MudSwitch T="bool" @bind-Value="job.Enabled" Label="@L["Enabled"]" Color="Color.Primary" Disabled="busy" Class="mt-2" />
             </MudTabPanel>

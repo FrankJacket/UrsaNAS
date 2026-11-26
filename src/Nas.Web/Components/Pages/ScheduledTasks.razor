@@ -1,0 +1,131 @@
+@page "/scheduled-tasks"
+@inherits AutoRefreshBase
+@inject ScheduledTaskRepo Tasks
+@inject ScheduledTaskOperations Ops
+@inject IDialogService Dialogs
+@inject ISnackbar Snack
+
+@if (!InWindow) { <MudText Typo="Typo.h4" Class="mb-4">@L["Scheduled tasks"]</MudText> }
+
+<MudStack Row="true" Class="mb-4">
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="() => Edit(null)">@L["New task"]</MudButton>
+</MudStack>
+
+<MudTable Items="tasks" T="ScheduledTaskRow" Class="desk-grow" Hover="true" Dense="true">
+    <HeaderContent>
+        <MudTh>@L["Name"]</MudTh><MudTh>@L["Type"]</MudTh><MudTh>@L["Schedule"]</MudTh><MudTh>@L["Next run"]</MudTh>
+        <MudTh>@L["Last result"]</MudTh><MudTh>@L["Enabled"]</MudTh><MudTh></MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        @{
+            var task = context;
+            var last = latest.GetValueOrDefault(task.Id);
+            var running = last?.Status == TaskRunStatus.Running;
+        }
+        <MudTd>
+            <MudText Typo="Typo.body2">@task.Name</MudText>
+            <MudText Typo="Typo.caption" Class="d-block" Style="overflow-wrap:anywhere">@string.Join(", ", task.TargetList())</MudText>
+        </MudTd>
+        <MudTd>@TypeText(task.Type)</MudTd>
+        <MudTd>@ScheduleDescription.Describe(task.Rule(), L)</MudTd>
+        <MudTd>@(task.NextRunUtc is { } next ? Fmt.Dt(next) : "—")</MudTd>
+        <MudTd>
+            @if (last is null)
+            {
+                @L["Never run."]
+            }
+            else
+            {
+                <MudChip T="string" Size="Size.Small" Color="@TaskRunDisplay.Color(last.Status)">@TaskRunDisplay.Text(last.Status, L)</MudChip>
+                <MudText Typo="Typo.caption" Class="d-block">@Fmt.Dt(last.StartedUtc)</MudText>
+            }
+        </MudTd>
+        <MudTd><MudSwitch T="bool" Value="task.Enabled" ValueChanged="v => SetEnabled(task, v)" Color="Color.Primary" /></MudTd>
+        <MudTd Style="white-space:nowrap">
+            <MudTooltip Text="@L["Run now"]">
+                <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Small" Color="Color.Primary" Disabled="running" OnClick="() => RunNow(task)" />
+            </MudTooltip>
+            <MudTooltip Text="@L["History"]">
+                <MudIconButton Icon="@Icons.Material.Filled.History" Size="Size.Small" OnClick="() => History(task)" />
+            </MudTooltip>
+            <MudTooltip Text="@L["Edit"]">
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => Edit(task)" />
+            </MudTooltip>
+            <MudTooltip Text="@L["Delete"]">
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="() => Delete(task)" />
+            </MudTooltip>
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent><MudText Class="pa-4">@L["No scheduled task yet."]</MudText></NoRecordsContent>
+</MudTable>
+
+@code {
+    /// <summary>Vrai quand la page est affichée dans une fenêtre du bureau : le titre est alors celui de la fenêtre.</summary>
+    [CascadingParameter(Name = "InWindow")] bool InWindow { get; set; }
+
+    List<ScheduledTaskRow> tasks = new();
+    Dictionary<int, ScheduledRunRow> latest = new();
+
+    protected override TimeSpan Interval => TimeSpan.FromSeconds(5);
+
+    protected override async Task LoadAsync()
+    {
+        tasks = await Tasks.GetTasksAsync();
+        latest = await Tasks.GetLatestRunsAsync();
+    }
+
+    static readonly DialogOptions Wide = new() { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseButton = true, BackdropClick = false };
+
+    string TypeText(string type) => type == ScheduledTaskType.Scrub ? L["Pool scrub"] : L["ZFS snapshots"];
+
+    async Task Edit(ScheduledTaskRow? task)
+    {
+        var parameters = new DialogParameters<ScheduledTaskDialog> { { x => x.Existing, task } };
+        var dialog = await Dialogs.ShowAsync<ScheduledTaskDialog>(task is null ? L["New task"] : L["Edit {0}", task.Name], parameters, Wide);
+        if (await dialog.Result is { Canceled: false })
+        {
+            Snack.Add(L["Task saved."], Severity.Success);
+            await LoadAsync();
+        }
+    }
+
+    async Task History(ScheduledTaskRow task)
+    {
+        var parameters = new DialogParameters<ScheduledTaskHistoryDialog> { { x => x.TaskId, task.Id } };
+        await Dialogs.ShowAsync<ScheduledTaskHistoryDialog>(L["History of {0}", task.Name], parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseButton = true });
+    }
+
+    async Task Delete(ScheduledTaskRow task)
+    {
+        var ok = await Dialogs.ShowMessageBoxAsync(L["Delete task {0}?", task.Name],
+            L["The task and its history are removed. Snapshots it already created are kept, and a scrub already started goes on."],
+            yesText: L["Delete"], cancelText: L["Cancel"]);
+        if (ok == true) await Run(() => Ops.DeleteAsync(task.Id), L["Task deleted."]);
+    }
+
+    async Task RunNow(ScheduledTaskRow task)
+    {
+        if (!await Run(() => Ops.RunNowAsync(task.Id), null)) return;
+        if (latest.GetValueOrDefault(task.Id) is not { } r) return;
+        var severity = r.Status == TaskRunStatus.Failed ? Severity.Error : r.Status == TaskRunStatus.Success ? Severity.Success : Severity.Info;
+        Snack.Add($"{task.Name}: {TaskRunDisplay.Text(r.Status, L)}", severity);
+    }
+
+    Task SetEnabled(ScheduledTaskRow task, bool value) => Run(() => Ops.SetEnabledAsync(task.Id, value), null);
+
+    async Task<bool> Run(Func<Task> action, string? success)
+    {
+        var ok = false;
+        try
+        {
+            await action();
+            ok = true;
+            if (success is not null) Snack.Add(success, Severity.Success);
+        }
+        catch (AgentException e) { Snack.Add(L.Translate(e.Message), Severity.Error); }
+        catch (HttpRequestException) { Snack.Add(L["Agent unreachable."], Severity.Error); }
+        await LoadAsync();
+        return ok;
+    }
+}
