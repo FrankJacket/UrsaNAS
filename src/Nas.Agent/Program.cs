@@ -101,7 +101,7 @@ public partial class Program
         catch (Exception e) when (e is OperationException or System.ComponentModel.Win32Exception)
         { app.Logger.LogWarning("System groups could not be prepared: {Message}", e.Message); }
 
-        app.Services.GetRequiredService<ScriptService>(); // dès le démarrage : supprime les fichiers de scripts laissés par un arrêt brutal
+        app.Services.GetRequiredService<ScriptService>(); // at startup: removes the script files left behind by an abrupt stop
 
         app.UseWebSockets();
         app.MapGet("/terminal", (HttpContext ctx, IConfiguration cfg) => TerminalEndpoint.HandleAsync(ctx, cfg));
@@ -221,7 +221,7 @@ public partial class Program
         app.MapPost("/backup/runs/{id:int}/cancel", (int id, BackupService b) => { b.Cancel(id); return Results.NoContent(); });
         app.MapDelete("/backup/runs/{id:int}", (int id, BackupService b) => { b.Acknowledge(id); return Results.NoContent(); });
 
-        // Scripts des tâches planifiées (pas de verrou global : un script peut durer des heures)
+        // Scheduled task scripts (no global lock: a script can run for hours)
         app.MapGet("/scripts/runs", (ScriptService s) => Results.Ok(s.Statuses()));
         app.MapPost("/scripts/runs", (ScriptRunRequest r, ScriptService s, CancellationToken ct) =>
             Read(async () => { await s.StartAsync(r, ct); return Results.NoContent(); }));

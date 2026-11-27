@@ -58,14 +58,14 @@ public class Db
         c.Execute("""
         CREATE TABLE IF NOT EXISTS ScheduledTasks(Id INTEGER PRIMARY KEY AUTOINCREMENT, Name TEXT NOT NULL, Type TEXT NOT NULL, Targets TEXT NOT NULL, Keep INTEGER NOT NULL DEFAULT 14,
             SnapshotTag TEXT NOT NULL DEFAULT '', Schedule TEXT NOT NULL, CatchUp INTEGER NOT NULL DEFAULT 0, Enabled INTEGER NOT NULL DEFAULT 1, CreatedUtc TEXT NOT NULL,
-            NextRunUtc TEXT NULL); -- Targets : une cible par ligne ; Schedule : JSON de ScheduleRule
+            NextRunUtc TEXT NULL); -- Targets: one target per line; Schedule: JSON of ScheduleRule
         CREATE TABLE IF NOT EXISTS ScheduledTaskRuns(Id INTEGER PRIMARY KEY AUTOINCREMENT, TaskId INTEGER NOT NULL, TaskName TEXT NOT NULL, StartedUtc TEXT NOT NULL, EndedUtc TEXT NULL,
             Status TEXT NOT NULL, Reason TEXT NOT NULL DEFAULT '', Message TEXT NULL, Details TEXT NULL, Pending TEXT NOT NULL DEFAULT '',
             HasError INTEGER NOT NULL DEFAULT 0, HasCancel INTEGER NOT NULL DEFAULT 0, HasInterrupt INTEGER NOT NULL DEFAULT 0);
         CREATE INDEX IF NOT EXISTS IX_ScheduledTaskRuns_Task ON ScheduledTaskRuns(TaskId, Id);
         """);
-        AddColumn(c, "ScheduledTasks", "Script", "TEXT NOT NULL DEFAULT ''"); // tâches « script » : le texte Bash
-        AddColumn(c, "ScheduledTasks", "RunAs", "TEXT NOT NULL DEFAULT ''"); // le compte qui l'exécute
+        AddColumn(c, "ScheduledTasks", "Script", "TEXT NOT NULL DEFAULT ''"); // “script” tasks: the Bash text
+        AddColumn(c, "ScheduledTasks", "RunAs", "TEXT NOT NULL DEFAULT ''"); // the account that runs it
         AddColumn(c, "ScheduledTasks", "TimeoutMinutes", "INTEGER NOT NULL DEFAULT 60");
     }
 

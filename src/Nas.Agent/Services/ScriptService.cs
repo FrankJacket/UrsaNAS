@@ -8,7 +8,7 @@ using Nas.Contracts;
 
 namespace Nas.Agent.Services;
 
-/// <summary>La fin d'une sortie de programme : au plus <paramref name="capacity"/> octets, les plus anciens sont oubliés.</summary>
+/// <summary>The end of a program's output: at most <paramref name="capacity"/> bytes, the oldest ones are dropped.</summary>
 public sealed class OutputTail(int capacity = ScriptRules.MaxOutputBytes)
 {
     readonly byte[] _buf = new byte[capacity];
@@ -41,7 +41,7 @@ public sealed class OutputTail(int capacity = ScriptRules.MaxOutputBytes)
         }
     }
 
-    /// <summary>Le texte conservé ; « […] » en première ligne signale que le début a été coupé.</summary>
+    /// <summary>The kept text; “[…]” on the first line means the beginning was cut off.</summary>
     public override string ToString()
     {
         lock (_buf)
@@ -51,7 +51,7 @@ public sealed class OutputTail(int capacity = ScriptRules.MaxOutputBytes)
             _buf.AsSpan(_start, first).CopyTo(bytes);
             _buf.AsSpan(0, _count - first).CopyTo(bytes.AsSpan(first));
             var skip = 0;
-            if (_truncated) while (skip < bytes.Length && (bytes[skip] & 0xC0) == 0x80) skip++; // un caractère UTF-8 coupé en deux
+            if (_truncated) while (skip < bytes.Length && (bytes[skip] & 0xC0) == 0x80) skip++; // a UTF-8 character cut in half
             var text = Encoding.UTF8.GetString(bytes, skip, bytes.Length - skip).Replace("\0", "");
             return _truncated ? "[…]\n" + text : text;
         }
@@ -59,9 +59,9 @@ public sealed class OutputTail(int capacity = ScriptRules.MaxOutputBytes)
 }
 
 /// <summary>
-/// Exécute les scripts des tâches planifiées. Chaque script est écrit dans un fichier temporaire que seul son compte peut lire, lancé dans sa propre
-/// session (pour pouvoir arrêter aussi ses processus enfants), puis le fichier est supprimé. Les exécutions vivent en mémoire : un redémarrage
-/// de l'agent les arrête et les oublie, et l'interface les note alors « interrompues ».
+/// Runs the scripts of scheduled tasks. Each script is written to a temporary file that only its account can read, started in its own
+/// session (so that its child processes can be stopped too), then the file is deleted. Runs live in memory: restarting the agent
+/// stops and forgets them, and the web interface then records them as interrupted.
 /// </summary>
 public sealed partial class ScriptService
 {
@@ -89,7 +89,7 @@ public sealed partial class ScriptService
     readonly ILogger<ScriptService> _log;
     readonly ConcurrentDictionary<string, RunState> _runs = new();
 
-    /// <summary>L'unité de la limite de durée (une minute) ; les tests la raccourcissent.</summary>
+    /// <summary>The unit of the time limit (one minute); tests shorten it.</summary>
     public TimeSpan TimeoutUnit { get; set; } = TimeSpan.FromMinutes(1);
 
     public ScriptService(UserService users, ICommandRunner run, IConfiguration cfg, ILogger<ScriptService> log, IHostApplicationLifetime life)
@@ -102,7 +102,7 @@ public sealed partial class ScriptService
     string Folder => _cfg["Scripts:Directory"] ?? "/run/ursanas-scripts";
     TimeSpan KillDelay => TimeSpan.FromSeconds(_cfg.GetValue("Scripts:KillDelaySeconds", 5));
 
-    /// <summary>Les fichiers qu'un arrêt brutal de l'agent a pu laisser.</summary>
+    /// <summary>Files that an abrupt stop of the agent may have left behind.</summary>
     void RemoveLeftovers()
     {
         try
@@ -117,13 +117,13 @@ public sealed partial class ScriptService
 
     public void Cancel(string id) { if (_runs.TryGetValue(id, out var s) && s.Status.State == ScriptState.Running) s.Stop.Cancel(); }
 
-    /// <summary>La web a enregistré la fin du script : l'agent peut l'oublier.</summary>
+    /// <summary>The web interface has recorded the end of the script: the agent can forget it.</summary>
     public void Acknowledge(string id)
     {
         if (_runs.TryGetValue(id, out var s) && s.Status.State != ScriptState.Running) _runs.TryRemove(id, out _);
     }
 
-    /// <summary>Lance le script et rend la main dès que le processus est parti.</summary>
+    /// <summary>Starts the script and returns as soon as the process is running.</summary>
     public async Task StartAsync(ScriptRunRequest req, CancellationToken ct = default)
     {
         if (!OperatingSystem.IsLinux() || _cfg["URSANAS_FAKE"] == "1") throw new OperationException(Msg.F("Scripts can only run on the NAS itself."));
@@ -150,7 +150,7 @@ public sealed partial class ScriptService
         }
     }
 
-    /// <summary>Seuls « root » et les utilisateurs du NAS sont acceptés, jamais un autre compte système.</summary>
+    /// <summary>Only “root” and NAS users are accepted, never any other system account.</summary>
     async Task<Account> ResolveAccountAsync(string name, CancellationToken ct)
     {
         if (name != ScriptRules.Root && !(await _users.ListAsync(ct)).Any(u => u.Name == name))
@@ -159,7 +159,7 @@ public sealed partial class ScriptService
         var f = r.StdOut.Trim().Split(':');
         if (r.ExitCode != 0 || f.Length < 6 || f[0] != name || !uint.TryParse(f[2], out var uid) || !uint.TryParse(f[3], out var gid))
             throw new OperationException(Msg.F("User “{0}” does not exist.", name));
-        // Un compte du NAS ne doit jamais avoir l'identité de root.
+        // A NAS account must never have the identity of root.
         if (name != ScriptRules.Root && uid == 0) throw new OperationException(Msg.F("“{0}” is an existing system account: it cannot be used.", name));
         return new Account(name, uid, gid, f[5]);
     }
@@ -167,7 +167,7 @@ public sealed partial class ScriptService
     [SupportedOSPlatform("linux")]
     void WriteScript(string path, string script, Account account)
     {
-        // Le dossier se traverse sans pouvoir être listé ; chaque fichier n'est lisible que par le compte qui l'exécute.
+        // The folder can be traversed but not listed; each file is readable only by the account that runs it.
         Directory.CreateDirectory(Folder);
         File.SetUnixFileMode(Folder, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute);
 
@@ -181,8 +181,8 @@ public sealed partial class ScriptService
 
     Process StartProcess(string path, Account account)
     {
-        // « setsid » : le script est le chef d'une nouvelle session, son numéro de processus est donc aussi celui du groupe à arrêter.
-        // « setpriv » : quitte l'identité et les groupes de l'agent pour ceux du compte choisi.
+        // “setsid”: the script leads a new session, so its process id is also the id of the group to stop.
+        // “setpriv”: leaves the agent's identity and groups for those of the chosen account.
         var psi = new ProcessStartInfo("setsid")
         {
             RedirectStandardInput = true,
@@ -195,10 +195,10 @@ public sealed partial class ScriptService
             foreach (var a in new[] { "setpriv", $"--reuid={account.Uid}", $"--regid={account.Gid}", "--init-groups", "--" }) psi.ArgumentList.Add(a);
         else if (account.Uid != geteuid())
             throw new OperationException(Msg.F("The agent is not running as root: it cannot run a script as another account."));
-        // Les erreurs rejoignent la sortie standard pour garder les lignes dans l'ordre.
+        // Errors join standard output so that lines stay in order.
         foreach (var a in new[] { "/bin/bash", "-c", "umask 022; exec /bin/bash \"$0\" 2>&1", path }) psi.ArgumentList.Add(a);
 
-        psi.Environment.Clear(); // rien de l'environnement du service
+        psi.Environment.Clear(); // nothing from the service's environment
         psi.Environment["HOME"] = account.Home;
         psi.Environment["USER"] = account.Name;
         psi.Environment["LOGNAME"] = account.Name;
@@ -207,7 +207,7 @@ public sealed partial class ScriptService
         psi.Environment["LANG"] = "C.UTF-8";
 
         var process = Process.Start(psi) ?? throw new IOException("The shell could not be started.");
-        process.StandardInput.Close(); // un script qui attend une saisie lit une fin de fichier au lieu de rester bloqué
+        process.StandardInput.Close(); // a script waiting for input gets an end of file instead of hanging
         return process;
     }
 
@@ -231,15 +231,15 @@ public sealed partial class ScriptService
                 }
             }
 
-            // Un script terminé ne laisse rien derrière lui : un court délai, puis les processus restés dans son groupe sont arrêtés.
+            // A finished script leaves nothing behind: after a short delay, the processes remaining in its group are stopped.
             await WaitUntilAsync(() => !GroupAlive(group), TimeSpan.FromSeconds(1));
             await EndGroupAsync(group);
-            // Un processus volontairement détaché peut garder la sortie ouverte : on ne l'attend pas.
+            // A deliberately detached process can keep the output open: we do not wait for it.
             await Task.WhenAny(output, Task.Delay(TimeSpan.FromSeconds(2)));
 
             int? code = process.HasExited ? process.ExitCode : null;
             var result = ended ?? (code == 0 ? ScriptState.Succeeded : ScriptState.Failed);
-            DeleteFile(path); // avant d'annoncer la fin
+            DeleteFile(path); // before announcing the end
             state.Status = new(id, result, ended is null ? code : null, state.Output.ToString(), DateTime.UtcNow, TimeoutMinutes: timeoutMinutes);
         }
         catch (Exception e)
@@ -266,7 +266,7 @@ public sealed partial class ScriptService
         catch (Exception e) when (e is IOException or ObjectDisposedException or OperationCanceledException) { }
     }
 
-    /// <summary>Arrêt demandé ou limite dépassée : SIGTERM au groupe, puis SIGKILL à ce qui résiste, descendants compris.</summary>
+    /// <summary>Stop requested or time limit exceeded: SIGTERM to the group, then SIGKILL to whatever resists, descendants included.</summary>
     async Task KillAsync(Process process, int group)
     {
         kill(-group, SIGTERM);
@@ -286,7 +286,7 @@ public sealed partial class ScriptService
         if (!await WaitUntilAsync(() => !GroupAlive(group), KillDelay)) kill(-group, SIGKILL);
     }
 
-    // Le signal 0 n'envoie rien : il dit seulement si le groupe a encore un membre.
+    // Signal 0 sends nothing: it only tells whether the group still has a member.
     static bool GroupAlive(int group) => kill(-group, 0) == 0;
 
     static async Task<bool> WaitUntilAsync(Func<bool> done, TimeSpan max)

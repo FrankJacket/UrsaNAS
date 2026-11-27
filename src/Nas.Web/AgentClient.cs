@@ -290,7 +290,7 @@ public class AgentClient(HttpClient http)
 
     public Task<IReadOnlyList<SmartInfo>> GetSmartAsync(CancellationToken ct = default) => GetListAsync<SmartInfo>("smart", ct);
 
-    // ---- Scripts des tâches planifiées
+    // ---- Scheduled task scripts
 
     public Task<IReadOnlyList<ScriptRunStatus>> GetScriptRunsAsync(CancellationToken ct = default) => GetListAsync<ScriptRunStatus>("scripts/runs", ct);
 

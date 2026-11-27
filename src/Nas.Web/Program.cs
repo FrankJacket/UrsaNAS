@@ -15,7 +15,7 @@ using Nas.Web.Data;
 using Nas.Web.Localization;
 
 var b = WebApplication.CreateBuilder(args);
-// La limite par défaut (32 Ko) couperait la connexion à l'enregistrement d'un long script collé dans l'éditeur.
+// The default limit (32 KB) would drop the connection when saving a long script pasted into the editor.
 b.Services.AddRazorComponents().AddInteractiveServerComponents().AddHubOptions(o => o.MaximumReceiveMessageSize = 256 * 1024);
 b.Services.AddMudServices();
 b.Services.AddScoped<ThemeState>();

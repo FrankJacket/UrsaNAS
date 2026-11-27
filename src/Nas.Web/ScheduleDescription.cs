@@ -3,10 +3,10 @@ using Nas.Web.Localization;
 
 namespace Nas.Web;
 
-/// <summary>Un horaire en toutes lettres, dans la langue de l'interface.</summary>
+/// <summary>A schedule written out in words, in the interface language.</summary>
 public static class ScheduleDescription
 {
-    /// <summary>Ordre d'affichage des jours : la semaine commence le lundi.</summary>
+    /// <summary>Display order of the days: the week starts on Monday.</summary>
     public static readonly IReadOnlyList<DayOfWeek> WeekDays =
         [DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday, DayOfWeek.Thursday, DayOfWeek.Friday, DayOfWeek.Saturday, DayOfWeek.Sunday];
 

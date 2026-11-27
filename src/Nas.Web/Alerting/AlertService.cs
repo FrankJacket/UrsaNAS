@@ -52,7 +52,7 @@ public sealed class AlertService(Repo repo, IMailSender mail, AlertState state)
 
             var (raise, resolve) = AlertEngine.Step(current, active, _previous, unknown, immediate);
             _previous = current.Select(c => c.Code).ToHashSet(StringComparer.Ordinal);
-            // Une alerte ouverte directement pendant la collecte n'est pas dans cet état déjà périmé : on ne la ferme pas.
+            // An alert opened directly during the collection is not part of this already outdated state: it is not closed.
             if (snapshot.CollectedUtc is { } collected) resolve.RemoveAll(a => a.RaisedAt > collected);
 
             foreach (var c in raise) await RaiseCoreAsync(c, ct);
@@ -72,8 +72,8 @@ public sealed class AlertService(Repo repo, IMailSender mail, AlertState state)
     }
 
     /// <summary>
-    /// Ouvre tout de suite l'alerte d'un événement certain (l'échec d'une tâche), sans attendre deux constats ; sans effet si elle est déjà ouverte.
-    /// Les contrôles périodiques la ferment ensuite quand le problème n'est plus constaté.
+    /// Immediately opens the alert for a certain event (a task failure), without waiting for two observations; no effect if it is already open.
+    /// The periodic checks close it later, once the problem is no longer observed.
     /// </summary>
     public async Task RaiseNowAsync(Candidate c, CancellationToken ct = default)
     {
@@ -88,8 +88,8 @@ public sealed class AlertService(Repo repo, IMailSender mail, AlertState state)
         finally { _gate.Release(); }
     }
 
-    // Une alerte qui clignote (fermée puis rouverte en moins de RepeatQuiet) n'est avisée qu'une fois : sa première ouverture
-    // a déjà été envoyée, et le retour à la normale de ses ouvertures suivantes ne l'est pas non plus.
+    // A flapping alert (closed then reopened within RepeatQuiet) is notified only once: its first opening
+    // has already been sent, and the return to normal of its later openings is not sent either.
     async Task RaiseCoreAsync(Candidate c, CancellationToken ct)
     {
         var repeat = await repo.WasResolvedRecentlyAsync(c.Code, RepeatQuiet);
@@ -194,7 +194,7 @@ public sealed class AlertMonitor(IServiceScopeFactory scopes, AlertService alert
             catch (AgentException) { }
             IReadOnlyList<TaskHealth>? scheduled = null;
             try { scheduled = await scope.ServiceProvider.GetRequiredService<ScheduledTaskRepo>().GetHealthAsync(); }
-            catch (Microsoft.Data.Sqlite.SqliteException) { } // base illisible : on ne sait pas, on ne ferme rien
+            catch (Microsoft.Data.Sqlite.SqliteException) { } // unreadable database: the state is unknown, so nothing is closed
             return new HealthSnapshot(true, pools, _smart, backups, remotes, updates, scheduled, collectedUtc);
         }
         catch (Exception e) when (e is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)

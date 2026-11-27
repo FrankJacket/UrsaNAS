@@ -58,7 +58,7 @@
                 </MudSelect>
                 @if (job.ScheduleMode == BackupSchedule.Daily)
                 {
-                    @* La largeur est limitée par le conteneur : un style sur le sélecteur tronquerait aussi son popup. *@
+                    @* The width is limited by the container: a style on the picker would also truncate its popup. *@
                     <div style="width:100%; max-width:280px">
                         <MudTimePicker Time="@TimeSpan.Parse(job.DailyTime)" TimeChanged="OnDailyTimeChanged"
                                        Label="@L["Time"]" Disabled="busy"

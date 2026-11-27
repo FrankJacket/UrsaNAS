@@ -20,27 +20,27 @@ public sealed class ScheduledTaskRow
     public int Id { get; set; }
     public string Name { get; set; } = "";
     public string Type { get; set; } = ScheduledTaskType.Snapshot;
-    /// <summary>Une cible par ligne : des jeux de données (instantanés) ou des pools (scrub).</summary>
+    /// <summary>One target per line: datasets (snapshots) or pools (scrub).</summary>
     public string Targets { get; set; } = "";
-    /// <summary>Instantanés : combien en garder par jeu de données.</summary>
+    /// <summary>Snapshots: how many to keep for each dataset.</summary>
     public int Keep { get; set; } = 14;
     /// <summary>
-    /// Marque propre à la tâche, reprise dans le nom de ses instantanés : la rétention ne supprime que ceux-là.
-    /// Aléatoire plutôt que l'identifiant, qui recommence à 1 après une réinstallation.
+    /// Mark specific to the task, included in the names of its snapshots: retention only deletes those.
+    /// Random rather than the identifier, which starts again at 1 after a reinstallation.
     /// </summary>
     public string SnapshotTag { get; set; } = "";
-    /// <summary>Scripts : le texte Bash.</summary>
+    /// <summary>Scripts: the Bash text.</summary>
     public string Script { get; set; } = "";
-    /// <summary>Scripts : « root » ou un utilisateur du NAS ; aucun choix par défaut.</summary>
+    /// <summary>Scripts: “root” or a NAS user; nothing is selected by default.</summary>
     public string RunAs { get; set; } = "";
     public int TimeoutMinutes { get; set; } = ScriptRules.DefaultTimeoutMinutes;
-    /// <summary>JSON de <see cref="ScheduleRule"/>.</summary>
+    /// <summary>JSON of <see cref="ScheduleRule"/>.</summary>
     public string Schedule { get; set; } = JsonSerializer.Serialize(new ScheduleRule());
-    /// <summary>Exécuter une fois au retour après des occurrences manquées.</summary>
+    /// <summary>Run once on return after missed occurrences.</summary>
     public bool CatchUp { get; set; }
     public bool Enabled { get; set; } = true;
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
-    /// <summary>Prochaine occurrence ; enregistrée pour reconnaître, après un redémarrage, celles qui ont été manquées. <c>null</c> : désactivée ou terminée.</summary>
+    /// <summary>Next occurrence; saved so that missed ones can be recognized after a restart. <c>null</c>: disabled or finished.</summary>
     public DateTime? NextRunUtc { get; set; }
 
     public string[] TargetList() => Targets.Split(['\n', '\r'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -48,7 +48,7 @@ public sealed class ScheduledTaskRow
     public ScheduleRule Rule()
     {
         try { return JsonSerializer.Deserialize<ScheduleRule>(Schedule) ?? new ScheduleRule { Repeat = "" }; }
-        catch (JsonException) { return new ScheduleRule { Repeat = "" }; } // illisible : jamais exécutée plutôt qu'à un horaire inventé
+        catch (JsonException) { return new ScheduleRule { Repeat = "" }; } // unreadable: never run, rather than run on a made-up schedule
     }
 
     public void SetRule(ScheduleRule rule) => Schedule = JsonSerializer.Serialize(rule);
@@ -62,20 +62,20 @@ public sealed class ScheduledRunRow
     public DateTime StartedUtc { get; set; }
     public DateTime? EndedUtc { get; set; }
     public string Status { get; set; } = TaskRunStatus.Running;
-    /// <summary>Manual, Schedule ou Catch-up.</summary>
+    /// <summary>Manual, Schedule or Catch-up.</summary>
     public string Reason { get; set; } = "";
     public string? Message { get; set; }
-    /// <summary>Une ligne par cible traitée.</summary>
+    /// <summary>One line per processed target.</summary>
     public string? Details { get; set; }
-    /// <summary>Opération qui continue après son lancement : les pools dont le scrub est encore attendu (un par ligne), ou « script:identifiant ».</summary>
+    /// <summary>Operation that goes on after being started: the pools whose scrub is still awaited (one per line), or “script:id”.</summary>
     public string Pending { get; set; } = "";
-    /// <summary>Résultats déjà connus pendant l'attente : ils comptent dans le résultat final.</summary>
+    /// <summary>Results already known while waiting: they count in the final result.</summary>
     public bool HasError { get; set; }
     public bool HasCancel { get; set; }
     public bool HasInterrupt { get; set; }
 }
 
-/// <summary>Résumé d'une tâche pour les alertes : son dernier résultat concluant (réussite ou échec).</summary>
+/// <summary>Summary of a task for alerts: its last conclusive result (success or failure).</summary>
 public sealed record TaskHealth(int TaskId, string Name, bool Enabled, string? LastStatus);
 
 public class ScheduledTaskRepo(Db db)
@@ -95,7 +95,7 @@ public class ScheduledTaskRepo(Db db)
         return await c.QuerySingleOrDefaultAsync<ScheduledTaskRow>($"SELECT {TaskColumns} FROM ScheduledTasks WHERE Id=@id", new { id });
     }
 
-    /// <summary>Crée (Id = 0) ou met à jour une tâche ; renvoie son identifiant.</summary>
+    /// <summary>Creates (Id = 0) or updates a task; returns its identifier.</summary>
     public async Task<int> SaveTaskAsync(ScheduledTaskRow t)
     {
         using var c = db.Open();
@@ -124,9 +124,9 @@ public class ScheduledTaskRepo(Db db)
         await c.ExecuteAsync("DELETE FROM ScheduledTaskRuns WHERE TaskId=@id; DELETE FROM ScheduledTasks WHERE Id=@id", new { id });
     }
 
-    // ---- Exécutions
+    // ---- Runs
 
-    /// <summary>Enregistre une exécution (en cours, ou déjà conclue comme une occurrence manquée) et remplit son identifiant.</summary>
+    /// <summary>Records a run (in progress, or already concluded such as a missed occurrence) and sets its identifier.</summary>
     public async Task AddRunAsync(ScheduledRunRow r)
     {
         using var c = db.Open();
@@ -164,7 +164,7 @@ public class ScheduledTaskRepo(Db db)
         return (await c.QueryAsync<ScheduledRunRow>("SELECT * FROM ScheduledTaskRuns WHERE TaskId=@taskId ORDER BY Id DESC LIMIT @limit", new { taskId, limit })).ToList();
     }
 
-    /// <summary>L'état à montrer pour chaque tâche : l'exécution en cours s'il y en a une, sinon la plus récente.</summary>
+    /// <summary>The state to show for each task: the run in progress if there is one, otherwise the most recent one.</summary>
     public async Task<Dictionary<int, ScheduledRunRow>> GetLatestRunsAsync()
     {
         using var c = db.Open();
@@ -175,7 +175,7 @@ public class ScheduledTaskRepo(Db db)
         return rows.ToDictionary(r => r.TaskId);
     }
 
-    /// <summary>Garde les dernières exécutions d'une tâche ; jamais celle en cours, même si des occurrences ignorées se sont accumulées après elle.</summary>
+    /// <summary>Keeps a task's latest runs; never deletes the one in progress, even if skipped occurrences have piled up after it.</summary>
     public async Task PruneRunsAsync(int taskId, int keep = KeptRuns)
     {
         using var c = db.Open();
@@ -185,7 +185,7 @@ public class ScheduledTaskRepo(Db db)
             """, new { taskId, keep });
     }
 
-    /// <summary>Pour les alertes : seules une réussite ou un échec changent l'état d'une tâche (pas une occurrence ignorée, manquée ou annulée).</summary>
+    /// <summary>For alerts: only a success or a failure changes a task's state (not a skipped, missed or cancelled occurrence).</summary>
     public async Task<List<TaskHealth>> GetHealthAsync()
     {
         using var c = db.Open();

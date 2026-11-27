@@ -14,7 +14,7 @@ public class ScriptRulesTests
     [InlineData("echo ok", "root", 60, true)]
     [InlineData("echo ok", "alice", 10080, true)]
     [InlineData("  \n ", "root", 60, false)]
-    [InlineData("echo ok", "", 60, false)] // aucun compte par défaut
+    [InlineData("echo ok", "", 60, false)] // no default account
     [InlineData("echo ok", "a b", 60, false)]
     [InlineData("echo ok", "root", 0, false)]
     [InlineData("echo ok", "root", 10081, false)]
@@ -48,16 +48,16 @@ public class OutputTailTests
     public void Garde_la_fin(string expected, params string[] chunks) => Assert.Equal(expected, Tail(8, chunks));
 
     [Fact]
-    public void Ne_coupe_pas_un_caractere() => Assert.Equal("[…]\néé", Tail(5, "ééé")); // le 1er « é » est à moitié sorti
+    public void Ne_coupe_pas_un_caractere() => Assert.Equal("[…]\néé", Tail(5, "ééé")); // the first “é” is half out
 }
 
-/// <summary>De vrais scripts Bash, sous le compte qui lance les tests (ignorés hors de Linux).</summary>
+/// <summary>Real Bash scripts, run as the account running the tests (skipped outside Linux).</summary>
 public class ScriptServiceTests : IDisposable
 {
     [DllImport("libc")] static extern uint geteuid();
     [DllImport("libc")] static extern uint getegid();
 
-    /// <summary>« getent » : le compte des tests est le seul utilisateur du NAS.</summary>
+    /// <summary>“getent”: the test account is the only NAS user.</summary>
     sealed class Accounts(string me, string home) : ICommandRunner
     {
         public Task<CommandResult> RunAsync(string fileName, IReadOnlyList<string> args, string? stdin = null, CancellationToken ct = default)
@@ -132,7 +132,7 @@ public class ScriptServiceTests : IDisposable
         var end = await EndOfAsync(s, id);
 
         Assert.Equal((ScriptState.Succeeded, 0), (end.State, end.ExitCode));
-        // Dossier personnel absent : le script démarre dans « / ». L'environnement du service n'est pas transmis.
+        // Missing home folder: the script starts in “/”. The service's environment is not passed on.
         Assert.Equal($"un\ndeux\n{_me} / []\n400\nsans-saisie\n", end.Output);
         Assert.Empty(Directory.GetFiles(Folder));
         Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute,
@@ -171,7 +171,7 @@ public class ScriptServiceTests : IDisposable
         var ready = Path.Combine(_dir, "pret");
         var id = await StartAsync(s, $"trap '' TERM\nsleep 30 &\necho $!\ntouch '{ready}'\nwait\n");
         for (var i = 0; i < 100 && !File.Exists(ready); i++) await Task.Delay(50);
-        s.Acknowledge(id); // sans effet : il tourne encore
+        s.Acknowledge(id); // no effect: it is still running
         s.Cancel(id);
         var end = await EndOfAsync(s, id);
 
@@ -195,7 +195,7 @@ public class ScriptServiceTests : IDisposable
     {
         if (!OperatingSystem.IsLinux()) return;
         var s = Service();
-        await Assert.ThrowsAsync<OperationException>(() => s.StartAsync(new ScriptRunRequest(NewId(), "echo", "daemon", 1))); // pas un utilisateur du NAS
+        await Assert.ThrowsAsync<OperationException>(() => s.StartAsync(new ScriptRunRequest(NewId(), "echo", "daemon", 1))); // not a NAS user
         await Assert.ThrowsAsync<OperationException>(() => s.StartAsync(new ScriptRunRequest("../x", "echo", _me, 1)));
         Assert.Empty(s.Statuses());
     }

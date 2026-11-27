@@ -9,20 +9,20 @@ namespace Nas.Web;
 public enum ScrubState { Running, Succeeded, Errors, Cancelled, Superseded }
 
 /// <summary>
-/// Exécute les tâches planifiées : lance celles qui sont dues, suit les scrubs jusqu'à leur fin et note chaque résultat.
-/// Sans dépendance à l'utilisateur connecté (le planificateur s'en sert aussi) : l'auteur est passé en paramètre.
+/// Runs scheduled tasks: starts those that are due, follows scrubs and scripts until they end and records each result.
+/// No dependency on the signed-in user (the scheduler uses it too): the actor is passed as a parameter.
 /// </summary>
 public class ScheduledTaskCoordinator(AgentClient agent, Repo repo, ScheduledTaskRepo tasks, AlertService alerts)
 {
-    /// <summary>Retard au-delà duquel une occurrence est considérée comme manquée (NAS ou interface arrêtés, agent injoignable).</summary>
+    /// <summary>Delay beyond which an occurrence is considered missed (NAS or web interface stopped, agent unreachable).</summary>
     public static readonly TimeSpan Grace = TimeSpan.FromMinutes(5);
 
     const string InProgress = "Scrub in progress.";
     const string ScriptInProgress = "Script in progress.";
-    /// <summary>Début de <see cref="ScheduledRunRow.Pending"/> pour un script ; un nom de pool ne contient jamais de « : ».</summary>
+    /// <summary>Prefix of <see cref="ScheduledRunRow.Pending"/> for a script; a pool name never contains “:”.</summary>
     public const string ScriptPrefix = "script:";
 
-    // Statique : l'interface et le planificateur ne doivent pas démarrer la même tâche en même temps.
+    // Static: the interface and the scheduler must not start the same task at the same time.
     static readonly SemaphoreSlim Gate = new(1, 1);
 
     public static string? Validate(ScheduledTaskRow t)
@@ -40,9 +40,9 @@ public class ScheduledTaskCoordinator(AgentClient agent, Repo repo, ScheduledTas
         return t.Rule().Validate();
     }
 
-    // ---- Planification
+    // ---- Scheduling
 
-    /// <summary>Un passage du planificateur : conclut les opérations terminées, puis traite les tâches dont l'heure est venue.</summary>
+    /// <summary>One scheduler pass: concludes finished operations, then handles the tasks whose time has come.</summary>
     public async Task TickAsync(DateTime nowUtc, TimeZoneInfo zone, CancellationToken ct = default)
     {
         await Gate.WaitAsync(ct);
@@ -52,15 +52,15 @@ public class ScheduledTaskCoordinator(AgentClient agent, Repo repo, ScheduledTas
             var due = (await tasks.GetTasksAsync()).Where(t => t.Enabled && t.NextRunUtc is { } n && Utc(n) <= nowUtc).ToList();
             if (due.Count == 0) return;
 
-            // Agent injoignable : on ne touche à rien (HttpRequestException remonte au planificateur). L'occurrence reste due et, trop tard, sera manquée.
+            // Agent unreachable: nothing is touched (HttpRequestException reaches the scheduler). The occurrence stays due and, once too late, is missed.
             try { await agent.GetPoolsAsync(ct); }
-            catch (AgentException) { } // l'agent répond ; si ZFS est en cause, la tâche le dira
+            catch (AgentException) { } // the agent answers; if ZFS is at fault, the task will say so
 
             foreach (var t in due)
             {
                 var slot = Utc(t.NextRunUtc!.Value);
                 var late = nowUtc - slot > Grace;
-                // La prochaine occurrence est enregistrée avant d'exécuter : un arrêt en cours de route ne relance pas deux fois la même.
+                // The next occurrence is saved before running: a stop along the way does not start the same one twice.
                 await tasks.SetNextRunAsync(t.Id, t.Rule().NextAfter(nowUtc, zone));
                 if (late && !t.CatchUp)
                     await RecordAsync(t, slot, TaskRunStatus.Missed, "Schedule", "UrsaNAS could not run the task at the scheduled time.");
@@ -86,7 +86,7 @@ public class ScheduledTaskCoordinator(AgentClient agent, Repo repo, ScheduledTas
         finally { Gate.Release(); }
     }
 
-    /// <summary>Demande à l'agent d'arrêter le script en cours ; le résultat est noté au passage suivant du planificateur.</summary>
+    /// <summary>Asks the agent to stop the running script; the result is recorded on the next scheduler pass.</summary>
     public async Task StopAsync(int taskId, string actor, CancellationToken ct = default)
     {
         await Gate.WaitAsync(ct);
@@ -100,14 +100,14 @@ public class ScheduledTaskCoordinator(AgentClient agent, Repo repo, ScheduledTas
         finally { Gate.Release(); }
     }
 
-    /// <summary>Supprime la tâche et son historique ; renvoie son nom. Dans le verrou : le planificateur ne peut pas la lancer pendant ce temps.</summary>
+    /// <summary>Deletes the task and its history; returns its name. Inside the lock: the scheduler cannot start it meanwhile.</summary>
     public async Task<string> DeleteAsync(int taskId, CancellationToken ct = default)
     {
         await Gate.WaitAsync(ct);
         try
         {
             var t = await tasks.GetTaskAsync(taskId) ?? throw new AgentException(Msg.F("Task not found."));
-            // Sans suivi, un script continuerait sans que personne puisse l'arrêter ni voir son résultat.
+            // Without follow-up, a script would keep running with no way to stop it or see its result.
             if (t.Type == ScheduledTaskType.Script && await tasks.IsRunningAsync(taskId))
                 throw new AgentException(Msg.F("A script is running: stop it before deleting the task."));
             await tasks.DeleteTaskAsync(taskId);
@@ -116,7 +116,7 @@ public class ScheduledTaskCoordinator(AgentClient agent, Repo repo, ScheduledTas
         finally { Gate.Release(); }
     }
 
-    // ---- Exécution
+    // ---- Execution
 
     async Task StartCoreAsync(ScheduledTaskRow t, string reason, CancellationToken ct)
     {
@@ -136,7 +136,7 @@ public class ScheduledTaskCoordinator(AgentClient agent, Repo repo, ScheduledTas
         run.Details = lines.Count == 0 ? null : string.Join('\n', lines);
         if (run.Pending.Length > 0)
         {
-            run.Message ??= InProgress; // une erreur déjà rencontrée au lancement reste le message
+            run.Message ??= InProgress; // an error already met while starting remains the message
             await tasks.UpdateRunAsync(run);
         }
         else await FinishAsync(run);
@@ -160,7 +160,7 @@ public class ScheduledTaskCoordinator(AgentClient agent, Repo repo, ScheduledTas
                 await agent.CreateSnapshotAsync(dataset, name, ct);
                 created++;
                 lines.Add(Msg.F("Snapshot {0} created.", $"{dataset}@{name}"));
-                // La rétention ne passe qu'après une création réussie : un échec ne doit jamais réduire ce qui reste.
+                // Retention only runs after a successful creation: a failure must never reduce what remains.
                 foreach (var old in Expired(await agent.GetSnapshotsAsync(ct), dataset, t.SnapshotTag, t.Keep))
                 {
                     await agent.DestroySnapshotAsync(old.Name, ct);
@@ -168,7 +168,7 @@ public class ScheduledTaskCoordinator(AgentClient agent, Repo repo, ScheduledTas
                     lines.Add(Msg.F("Old snapshot {0} deleted.", old.Name));
                 }
             }
-            catch (AgentException e) // les autres jeux de données sont quand même traités
+            catch (AgentException e) // the other datasets are still processed
             {
                 run.HasError = true;
                 run.Message ??= Msg.F("Dataset {0}: {1}", dataset, e.Message);
@@ -181,7 +181,7 @@ public class ScheduledTaskCoordinator(AgentClient agent, Repo repo, ScheduledTas
     public static string SnapshotName(string tag, DateTime localNow) =>
         $"auto-{tag}-{localNow.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture)}";
 
-    /// <summary>Les instantanés de la tâche au-delà des <paramref name="keep"/> plus récents ; tous les autres (manuels, sauvegardes, autres tâches) sont ignorés.</summary>
+    /// <summary>The task's snapshots beyond the <paramref name="keep"/> most recent ones; all others (manual, backups, other tasks) are ignored.</summary>
     public static IReadOnlyList<SnapshotInfo> Expired(IEnumerable<SnapshotInfo> all, string dataset, string tag, int keep)
     {
         if (tag.Length == 0 || keep < 1) return [];
@@ -211,7 +211,7 @@ public class ScheduledTaskCoordinator(AgentClient agent, Repo repo, ScheduledTas
                 lines.Add(Msg.F("Pool {0}: scrub started.", name));
             }
             catch (AgentException e) { Fail(run, lines, Msg.F("Pool {0}: {1}", name, e.Message)); }
-            run.Pending = string.Join('\n', started); // à jour au fur et à mesure : un agent perdu en route n'efface pas les scrubs déjà lancés
+            run.Pending = string.Join('\n', started); // updated as we go: losing the agent midway does not erase the scrubs already started
         }
         if (started.Count == 0 && !run.HasError)
         {
@@ -221,20 +221,20 @@ public class ScheduledTaskCoordinator(AgentClient agent, Repo repo, ScheduledTas
     }
 
     /// <summary>
-    /// Lit la ligne « scan » de <c>zpool status</c>. Après un <c>zpool scrub</c> réussi elle parle de ce scrub jusqu'à sa fin :
-    /// « scrub in progress… », « scrub paused… », « scrub canceled… » ou « scrub repaired … with N errors on … ».
+    /// Reads the “scan” line of <c>zpool status</c>. After a successful <c>zpool scrub</c> it describes that scrub until it ends:
+    /// “scrub in progress…”, “scrub paused…”, “scrub canceled…” or “scrub repaired … with N errors on …”.
     /// </summary>
     public static ScrubState ReadScrub(string scan, string errors)
     {
         if (scan.StartsWith("scrub in progress", StringComparison.Ordinal) || scan.StartsWith("scrub paused", StringComparison.Ordinal)) return ScrubState.Running;
         if (scan.StartsWith("scrub canceled", StringComparison.Ordinal)) return ScrubState.Cancelled;
         var done = Regex.Match(scan, @"^scrub repaired .+? with (\d+) errors on ");
-        if (!done.Success) return ScrubState.Superseded; // remplacé par une reconstruction, ou plus aucune trace
+        if (!done.Success) return ScrubState.Superseded; // replaced by a resilver, or no trace left
         var clean = done.Groups[1].Value == "0" && (errors.Length == 0 || errors.StartsWith("No known data errors", StringComparison.OrdinalIgnoreCase));
         return clean ? ScrubState.Succeeded : ScrubState.Errors;
     }
 
-    /// <summary>Lance un script. Son identifiant est enregistré avant l'appel : une interface arrêtée à cet instant le retrouvera.</summary>
+    /// <summary>Starts a script. Its identifier is saved before the call: a web interface stopped at that moment will find it again.</summary>
     async Task StartScriptAsync(ScheduledTaskRow t, ScheduledRunRow run, CancellationToken ct)
     {
         var id = Guid.NewGuid().ToString("N");
@@ -245,14 +245,14 @@ public class ScheduledTaskCoordinator(AgentClient agent, Repo repo, ScheduledTas
         catch (AgentException e) { NotStarted(run, e.Message); }
         catch (Exception e) when (e is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
         {
-            // La réponse s'est perdue : au cas où le script serait parti, il est arrêté.
+            // The answer was lost: in case the script did start, it is stopped.
             try { await agent.CancelScriptAsync(id, CancellationToken.None); }
             catch (Exception x) when (x is AgentException or HttpRequestException or TaskCanceledException) { }
             NotStarted(run, "Agent unreachable.");
         }
     }
 
-    // Pas de ligne de détail : pour un script, le détail est sa sortie.
+    // No detail line: for a script, the details are its output.
     static void NotStarted(ScheduledRunRow run, string error)
     {
         run.Pending = "";
@@ -262,18 +262,18 @@ public class ScheduledTaskCoordinator(AgentClient agent, Repo repo, ScheduledTas
 
     static string? ScriptId(ScheduledRunRow run) => run.Pending.StartsWith(ScriptPrefix, StringComparison.Ordinal) ? run.Pending[ScriptPrefix.Length..] : null;
 
-    /// <summary>Appelé dans le verrou : conclut les opérations terminées et marque « Interrompue » une exécution que plus rien ne fera avancer.</summary>
+    /// <summary>Called inside the lock: concludes finished operations and marks as interrupted any run that nothing will move forward.</summary>
     async Task SyncCoreAsync(CancellationToken ct)
     {
         var open = await tasks.GetOpenRunsAsync();
-        foreach (var run in open.Where(r => r.Pending.Length == 0).ToList()) // une exécution immédiate coupée par un arrêt de l'interface
+        foreach (var run in open.Where(r => r.Pending.Length == 0).ToList()) // an immediate run cut short by a stop of the web interface
         {
             run.Status = TaskRunStatus.Interrupted;
             run.Message = "Interrupted.";
             await FinishAsync(run);
             open.Remove(run);
         }
-        // Séparés : un ZFS en panne ne doit pas retenir le résultat des scripts.
+        // Kept apart: a failing ZFS must not hold back script results.
         await SyncScriptsAsync(open.Where(r => ScriptId(r) is not null).ToList(), ct);
         await SyncScrubsAsync(open.Where(r => ScriptId(r) is null).ToList(), ct);
     }
@@ -283,11 +283,11 @@ public class ScheduledTaskCoordinator(AgentClient agent, Repo repo, ScheduledTas
         if (open.Count == 0) return;
         IReadOnlyList<ScriptRunStatus> statuses;
         try { statuses = await agent.GetScriptRunsAsync(ct); }
-        catch (AgentException) { return; } // état inconnu : on réessaiera
+        catch (AgentException) { return; } // unknown state: we will try again
         foreach (var run in open)
         {
             var status = statuses.FirstOrDefault(s => s.Id == ScriptId(run));
-            if (status is null) // les exécutions vivent dans la mémoire de l'agent
+            if (status is null) // runs live in the agent's memory
             {
                 run.Pending = "";
                 run.Status = TaskRunStatus.Interrupted;
@@ -300,7 +300,7 @@ public class ScheduledTaskCoordinator(AgentClient agent, Repo repo, ScheduledTas
                 await FinishAsync(run);
             }
         }
-        // Les résultats sont enregistrés : l'agent peut oublier les scripts terminés, y compris ceux que plus aucune exécution n'attend.
+        // Results are recorded: the agent can forget finished scripts, including those no run is waiting for anymore.
         foreach (var done in statuses.Where(s => s.State != ScriptState.Running))
         {
             try { await agent.AcknowledgeScriptAsync(done.Id, ct); }
@@ -333,12 +333,12 @@ public class ScheduledTaskCoordinator(AgentClient agent, Repo repo, ScheduledTas
             if (pools is null)
             {
                 try { pools = await agent.GetPoolsAsync(ct); }
-                catch (AgentException) { return; } // état inconnu : on réessaiera
+                catch (AgentException) { return; } // unknown state: we will try again
             }
 
             var lines = run.Details is null ? new List<string>() : run.Details.Split('\n').ToList();
             var before = pending.Count;
-            if (run.Message == InProgress) run.Message = null; // la première erreur, s'il y en a une, doit pouvoir prendre la place
+            if (run.Message == InProgress) run.Message = null; // the first error, if any, must be able to take its place
             foreach (var name in pending.ToList())
             {
                 var pool = pools.FirstOrDefault(p => p.Name == name);
@@ -369,7 +369,7 @@ public class ScheduledTaskCoordinator(AgentClient agent, Repo repo, ScheduledTas
         }
     }
 
-    // ---- Résultats
+    // ---- Results
 
     async Task RecordAsync(ScheduledTaskRow t, DateTime atUtc, string status, string reason, string message)
     {
@@ -402,7 +402,7 @@ public class ScheduledTaskCoordinator(AgentClient agent, Repo repo, ScheduledTas
             TaskRunStatus.Cancelled => "Task “{0}” was cancelled.",
             _ => "Task “{0}” was interrupted.",
         }, run.TaskName));
-        // L'alerte est ouverte tout de suite : le contrôle périodique ne verrait pas un échec aussitôt suivi d'une réussite.
+        // The alert is opened right away: the periodic check would miss a failure immediately followed by a success.
         if (run.Status == TaskRunStatus.Failed && await tasks.GetTaskAsync(run.TaskId) is { Enabled: true } task)
             await alerts.RaiseNowAsync(AlertRules.TaskFailed(task.Id, task.Name));
     }
@@ -410,7 +410,7 @@ public class ScheduledTaskCoordinator(AgentClient agent, Repo repo, ScheduledTas
     static DateTime Utc(DateTime d) => DateTime.SpecifyKind(d, DateTimeKind.Utc);
 }
 
-/// <summary>Passe toutes les 5 secondes :suit les opérations en cours et lance les tâches dues (heure du serveur).</summary>
+/// <summary>Runs every 5 seconds: follows operations in progress and starts due tasks (server time).</summary>
 public sealed class ScheduledTaskMonitor(IServiceScopeFactory scopes, IConfiguration cfg, ILogger<ScheduledTaskMonitor> log) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken ct)
@@ -424,7 +424,7 @@ public sealed class ScheduledTaskMonitor(IServiceScopeFactory scopes, IConfigura
             try
             {
                 using var scope = scopes.CreateScope();
-                TimeZoneInfo.ClearCachedData(); // le fuseau du serveur peut changer pendant que l'interface tourne
+                TimeZoneInfo.ClearCachedData(); // the server's time zone can change while the web interface is running
                 await scope.ServiceProvider.GetRequiredService<ScheduledTaskCoordinator>().TickAsync(DateTime.UtcNow, TimeZoneInfo.Local, ct);
             }
             catch (Exception e) when (e is AgentException or HttpRequestException) { log.LogDebug(e, "Scheduled task check skipped (agent unreachable)"); }

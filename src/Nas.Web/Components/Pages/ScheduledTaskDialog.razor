@@ -1,7 +1,7 @@
 @inject ScheduledTaskOperations Ops
 @inject AgentClient Agent
 
-@* Création ou modification d'une tâche planifiée. *@
+@* Creating or editing a scheduled task. *@
 <MudDialog>
     <DialogContent>
         @if (error is not null)
@@ -88,7 +88,7 @@
 
                 @if (rule.Repeat == RepeatKind.Once)
                 {
-                    @* La largeur est limitée par le conteneur : un style sur le sélecteur tronquerait aussi son popup. *@
+                    @* The width is limited by the container: a style on the picker would also truncate its popup. *@
                     <div style="width:100%; max-width:280px">
                         <MudDatePicker Date="@rule.Date?.ToDateTime(TimeOnly.MinValue)" DateChanged="SetDate" Label="@L["Date"]" Disabled="busy"
                                        Culture="Culture" DateFormat="@Culture.DateTimeFormat.ShortDatePattern" />
@@ -212,11 +212,11 @@
             selected = Existing.TargetList().ToHashSet(StringComparer.Ordinal);
         }
         try { users = (await Agent.GetUsersAsync()).Select(u => u.Name).ToList(); }
-        catch (Exception e) when (e is AgentException or HttpRequestException or System.Text.Json.JsonException) { } // « root » reste proposé
+        catch (Exception e) when (e is AgentException or HttpRequestException or System.Text.Json.JsonException) { } // “root” is still offered
         try
         {
             pools = (await Agent.GetPoolsAsync()).Select(p => p.Name).ToList();
-            // La racine d'un pool n'est pas proposée : l'agent ne crée des instantanés que sur un jeu de données.
+            // A pool's root is not offered: the agent only creates snapshots on a dataset.
             datasets = (await Agent.GetDatasetsAsync()).Select(d => d.Name).Where(n => n.Contains('/')).ToList();
         }
         catch (AgentException e) { targetsError = L.Translate(e.Message); }
@@ -224,7 +224,7 @@
         loaded = true;
     }
 
-    /// <summary>« root » et les utilisateurs du NAS, plus le compte de la tâche s'il a disparu (pour qu'il reste visible).</summary>
+    /// <summary>“root” and the NAS users, plus the task's account if it no longer exists (so that it stays visible).</summary>
     IEnumerable<string> Accounts()
     {
         var all = users.Prepend(ScriptRules.Root).ToList();
@@ -232,7 +232,7 @@
         return all;
     }
 
-    /// <summary>Les cibles qui existent, plus celles de la tâche qui ont disparu (pour pouvoir les décocher).</summary>
+    /// <summary>The existing targets, plus the task's targets that no longer exist (so that they can be unticked).</summary>
     IEnumerable<string> Choices()
     {
         var existing = IsSnapshot ? datasets : pools;

@@ -69,7 +69,7 @@
 </MudTable>
 
 @code {
-    /// <summary>Vrai quand la page est affichée dans une fenêtre du bureau : le titre est alors celui de la fenêtre.</summary>
+    /// <summary>True when the page is shown in a desktop window: the title is then the window's title.</summary>
     [CascadingParameter(Name = "InWindow")] bool InWindow { get; set; }
 
     List<ScheduledTaskRow> tasks = new();

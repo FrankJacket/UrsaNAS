@@ -1,7 +1,7 @@
 @inherits AutoRefreshBase
 @inject ScheduledTaskRepo Tasks
 
-@* Les dernières exécutions d'une tâche planifiée ; une ligne choisie montre son détail. *@
+@* The latest runs of a scheduled task; the selected row shows its details. *@
 <MudDialog>
     <DialogContent>
         <MudTable Items="runs" T="ScheduledRunRow" Hover="true" Dense="true" OnRowClick="Select" RowStyle="cursor:pointer" Style="max-height:360px; overflow:auto">
@@ -29,7 +29,7 @@
             }
             else if (IsScript)
             {
-                @* La sortie d'un script est montrée telle quelle : jamais traduite. *@
+                @* A script's output is shown as is: never translated. *@
                 <pre class="script-output">@run.Details</pre>
             }
             else

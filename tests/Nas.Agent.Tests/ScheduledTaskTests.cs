@@ -11,7 +11,7 @@ namespace Nas.Agent.Tests;
 
 public class ScheduleRuleTests
 {
-    // Fuseau fixe pour des tests indépendants de la machine : UTC-5, UTC-4 du 2e dimanche de mars au 1er dimanche de novembre (2 h).
+    // Fixed time zone for machine-independent tests: UTC-5, UTC-4 from the 2nd Sunday of March to the 1st Sunday of November (2 a.m.).
     static readonly TimeZoneInfo Eastern = TimeZoneInfo.CreateCustomTimeZone("test-eastern", TimeSpan.FromHours(-5), "test", "std", "dst",
     [
         TimeZoneInfo.AdjustmentRule.CreateAdjustmentRule(new DateTime(2000, 1, 1), new DateTime(2100, 12, 31), TimeSpan.FromHours(1),
@@ -28,7 +28,7 @@ public class ScheduleRuleTests
     {
         var r = new ScheduleRule { Repeat = RepeatKind.Daily, Time = "02:00" };
         Assert.Equal(Utc(2026, 11, 10, 2), Next(r, Utc(2026, 11, 10, 1)));
-        Assert.Equal(Utc(2026, 11, 11, 2), Next(r, Utc(2026, 11, 10, 2))); // strictement après
+        Assert.Equal(Utc(2026, 11, 11, 2), Next(r, Utc(2026, 11, 10, 2))); // strictly after
     }
 
     [Fact]
@@ -43,7 +43,7 @@ public class ScheduleRuleTests
     public void Chaque_semaine_ne_prend_que_les_jours_coches()
     {
         var r = new ScheduleRule { Repeat = RepeatKind.Weekly, Time = "03:00", Days = (1 << (int)DayOfWeek.Monday) | (1 << (int)DayOfWeek.Friday) };
-        Assert.Equal(Utc(2026, 11, 13, 3), Next(r, Utc(2026, 11, 9, 4))); // lundi passé → vendredi
+        Assert.Equal(Utc(2026, 11, 13, 3), Next(r, Utc(2026, 11, 9, 4))); // Monday is past → Friday
         Assert.Equal(Utc(2026, 11, 16, 3), Next(r, Utc(2026, 11, 13, 4)));
     }
 
@@ -86,7 +86,7 @@ public class ScheduleRuleTests
     public void Une_heure_sautee_s_execute_des_que_l_horloge_reprend()
     {
         var r = new ScheduleRule { Repeat = RepeatKind.Daily, Time = "02:30" };
-        // 14 mars 2027 : de 2 h on passe à 3 h (07:00 UTC).
+        // March 14, 2027: the clock jumps from 2:00 to 3:00 (07:00 UTC).
         Assert.Equal(Utc(2027, 3, 14, 7), Next(r, Utc(2027, 3, 14, 5), Eastern));
         Assert.Equal(Utc(2027, 3, 15, 6, 30), Next(r, Utc(2027, 3, 14, 7), Eastern));
     }
@@ -95,7 +95,7 @@ public class ScheduleRuleTests
     public void Une_heure_repetee_ne_s_execute_qu_une_fois()
     {
         var r = new ScheduleRule { Repeat = RepeatKind.Daily, Time = "01:30" };
-        // 1er novembre 2026 : 1 h 30 se produit à 05:30 puis à 06:30 UTC.
+        // November 1, 2026: 1:30 happens at 05:30, then again at 06:30 UTC.
         Assert.Equal(Utc(2026, 11, 1, 5, 30), Next(r, Utc(2026, 11, 1, 4), Eastern));
         Assert.Equal(Utc(2026, 11, 2, 6, 30), Next(r, Utc(2026, 11, 1, 5, 30), Eastern));
     }
@@ -138,13 +138,13 @@ public class SnapshotRetentionTests
             Snap("tank/a", "auto-aaaa-20261103-020000", 3),
             Snap("tank/a", "manuel", 1),
             Snap("tank/a", "ursacopy-1", 1),
-            Snap("tank/a", "auto-bbbb-20261001-020000", 1),        // une autre tâche
-            Snap("tank/a", "auto-aaaa-20261001-020000-garde", 1),  // renommé à la main
-            Snap("tank/b", "auto-aaaa-20261001-020000", 1),        // un autre jeu de données
+            Snap("tank/a", "auto-bbbb-20261001-020000", 1),        // another task
+            Snap("tank/a", "auto-aaaa-20261001-020000-garde", 1),  // renamed by hand
+            Snap("tank/b", "auto-aaaa-20261001-020000", 1),        // another dataset
         ];
         var expired = ScheduledTaskCoordinator.Expired(all, "tank/a", "aaaa", keep: 2);
         Assert.Equal("tank/a@auto-aaaa-20261101-020000", Assert.Single(expired).Name);
-        Assert.Empty(ScheduledTaskCoordinator.Expired(all, "tank/a", "", keep: 1)); // sans marque, on ne supprime rien
+        Assert.Empty(ScheduledTaskCoordinator.Expired(all, "tank/a", "", keep: 1)); // without a mark, nothing is deleted
     }
 
     [Theory]
@@ -160,7 +160,7 @@ public class SnapshotRetentionTests
         Assert.Equal(expected, ScheduledTaskCoordinator.ReadScrub(scan, errors));
 }
 
-/// <summary>Un agent minimal : des pools et des instantanés en mémoire.</summary>
+/// <summary>A minimal agent: pools and snapshots in memory.</summary>
 sealed class FakeZfsAgentHandler : HttpMessageHandler
 {
     public List<SnapshotInfo> Snapshots { get; } = [];
@@ -174,7 +174,7 @@ sealed class FakeZfsAgentHandler : HttpMessageHandler
     public List<string> ScriptCancels { get; } = [];
     public string? ScriptRefusal { get; set; }
 
-    /// <summary>Termine le dernier script lancé.</summary>
+    /// <summary>Ends the last script started.</summary>
     public void EndScript(string state, int? exitCode = null, string output = "")
     {
         var id = ScriptStarts[^1].Id;
@@ -279,7 +279,7 @@ public class ScheduledTaskCoordinatorTests : IDisposable
         Assert.True((await _tasks.GetTaskAsync(id))!.NextRunUtc > now);
 
         await _coordinator.TickAsync(now.AddSeconds(20), Zone);
-        Assert.Single(await _tasks.GetRunsAsync(id)); // pas deux fois la même occurrence
+        Assert.Single(await _tasks.GetRunsAsync(id)); // the same occurrence never runs twice
     }
 
     [Theory]
@@ -288,7 +288,7 @@ public class ScheduledTaskCoordinatorTests : IDisposable
     public async Task Une_occurrence_trop_ancienne_est_manquee_ou_rattrapee_une_seule_fois(bool catchUp, string status, string reason, int snapshots)
     {
         var now = DateTime.UtcNow;
-        var id = await AddAsync(nextRun: now.AddDays(-4), catchUp: catchUp); // plusieurs occurrences manquées
+        var id = await AddAsync(nextRun: now.AddDays(-4), catchUp: catchUp); // several missed occurrences
         await _coordinator.TickAsync(now, Zone);
 
         var run = Assert.Single(await _tasks.GetRunsAsync(id));
@@ -317,7 +317,7 @@ public class ScheduledTaskCoordinatorTests : IDisposable
 
         await _coordinator.RunNowAsync(id, "alice");
 
-        Assert.Equal(3, _agent.Snapshots.Count); // le nouveau, le plus récent des anciens et le manuel
+        Assert.Equal(3, _agent.Snapshots.Count); // the new one, the most recent of the old ones and the manual one
         Assert.Contains(_agent.Snapshots, s => s.Snapshot == "manuel");
         Assert.Contains(_agent.Snapshots, s => s.Snapshot == "auto-aaaa-20260103-020000");
     }
@@ -336,9 +336,9 @@ public class ScheduledTaskCoordinatorTests : IDisposable
         Assert.Equal("tank/b", Assert.Single(_agent.Snapshots).Dataset);
         Assert.Equal($"task:{id}:failed", Assert.Single(await _repo.GetActiveAlertsAsync()).Code);
 
-        // La réussite suivante ferme l'alerte.
+        // The next success closes the alert.
         _agent.BrokenDatasets.Clear();
-        await Task.Delay(1100); // un nom d'instantané par seconde
+        await Task.Delay(1100); // one snapshot name per second
         await _coordinator.RunNowAsync(id, "alice");
         await _alerts.ProcessAsync(new HealthSnapshot(true, [], [], Tasks: await _tasks.GetHealthAsync(), CollectedUtc: DateTime.UtcNow));
         Assert.Empty(await _repo.GetActiveAlertsAsync());
@@ -380,7 +380,7 @@ public class ScheduledTaskCoordinatorTests : IDisposable
         await _tasks.SetNextRunAsync(id, now.AddMinutes(-1));
         await _coordinator.TickAsync(now, Zone);
         Assert.Equal(TaskRunStatus.Skipped, (await LastRunAsync(id)).Status);
-        Assert.Equal(TaskRunStatus.Running, (await _tasks.GetLatestRunsAsync())[id].Status); // la liste montre l'exécution en cours
+        Assert.Equal(TaskRunStatus.Running, (await _tasks.GetLatestRunsAsync())[id].Status); // the list shows the run in progress
 
         _agent.Scan = "scrub repaired 0B in 00:00:01 with 3 errors on Sun Nov 29 02:00:02 2026";
         await _coordinator.TickAsync(DateTime.UtcNow, Zone);
@@ -430,14 +430,14 @@ public class ScheduledTaskCoordinatorTests : IDisposable
         Assert.Equal((TaskRunStatus.Running, ScheduledTaskCoordinator.ScriptPrefix + sent.Id), (run.Status, run.Pending));
         await Assert.ThrowsAsync<AgentException>(() => _coordinator.RunNowAsync(id, "alice"));
 
-        _agent.PoolsBroken = true; // un ZFS en panne ne retient pas le résultat d'un script
+        _agent.PoolsBroken = true; // a failing ZFS does not hold back a script's result
         _agent.EndScript(ScriptState.Succeeded, 0, "bonjour\n");
         await _coordinator.TickAsync(DateTime.UtcNow, Zone);
 
         run = await LastRunAsync(id);
         Assert.Equal((TaskRunStatus.Success, "Script completed.", "bonjour\n", ""), (run.Status, run.Message, run.Details, run.Pending));
         Assert.NotNull(run.EndedUtc);
-        Assert.Empty(_agent.ScriptRuns); // acquitté
+        Assert.Empty(_agent.ScriptRuns); // acknowledged
     }
 
     [Theory]
@@ -474,7 +474,7 @@ public class ScheduledTaskCoordinatorTests : IDisposable
     {
         var id = await AddScriptAsync();
         await _coordinator.RunNowAsync(id, "alice");
-        _agent.ScriptRuns.Clear(); // l'agent a redémarré
+        _agent.ScriptRuns.Clear(); // the agent restarted
         await _coordinator.TickAsync(DateTime.UtcNow, Zone);
 
         Assert.Equal(TaskRunStatus.Interrupted, (await LastRunAsync(id)).Status);

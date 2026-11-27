@@ -4,7 +4,7 @@ using Nas.Web.Localization;
 
 namespace Nas.Web;
 
-/// <summary>Libellé et couleur d'un résultat de tâche planifiée, communs à la liste et à l'historique.</summary>
+/// <summary>Label and color of a scheduled task result, shared by the list and the history.</summary>
 public static class TaskRunDisplay
 {
     public static string Text(string status, Loc L) => status switch

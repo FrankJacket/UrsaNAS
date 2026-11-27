@@ -5,7 +5,7 @@ using Nas.Web.Data;
 
 namespace Nas.Web;
 
-/// <summary>Les opérations sur les tâches planifiées faites depuis l'interface : valide, agit, journalise avec le nom de l'administrateur connecté.</summary>
+/// <summary>Scheduled task operations made from the interface: validates, acts, and logs with the name of the signed-in administrator.</summary>
 public class ScheduledTaskOperations(ScheduledTaskCoordinator coordinator, ScheduledTaskRepo tasks, Repo repo, AuthenticationStateProvider auth)
 {
     async Task<string> ActorAsync() => (await auth.GetAuthenticationStateAsync()).User.Identity?.Name ?? "unknown";
@@ -34,7 +34,7 @@ public class ScheduledTaskOperations(ScheduledTaskCoordinator coordinator, Sched
             task.SnapshotTag = before.SnapshotTag;
             task.CreatedUtc = before.CreatedUtc;
         }
-        // Horaire inchangé : la prochaine occurrence reste (une exécution unique déjà passée ne bloque pas un changement de nom).
+        // Unchanged schedule: the next occurrence stays (a past one-time run does not block a name change).
         task.NextRunUtc = before is not null && before.Schedule == task.Schedule && before.Enabled == task.Enabled
             ? before.NextRunUtc
             : NextRun(task);
@@ -58,7 +58,7 @@ public class ScheduledTaskOperations(ScheduledTaskCoordinator coordinator, Sched
             ?? throw new AgentException(Msg.F("This date and time are in the past."));
     }
 
-    /// <summary>Permis pendant un scrub, qui continue sur le pool ; un script en cours doit d'abord être arrêté.</summary>
+    /// <summary>Allowed during a scrub, which goes on in the pool; a running script must be stopped first.</summary>
     public async Task DeleteAsync(int id)
     {
         var name = await coordinator.DeleteAsync(id);

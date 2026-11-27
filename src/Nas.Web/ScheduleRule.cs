@@ -9,29 +9,29 @@ public static class RepeatKind
     public static readonly IReadOnlyList<string> All = [Once, Hours, Daily, Weekly, MonthlyDay, MonthlyWeekday];
 }
 
-/// <summary>L'horaire d'une tâche planifiée, à l'heure du serveur. Seuls les champs utiles à <see cref="Repeat"/> comptent.</summary>
+/// <summary>The schedule of a scheduled task, in server time. Only the fields relevant to <see cref="Repeat"/> matter.</summary>
 public sealed record ScheduleRule
 {
-    /// <summary>Valeur de <see cref="MonthDay"/> pour « dernier jour du mois ».</summary>
+    /// <summary>Value of <see cref="MonthDay"/> meaning “last day of the month”.</summary>
     public const int LastDay = 0;
-    /// <summary>Valeur de <see cref="WeekRank"/> pour « dernier » (dernier dimanche du mois, par exemple).</summary>
+    /// <summary>Value of <see cref="WeekRank"/> meaning “last” (the last Sunday of the month, for example).</summary>
     public const int LastRank = 5;
 
     public static readonly IReadOnlyList<int> HourSteps = [1, 2, 3, 4, 6, 8, 12];
 
     public string Repeat { get; init; } = RepeatKind.Daily;
-    /// <summary>« HH:mm » ; ne sert pas à la répétition aux N heures.</summary>
+    /// <summary>“HH:mm”; not used by the every-N-hours repetition.</summary>
     public string Time { get; init; } = "02:00";
-    /// <summary>Exécution unique seulement.</summary>
+    /// <summary>One-time run only.</summary>
     public DateOnly? Date { get; init; }
     public int EveryHours { get; init; } = 6;
-    /// <summary>Minute de l'heure, pour la répétition aux N heures (comptées à partir de minuit).</summary>
+    /// <summary>Minute of the hour, for the every-N-hours repetition (hours are counted from midnight).</summary>
     public int Minute { get; init; }
-    /// <summary>Jours de la répétition hebdomadaire : bit n = <see cref="DayOfWeek"/> n.</summary>
+    /// <summary>Days of the weekly repetition: bit n = <see cref="DayOfWeek"/> n.</summary>
     public int Days { get; init; } = 1 << (int)DayOfWeek.Sunday;
-    /// <summary>1 à 31, ou <see cref="LastDay"/>. Un mois trop court prend son dernier jour.</summary>
+    /// <summary>1 to 31, or <see cref="LastDay"/>. A month that is too short uses its last day.</summary>
     public int MonthDay { get; init; } = 1;
-    /// <summary>1 à 4, ou <see cref="LastRank"/>.</summary>
+    /// <summary>1 to 4, or <see cref="LastRank"/>.</summary>
     public int WeekRank { get; init; } = 1;
     public DayOfWeek WeekDay { get; init; } = DayOfWeek.Sunday;
 
@@ -57,8 +57,8 @@ public sealed record ScheduleRule
     }
 
     /// <summary>
-    /// La première exécution strictement après <paramref name="afterUtc"/> ; <c>null</c> s'il n'y en a plus (exécution unique passée) ou si l'horaire est invalide.
-    /// Changement d'heure : une heure sautée s'exécute dès que l'horloge reprend, une heure répétée seulement à son premier passage.
+    /// The first run strictly after <paramref name="afterUtc"/>; <c>null</c> if there is none left (past one-time run) or if the schedule is invalid.
+    /// Clock changes: a skipped time runs as soon as the clock resumes, a repeated time only on its first occurrence.
     /// </summary>
     public DateTime? NextAfter(DateTime afterUtc, TimeZoneInfo zone)
     {
@@ -71,7 +71,7 @@ public sealed record ScheduleRule
             return only > after ? only : null;
         }
 
-        // La veille aussi : une heure sautée près de minuit peut tomber le lendemain.
+        // The day before too: a skipped time close to midnight can fall on the next day.
         var first = TimeZoneInfo.ConvertTimeFromUtc(after, zone).Date.AddDays(-1);
         for (var i = 0; i < 400; i++)
             foreach (var local in TimesOn(first.AddDays(i), time))
@@ -105,7 +105,7 @@ public sealed record ScheduleRule
     {
         local = DateTime.SpecifyKind(local, DateTimeKind.Unspecified);
         while (zone.IsInvalidTime(local)) local = local.AddMinutes(1);
-        if (zone.IsAmbiguousTime(local)) // le plus grand décalage correspond au premier passage
+        if (zone.IsAmbiguousTime(local)) // the largest offset corresponds to the first occurrence
             return DateTime.SpecifyKind(local - zone.GetAmbiguousTimeOffsets(local).Max(), DateTimeKind.Utc);
         return TimeZoneInfo.ConvertTimeToUtc(local, zone);
     }

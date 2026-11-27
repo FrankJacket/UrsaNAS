@@ -1702,7 +1702,7 @@ public static class French
         ["Enter a password, or turn protection off."] = "Entrez un mot de passe, ou désactivez la protection.",
         ["This password is too long."] = "Ce mot de passe est trop long.",
 
-        // Tâches planifiées
+        // Scheduled tasks
         ["Scheduled tasks"] = "Tâches planifiées",
         ["New task"] = "Nouvelle tâche",
         ["No scheduled task yet."] = "Aucune tâche planifiée pour le moment.",

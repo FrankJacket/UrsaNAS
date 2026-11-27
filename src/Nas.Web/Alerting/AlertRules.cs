@@ -98,7 +98,7 @@ public static class AlertRules
         return result;
     }
 
-    /// <summary>Le dernier résultat concluant d'une tâche planifiée est un échec ; la réussite suivante ferme l'alerte.</summary>
+    /// <summary>The last conclusive result of a scheduled task is a failure; the next success closes the alert.</summary>
     public static Candidate TaskFailed(int taskId, string name) =>
         new($"task:{taskId}:failed", Critical, Msg.F("Scheduled task {0}: the last run failed", name), "Open the Scheduled tasks window to read the error.");
 
