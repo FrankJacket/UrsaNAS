@@ -1,5 +1,5 @@
 #!/bin/sh
-# UrsaNAS installer / updater. Run as root on the NAS (Debian 13 or Ubuntu Server 26.04, x86-64).
+# UrsaNAS installer / updater. Run as root on the NAS (Debian 13 or Ubuntu Server 26.04, x86-64; ARM64 is unsupported, from sources only).
 #
 #   curl -fsSL <raw URL of this script> | sudo sh -s -- [--no-zfs]   (downloads the newest release)
 #   sudo ./install.sh [--no-zfs] [DIR]   (from an extracted package; DIR defaults to this script's folder)
@@ -29,6 +29,13 @@ die()  { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 # Without the program next to it, the script fetches the newest release (pre-releases included) and runs the installer it contains.
 # For a private repository, set GITHUB_TOKEN to a token that can read the repository contents.
 if [ ! -f "$SRC/Nas.Agent/Nas.Agent" ]; then
+  # Only x86-64 packages are published: never download one on another processor.
+  if command -v dpkg >/dev/null 2>&1; then
+    case "$(dpkg --print-architecture)" in
+      amd64) ;;
+      *) die "no UrsaNAS package is published for this processor: build one from the sources (deploy/build-package.sh) and run the install.sh it contains" ;;
+    esac
+  fi
   REPO=FrankJacket/UrsaNAS
   fetch() { # fetch URL [OUTPUT]  (stdout when no output file)
     if command -v curl >/dev/null 2>&1; then
@@ -66,7 +73,20 @@ fi
 [ -f "$SRC/Nas.Web/Nas.Web" ] || die "Nas.Web/ not found in $SRC"
 command -v apt-get >/dev/null 2>&1 || die "this installer needs a Debian or Ubuntu system (apt-get not found)"
 ARCH=$(dpkg --print-architecture)
-[ "$ARCH" = amd64 ] || die "only x86-64 (amd64) is supported, this machine is $ARCH"
+# Byte 18 of an ELF header is the processor the program was built for.
+case "$ARCH" in
+  amd64) ELF_MACHINE=3e ;;
+  arm64) ELF_MACHINE=b7 ;;
+  *) die "only x86-64 (amd64) is supported, and ARM64 from the sources; this machine is $ARCH" ;;
+esac
+# Checked before anything changes: a package built for another processor would leave UrsaNAS unable to start.
+for p in "$SRC/Nas.Agent/Nas.Agent" "$SRC/Nas.Web/Nas.Web"; do
+  [ "$(od -An -tx1 -j18 -N1 "$p" | tr -d ' ')" = "$ELF_MACHINE" ] || die "this package was not built for this machine ($ARCH): $p"
+done
+if [ "$ARCH" = arm64 ]; then
+  warn "ARM64 is not officially supported. ZFS and virtual machine support are not installed, and UrsaNAS cannot update itself."
+  WITH_ZFS=0
+fi
 MEM_MB=$(awk '/^MemTotal:/ {print int($2 / 1024)}' /proc/meminfo 2>/dev/null || echo 0)
 if [ "${MEM_MB:-0}" -lt 1800 ]; then
   warn "this machine has only ${MEM_MB} MB of memory (2 GB minimum, 4 GB recommended): the installation may be killed by the system. On Hyper-V, switch off Dynamic Memory."
@@ -135,14 +155,18 @@ say "Installing Docker"
 apt_install docker.io || warn "Docker could not be installed"
 command -v docker >/dev/null 2>&1 && { docker compose version >/dev/null 2>&1 || apt_install docker-compose-v2 || apt_install docker-compose || warn "Docker Compose could not be installed (stacks will be unavailable)"; }
 
-say "Installing virtual machine support (KVM / libvirt)"
-apt_install qemu-system-x86 libvirt-daemon-system libvirt-clients virtinst ovmf swtpm || warn "libvirt could not be installed"
-[ -e /dev/kvm ] || warn "/dev/kvm is missing: enable virtualization in the BIOS (or nested virtualization if this machine is itself a VM)"
+if [ "$ARCH" = amd64 ]; then
+  say "Installing virtual machine support (KVM / libvirt)"
+  apt_install qemu-system-x86 libvirt-daemon-system libvirt-clients virtinst ovmf swtpm || warn "libvirt could not be installed"
+  [ -e /dev/kvm ] || warn "/dev/kvm is missing: enable virtualization in the BIOS (or nested virtualization if this machine is itself a VM)"
+fi
 
 # ---------------------------------------------------------------- rclone (OneDrive, Dropbox)
 # The rclone shipped by Ubuntu (1.60) cannot renew the tokens of our connections: install the official release, checksum verified.
 RCLONE_VERSION=v1.76.0
 RCLONE_SHA=9db7ee9b725bce7cdd195b9183449a4c6fb93cad3e6578e70b87c0bc7f6062e9
+# The line above is for amd64 (deploy/iso/late.sh reads it); one checksum per processor, from the SHA256SUMS of the release.
+[ "$ARCH" != arm64 ] || RCLONE_SHA=c486d404ecbc4bb3d54052a0efaf9e652cf0d2c645e4523f7a2aefa112fe029c
 if [ "$(rclone version 2>/dev/null | head -1)" != "rclone $RCLONE_VERSION" ]; then
   say "Installing rclone $RCLONE_VERSION"
   T=$(mktemp -d); F="$T/rclone.deb"

@@ -12,6 +12,10 @@
 {
     <MudAlert Severity="Severity.Error" Class="mb-4">@error</MudAlert>
 }
+else if (status is { State: VmHostState.Unsupported })
+{
+    <MudAlert Severity="Severity.Info" Class="mb-4">@L["Virtual machines are not supported on this processor architecture."]</MudAlert>
+}
 else if (status is { State: VmHostState.NotInstalled })
 {
     <MudAlert Severity="Severity.Info" Class="mb-4">@L["Virtual machines are not available: libvirt is not installed on this NAS. To install it, run on the NAS:"]</MudAlert>

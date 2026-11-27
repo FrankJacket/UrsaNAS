@@ -52,7 +52,7 @@ public sealed class UpdateInstallTests : IDisposable
     static HttpResponseMessage Json(string body) => new(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
     static HttpResponseMessage Bytes(byte[] b) => new(HttpStatusCode.OK) { Content = new ByteArrayContent(b) };
 
-    (UpdateService Svc, FakeRunner Runner, Handler Http) Make(Func<HttpRequestMessage, HttpResponseMessage> dispatch, string version = "1.0.0")
+    (UpdateService Svc, FakeRunner Runner, Handler Http) Make(Func<HttpRequestMessage, HttpResponseMessage> dispatch, string version = "1.0.0", string architecture = "X64")
     {
         File.WriteAllText(Path.Combine(_dir, "VERSION"), version);
         var script = Path.Combine(_dir, "update-apply.sh");
@@ -66,6 +66,7 @@ public sealed class UpdateInstallTests : IDisposable
             ["Update:RebootRequiredFile"] = Path.Combine(_dir, "reboot-required"),
             ["Update:WorkDir"] = Path.Combine(_dir, "work"),
             ["Update:ApplyScript"] = script,
+            ["Platform:Architecture"] = architecture,
         }).Build();
         return (new UpdateService(runner, cfg, NullLogger<UpdateService>.Instance, http), runner, http);
     }
@@ -109,6 +110,27 @@ public sealed class UpdateInstallTests : IDisposable
         await svc.CheckAppAsync(default);
         var ex = await Assert.ThrowsAsync<OperationException>(() => svc.InstallAppAsync(default));
         Assert.Contains("Check for updates", ex.Message);
+    }
+
+    [Fact]
+    public async Task On_x64_an_available_update_can_be_installed()
+    {
+        var (svc, _, _) = Make(_ => Json(OneRelease));
+        var info = await svc.CheckAppAsync(default);
+        Assert.True(info is { Available: true, CanInstall: true });
+    }
+
+    [Fact]
+    public async Task On_arm64_a_new_version_is_reported_but_never_downloaded_or_installed()
+    {
+        var (svc, runner, http) = Make(_ => Json(OneRelease), architecture: "Arm64");
+        var info = await svc.CheckAppAsync(default);
+        Assert.True(info is { Available: true, CanInstall: false });
+
+        var ex = await Assert.ThrowsAsync<OperationException>(() => svc.InstallAppAsync(default));
+        Assert.Contains("cannot update itself", ex.Message);
+        Assert.Single(http.Requests); // the check only
+        Assert.Empty(runner.Calls);
     }
 
     [Fact]

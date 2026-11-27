@@ -81,6 +81,8 @@ public sealed partial class UpdateService(ICommandRunner runner, IConfiguration 
     {
         var current = CurrentVersion();
         var result = Fake ? FakeApp(current) : await QueryReleasesAsync(current, ct);
+        // The check still reports a newer version on other architectures, but its package could not run there.
+        result = result with { CanInstall = HostPlatform.IsOfficial(cfg) };
         lock (_lock) _app = result;
         return result;
     }
@@ -160,6 +162,9 @@ public sealed partial class UpdateService(ICommandRunner runner, IConfiguration 
     /// </summary>
     public async Task InstallAppAsync(CancellationToken ct)
     {
+        // Releases only hold an x86-64 package: installing it elsewhere would leave UrsaNAS unable to start.
+        if (!HostPlatform.IsOfficial(cfg))
+            throw new OperationException(Msg.F("UrsaNAS cannot update itself on this processor architecture: build the new version from the sources and install it again."));
         if (Fake)
         {
             var v = _app?.Latest ?? "9.9.0";

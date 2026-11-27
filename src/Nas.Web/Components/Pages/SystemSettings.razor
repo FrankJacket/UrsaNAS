@@ -65,11 +65,15 @@
             {
                 <MudAlert Severity="Severity.Success" Class="mt-2">@L.Translate(install.Message)</MudAlert>
             }
+            @if (app is { CanInstall: false })
+            {
+                <MudAlert Severity="Severity.Warning" Class="mt-2">@L["UrsaNAS cannot update itself on this processor architecture: build the new version from the sources and install it again."]</MudAlert>
+            }
             <MudStack Row="true" Class="mt-3">
                 <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="CheckApp" Disabled="@(busy || checkingApp || installing)">
                     @(checkingApp ? L["Checking…"] : L["Check for updates"])
                 </MudButton>
-                @if (app is { Available: true })
+                @if (app is { Available: true, CanInstall: true })
                 {
                     <MudButton Variant="Variant.Filled" Color="Color.Warning" OnClick="InstallApp" Disabled="@(busy || installing)">
                         @(installing ? L["Installing…"] : L["Update now"])
@@ -196,7 +200,8 @@
         <MudText Typo="Typo.h5" Class="mb-2">@L["Automatic installation"]</MudText>
         <MudPaper Class="pa-4" Style="max-width:620px">
             <MudText Typo="Typo.caption" Class="d-block mb-2">@L["Installs what the last check found, once a week."]</MudText>
-            <MudSwitch T="bool" @bind-Value="autoApp" Label="UrsaNAS" Color="Color.Primary" Disabled="scheduleBusy" />
+            @* Where UrsaNAS cannot update itself, the switch can only be turned off (a restored setting may have it on). *@
+            <MudSwitch T="bool" @bind-Value="autoApp" Label="UrsaNAS" Color="Color.Primary" Disabled="@(scheduleBusy || (app is { CanInstall: false } && !autoApp))" />
             <MudSwitch T="bool" @bind-Value="autoPkg" Label="@L["System packages"]" Color="Color.Primary" Disabled="scheduleBusy" />
             @if (autoPkg)
             {
@@ -420,7 +425,7 @@
 
     async Task InstallApp()
     {
-        if (app is not { Available: true, Latest: not null }) return;
+        if (app is not { Available: true, CanInstall: true, Latest: not null }) return;
         var ok = await Dialogs.ShowMessageBoxAsync(L["Update UrsaNAS"],
             L["Install {0} now? The interface will be unreachable for a minute while the services restart.", app.Latest],
             yesText: L["Update"], cancelText: L["Cancel"]);

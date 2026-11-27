@@ -55,7 +55,7 @@ public sealed class UpdateScheduler(AgentClient agent, Repo repo, ILogger<Update
         try { status = await agent.GetUpdateStatusAsync(ct); }
         catch (Exception e) when (e is AgentException or HttpRequestException) { log.LogWarning(e, "Scheduled auto-install skipped (agent unreachable)"); return; }
 
-        if (s.AutoInstallApp && status.App is { Available: true, Latest: not null } app)
+        if (s.AutoInstallApp && status.App is { Available: true, CanInstall: true, Latest: not null } app)
         {
             try
             {

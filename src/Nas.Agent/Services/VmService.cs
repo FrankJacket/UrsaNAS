@@ -75,6 +75,8 @@ public sealed partial class VmService(ICommandRunner run, AclService acl, Backup
 
     public async Task<VmStatus> StatusAsync(CancellationToken ct = default)
     {
+        // Machines are defined for x86 (q35, OVMF, SeaBIOS): they are switched off elsewhere, even if libvirt is installed.
+        if (!HostPlatform.IsOfficial(cfg)) return new(VmHostState.Unsupported, null, false, []);
         CommandResult v;
         try { v = await run.RunAsync(Virsh, ["-c", Connect, "version", "--daemon"], ct: ct); }
         catch (Win32Exception) { return new(VmHostState.NotInstalled, null, false, []); }
@@ -249,6 +251,7 @@ public sealed partial class VmService(ICommandRunner run, AclService acl, Backup
 
     public Task CreateAsync(CreateVmRequest r, CancellationToken ct = default)
     {
+        if (!HostPlatform.IsOfficial(cfg)) throw new OperationException(Msg.F("Virtual machines are not supported on this processor architecture."));
         if (Rules.ValidateCreateVm(r) is { } e) throw new OperationException(e);
         return Mutate(async () =>
         {

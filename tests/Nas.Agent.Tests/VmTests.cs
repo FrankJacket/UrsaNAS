@@ -68,6 +68,20 @@ public class VmTests : IDisposable
     }
 
     [Fact]
+    public async Task On_arm64_virtual_machines_are_unsupported_and_nothing_is_run()
+    {
+        var cfg = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Platform:Architecture"] = "Arm64" }).Build();
+        var users = new UserService(_run);
+        var acl = new AclService(_run, users, new GroupService(_run, users), cfg);
+        var svc = new VmService(_run, acl, new BackupService(_run, acl, cfg, NullLogger<BackupService>.Instance, new StubLifetime()), cfg);
+
+        Assert.Equal(VmHostState.Unsupported, (await svc.StatusAsync()).State);
+        var ex = await Assert.ThrowsAsync<OperationException>(() => svc.CreateAsync(new CreateVmRequest("web", 1, 1024, 10, "docs", "iso/debian.iso", null, "", false, null)));
+        Assert.Contains("not supported", ex.Message);
+        Assert.Empty(_run.Calls);
+    }
+
+    [Fact]
     public async Task Les_ponts_open_vswitch_s_ajoutent_aux_ponts_linux()
     {
         var baseHandler = _run.Handler!;

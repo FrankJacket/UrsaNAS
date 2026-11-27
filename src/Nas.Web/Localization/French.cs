@@ -997,6 +997,8 @@ public static class French
         ["The machine and its virtual disk are deleted for good. The installation image is kept."] = "La machine et son disque virtuel sont supprimés définitivement. L'image d'installation est conservée.",
         ["The machine is cut off immediately, like unplugging it: unsaved data in the machine is lost. Prefer “Shut down” when possible."] = "La machine est coupée immédiatement, comme si on la débranchait : les données non enregistrées dans la machine sont perdues. Préférez « Arrêter » si possible.",
         ["This page checks again every few seconds."] = "Cette page vérifie à nouveau toutes les quelques secondes.",
+        ["UrsaNAS cannot update itself on this processor architecture: build the new version from the sources and install it again."] = "UrsaNAS ne peut pas se mettre à jour lui-même sur cette architecture de processeur : compilez la nouvelle version à partir des sources et réinstallez-la.",
+        ["Virtual machines are not supported on this processor architecture."] = "Les machines virtuelles ne sont pas prises en charge sur cette architecture de processeur.",
         ["Virtual machines are not available: libvirt is not installed on this NAS. To install it, run on the NAS:"] = "Les machines virtuelles ne sont pas disponibles : libvirt n'est pas installé sur ce NAS. Pour l'installer, exécutez sur le NAS :",
         ["libvirt is installed but its service is not running. Start it on the NAS with:"] = "libvirt est installé mais son service ne tourne pas. Démarrez-le sur le NAS avec :",
         ["The folder path is too deep."] = "Le chemin du dossier est trop profond.",

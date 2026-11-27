@@ -3,7 +3,8 @@ using System.Text.RegularExpressions;
 namespace Nas.Contracts;
 
 /// <summary>NotInstalled : pas de commande virsh. Stopped : installé mais libvirt ne répond pas. Ready : utilisable.</summary>
-public enum VmHostState { NotInstalled, Stopped, Ready }
+/// <remarks>Unsupported: virtual machines are switched off on this processor architecture (only x86-64 is handled).</remarks>
+public enum VmHostState { NotInstalled, Stopped, Ready, Unsupported }
 
 /// <summary><c>Kvm</c> : /dev/kvm existe (sinon QEMU émule, très lentement). <c>Bridges</c> : ponts réseau de la machine, utilisables par les VM.</summary>
 public sealed record VmStatus(VmHostState State, string? Version, bool Kvm, IReadOnlyList<string> Bridges);

@@ -12,9 +12,10 @@ public sealed record SetUpdateSettingsRequest(string Channel);
 /// <summary>
 /// Résultat de la recherche d'une nouvelle version d'UrsaNAS. <c>Error</c> non nul : la recherche a échoué (les autres champs sont alors à ignorer, sauf <c>Current</c>).
 /// <c>Tag</c> : nom exact de la release GitHub (ex. « v1.2.3 ») ; sert à retrouver ses fichiers pour l'installation, jamais affiché.
+/// <c>CanInstall</c> is false when UrsaNAS cannot update itself on this processor architecture (only x86-64 packages are published).
 /// </summary>
 public sealed record AppUpdateInfo(string Current, string? Latest, bool Available, string? Notes, string? Url, bool Prerelease, DateTimeOffset? PublishedAt,
-    DateTimeOffset CheckedAt, string? Error, string? Tag = null);
+    DateTimeOffset CheckedAt, string? Error, string? Tag = null, bool CanInstall = true);
 
 /// <summary>
 /// Avancement de l'installation d'une mise à jour d'UrsaNAS, relu depuis le fichier que le script d'installation met à jour (survit au redémarrage de l'agent).
