@@ -312,6 +312,13 @@ public partial class Program
             Read(async () => Results.Ok(new ShareRoot(name, await a.SharePathAsync(name, ct)))));
 
         app.MapGet("/smart",(SmartService s, CancellationToken ct) => Read(async () => Results.Ok(await s.ListAsync(ct))));
+        app.MapGet("/smart/selftests", (HttpRequest request, SmartService s, CancellationToken ct) =>
+            Read(async () => Results.Ok(await s.ListSelfTestsAsync(request.Query["serial"].OfType<string>().ToList(), ct))));
+        app.MapPost("/smart/selftests", (SelfTestRequest r, SmartService s, CancellationToken ct) =>
+            Guard(async () => { await s.StartSelfTestAsync(r, ct); return Results.NoContent(); }));
+        app.MapGet("/zfs/trim", (ZfsService z, CancellationToken ct) => Read(async () => Results.Ok(await z.ListTrimAsync(ct))));
+        app.MapPost("/zfs/pools/{name}/trim", (string name, ZfsService z, CancellationToken ct) =>
+            Guard(async () => { await z.TrimAsync(name, ct); return Results.NoContent(); }));
 
         app.MapGet("/zfs/pools",(ZfsService z, CancellationToken ct) => Read(async () => Results.Ok(await z.ListPoolsAsync(ct))));
         app.MapPost("/zfs/pools", (CreatePoolRequest r, ZfsService z, CancellationToken ct) =>

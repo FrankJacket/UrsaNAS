@@ -15,6 +15,8 @@
                 <MudSelect T="string" Value="task.Type" ValueChanged="SetType" Label="@L["Type"]" Disabled="@(busy || task.Id != 0)">
                     <MudSelectItem T="string" Value="@ScheduledTaskType.Snapshot">@L["ZFS snapshots"]</MudSelectItem>
                     <MudSelectItem T="string" Value="@ScheduledTaskType.Scrub">@L["Pool scrub"]</MudSelectItem>
+                    <MudSelectItem T="string" Value="@ScheduledTaskType.Trim">@L["Pool TRIM"]</MudSelectItem>
+                    <MudSelectItem T="string" Value="@ScheduledTaskType.SelfTest">@L["SMART self-test"]</MudSelectItem>
                     <MudSelectItem T="string" Value="@ScheduledTaskType.Script">@L["Custom script"]</MudSelectItem>
                 </MudSelect>
 
@@ -43,8 +45,40 @@
                     <MudNumericField T="int" @bind-Value="task.TimeoutMinutes" Label="@L["Time limit (minutes)"]" Min="1" Max="@ScriptRules.MaxTimeoutMinutes" HideSpinButtons="true" Disabled="busy" Class="mt-3"
                                      HelperText="@L["When it is exceeded, the script and the processes it started are stopped."]" />
                 }
+                else if (IsSelfTest)
+                {
+                    <MudSelect T="string" @bind-Value="task.TestType" Label="@L["Test type"]" Disabled="busy" Class="mt-3"
+                               ToStringFunc="@(v => v == SelfTestType.Long ? L["Long"] : L["Short"])">
+                        <MudSelectItem T="string" Value="@SelfTestType.Short">@L["Short"]</MudSelectItem>
+                        <MudSelectItem T="string" Value="@SelfTestType.Long">@L["Long"]</MudSelectItem>
+                    </MudSelect>
+                    <MudText Typo="Typo.caption" Class="d-block">@L["A short test takes a few minutes. A long test reads the whole disk and can take many hours. The disk stays usable, but may be slower. The task runs until the disk reports the result."]</MudText>
+
+                    @if (disksError is not null)
+                    {
+                        <MudAlert Severity="Severity.Error" Dense="true" Class="mt-2">@disksError</MudAlert>
+                    }
+
+                    <MudText Typo="Typo.subtitle2" Class="mt-3">@L["Disks"]</MudText>
+                    <div style="max-height:220px; overflow:auto">
+                        @foreach (var item in DiskChoices())
+                        {
+                            var serial = item;
+                            <MudCheckBox T="bool" Value="selected.Contains(serial)" ValueChanged="v => Toggle(serial, v)" Label="@DiskText(serial)" Dense="true" Color="Color.Primary" Disabled="busy" Class="d-block" />
+                        }
+                    </div>
+                    @if (loaded && disksError is null && !DiskChoices().Any())
+                    {
+                        <MudText Typo="Typo.body2">@L["No disk with a serial number."]</MudText>
+                    }
+                    <MudText Typo="Typo.caption" Class="d-block">@L["Disks are recognized by their serial number. A new or replacement disk must be ticked here."]</MudText>
+                }
                 else
                 {
+                    @if (IsTrim)
+                    {
+                        <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">@L["On the first Sunday of every month, shortly after midnight, the system already trims by itself the pools made only of NVMe SSDs, unless a pool is set otherwise; those TRIMs don't appear in the task history. A task is useful for the other pools, or to trim at another time. Other file systems, such as ext4, are already trimmed every week."]</MudAlert>
+                    }
                     @if (IsScrub)
                     {
                         <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">@L["The system already scrubs the pools by itself on the second Sunday of every month, shortly after midnight; those scrubs don't appear in the task history. A task is useful to scrub more often or at another time."]</MudAlert>
@@ -187,7 +221,8 @@
     IReadOnlyList<string> datasets = [];
     IReadOnlyList<string> pools = [];
     IReadOnlyList<string> users = [];
-    string? error, targetsError;
+    IReadOnlyList<SelfTestStatus> disks = [];
+    string? error, targetsError, disksError;
     bool busy, loaded;
     static readonly Dictionary<string, object?> NoSpellcheck = new() { ["spellcheck"] = "false" };
 
@@ -195,6 +230,8 @@
     bool IsSnapshot => task.Type == ScheduledTaskType.Snapshot;
     bool IsScrub => task.Type == ScheduledTaskType.Scrub;
     bool IsScript => task.Type == ScheduledTaskType.Script;
+    bool IsTrim => task.Type == ScheduledTaskType.Trim;
+    bool IsSelfTest => task.Type == ScheduledTaskType.SelfTest;
     TimeSpan? Time => ScheduleRule.TryTime(rule.Time, out var t) ? t.ToTimeSpan() : null;
 
     protected override async Task OnInitializedAsync()
@@ -205,7 +242,7 @@
             {
                 Id = Existing.Id, Name = Existing.Name, Type = Existing.Type, Targets = Existing.Targets, Keep = Existing.Keep,
                 CatchUp = Existing.CatchUp, Enabled = Existing.Enabled,
-                Script = Existing.Script, RunAs = Existing.RunAs, TimeoutMinutes = Existing.TimeoutMinutes,
+                Script = Existing.Script, RunAs = Existing.RunAs, TimeoutMinutes = Existing.TimeoutMinutes, TestType = Existing.TestType,
             };
             rule = Existing.Rule();
             if (!RepeatKind.All.Contains(rule.Repeat)) rule = new ScheduleRule();
@@ -221,7 +258,36 @@
         }
         catch (AgentException e) { targetsError = L.Translate(e.Message); }
         catch (HttpRequestException) { targetsError = L["Agent unreachable."]; }
+        // A new task only reads the disks when its type needs them: smartctl wakes sleeping disks.
+        if (IsSelfTest) await LoadDisksAsync();
         loaded = true;
+    }
+
+    bool disksLoaded;
+
+    async Task LoadDisksAsync()
+    {
+        if (disksLoaded) return;
+        disksLoaded = true;
+        disksError = null;
+        try { disks = await Agent.GetSelfTestsAsync(); }
+        catch (AgentException e) { disksError = L.Translate(e.Message); disksLoaded = false; }
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException) { disksError = L["Agent unreachable."]; disksLoaded = false; }
+    }
+
+    /// <summary>The disks present, plus the task's disks that are gone (so that they can be unticked).</summary>
+    IEnumerable<string> DiskChoices()
+    {
+        var present = disks.Select(d => d.Serial).Distinct().ToList();
+        return present.Concat(selected.Where(s => !present.Contains(s)).Order(StringComparer.Ordinal));
+    }
+
+    string DiskText(string serial)
+    {
+        var d = disks.FirstOrDefault(x => x.Serial == serial);
+        if (d is null) return loaded && disksError is null ? L["{0} (disk not found)", serial] : serial;
+        var text = string.Join(" — ", new[] { d.Disk.Replace("/dev/", ""), d.Model ?? "", Fmt.Size(d.SizeBytes, L.Lang), d.Serial }.Where(s => s.Length > 0));
+        return d.State == SelfTestState.Unsupported ? L["{0} (self-tests not supported)", text] : text;
     }
 
     /// <summary>“root” and the NAS users, plus the task's account if it no longer exists (so that it stays visible).</summary>
@@ -239,10 +305,11 @@
         return existing.Concat(selected.Where(s => !existing.Contains(s)).Order(StringComparer.Ordinal));
     }
 
-    void SetType(string? type)
+    async Task SetType(string? type)
     {
         task.Type = type ?? ScheduledTaskType.Snapshot;
         selected.Clear();
+        if (IsSelfTest) await LoadDisksAsync();
     }
 
     void Toggle(string name, bool on)

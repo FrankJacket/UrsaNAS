@@ -67,6 +67,7 @@ public class Db
         AddColumn(c, "ScheduledTasks", "Script", "TEXT NOT NULL DEFAULT ''"); // “script” tasks: the Bash text
         AddColumn(c, "ScheduledTasks", "RunAs", "TEXT NOT NULL DEFAULT ''"); // the account that runs it
         AddColumn(c, "ScheduledTasks", "TimeoutMinutes", "INTEGER NOT NULL DEFAULT 60");
+        AddColumn(c, "ScheduledTasks", "TestType", "TEXT NOT NULL DEFAULT 'short'"); // self-test tasks: short or long
     }
 
     static void AddColumn(SqliteConnection c, string table, string column, string ddl)

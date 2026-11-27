@@ -174,6 +174,26 @@ sealed class FakeZfsAgentHandler : HttpMessageHandler
     public List<string> ScriptCancels { get; } = [];
     public string? ScriptRefusal { get; set; }
 
+    public Dictionary<string, TrimState> TrimDisks { get; } = new() { ["sdb"] = TrimState.Untrimmed, ["sdc"] = TrimState.Untrimmed };
+    public List<string> Trimmed { get; } = [];
+    public List<SelfTestStatus> SelfTests { get; } =
+    [
+        new("/dev/sda", "A1", "Model", 1000, SelfTestState.None, null, null),
+        new("/dev/sdb", "B2", "Model", 1000, SelfTestState.None, null, null),
+    ];
+    public List<SelfTestRequest> SelfTestStarts { get; } = [];
+
+    public void SetTrim(TrimState state)
+    {
+        foreach (var disk in TrimDisks.Keys.ToList()) TrimDisks[disk] = state;
+    }
+
+    public void SetSelfTest(string serial, SelfTestState state, string? detail = null)
+    {
+        var i = SelfTests.FindIndex(d => d.Serial == serial);
+        SelfTests[i] = SelfTests[i] with { State = state, Detail = detail };
+    }
+
     /// <summary>Ends the last script started.</summary>
     public void EndScript(string state, int? exitCode = null, string output = "")
     {
@@ -219,6 +239,21 @@ sealed class FakeZfsAgentHandler : HttpMessageHandler
             case ("DELETE", "zfs/snapshots"):
                 var name = Uri.UnescapeDataString(request.RequestUri.Query["?name=".Length..]);
                 Snapshots.RemoveAll(s => s.Name == name);
+                return Done();
+            case ("GET", "zfs/trim"):
+                return Json(new[] { new PoolTrimStatus("tank", TrimDisks.Select(d => new TrimDevice(d.Key, true, d.Value)).ToList()) });
+            case ("POST", "zfs/pools/tank/trim"):
+                Trimmed.Add("tank");
+                SetTrim(TrimState.Running);
+                return Done();
+            case ("GET", "smart/selftests"):
+                var asked = request.RequestUri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries)
+                    .Select(q => Uri.UnescapeDataString(q["serial=".Length..])).ToList();
+                return Json(SelfTests.Where(d => asked.Count == 0 || asked.Contains(d.Serial)).ToList());
+            case ("POST", "smart/selftests"):
+                var test = (await request.Content!.ReadFromJsonAsync<SelfTestRequest>(ct))!;
+                SelfTestStarts.Add(test);
+                SetSelfTest(test.Serial, SelfTestState.Running);
                 return Done();
             case ("POST", "zfs/pools/tank/scrub"):
                 Scrubbed.Add("tank");
@@ -410,6 +445,140 @@ public class ScheduledTaskCoordinatorTests : IDisposable
         Assert.Equal(TaskRunStatus.Skipped, (await LastRunAsync(id)).Status);
         Assert.Empty(_agent.Scrubbed);
         Assert.Empty(await _repo.GetActiveAlertsAsync());
+    }
+
+    [Fact]
+    public async Task Un_trim_reste_en_cours_jusqu_a_sa_fin()
+    {
+        var id = await AddAsync(ScheduledTaskType.Trim, "tank");
+        await _coordinator.RunNowAsync(id, "alice");
+        var run = await LastRunAsync(id);
+        Assert.Equal((TaskRunStatus.Running, "TRIM in progress.", "trim:tank"), (run.Status, run.Message, run.Pending));
+
+        _agent.PoolsBroken = true; // the scrub follow-up must not take a TRIM for a pool name
+        await _coordinator.TickAsync(DateTime.UtcNow, Zone);
+        Assert.Equal(TaskRunStatus.Running, (await LastRunAsync(id)).Status);
+
+        _agent.SetTrim(TrimState.Completed);
+        await _coordinator.TickAsync(DateTime.UtcNow, Zone);
+        run = await LastRunAsync(id);
+        Assert.Equal((TaskRunStatus.Success, "TRIM completed.", ""), (run.Status, run.Message, run.Pending));
+        Assert.Equal("tank", Assert.Single(_agent.Trimmed));
+    }
+
+    [Fact]
+    public async Task Un_trim_annule_est_note_sans_alerte()
+    {
+        var id = await AddAsync(ScheduledTaskType.Trim, "tank");
+        await _coordinator.RunNowAsync(id, "alice");
+        _agent.SetTrim(TrimState.Untrimmed);
+        await _coordinator.TickAsync(DateTime.UtcNow, Zone);
+
+        Assert.Equal(TaskRunStatus.Cancelled, (await LastRunAsync(id)).Status);
+        Assert.Empty(await _repo.GetActiveAlertsAsync());
+    }
+
+    [Theory]
+    [InlineData(TrimState.Running, TaskRunStatus.Skipped, 0)]
+    [InlineData(TrimState.Suspended, TaskRunStatus.Skipped, 0)]
+    [InlineData(TrimState.Unsupported, TaskRunStatus.Failed, 1)] // no disk of the pool supports TRIM
+    public async Task Un_trim_n_est_pas_lance_s_il_est_deja_en_cours_ou_impossible(TrimState state, string status, int alerts)
+    {
+        _agent.SetTrim(state);
+        var id = await AddAsync(ScheduledTaskType.Trim, "tank");
+        await _coordinator.RunNowAsync(id, "alice");
+
+        Assert.Equal(status, (await LastRunAsync(id)).Status);
+        Assert.Empty(_agent.Trimmed);
+        Assert.Equal(alerts, (await _repo.GetActiveAlertsAsync()).Count);
+    }
+
+    async Task<int> AddSelfTestAsync(string targets = "A1\nB2", string type = SelfTestType.Long) =>
+        await _tasks.SaveTaskAsync(new ScheduledTaskRow { Name = "disques", Type = ScheduledTaskType.SelfTest, Targets = targets, TestType = type });
+
+    [Fact]
+    public async Task Les_autotests_sont_suivis_jusqu_au_dernier_disque()
+    {
+        var id = await AddSelfTestAsync();
+        Assert.Equal(SelfTestType.Long, (await _tasks.GetTaskAsync(id))!.TestType);
+        await _coordinator.RunNowAsync(id, "alice");
+        Assert.Equal([new SelfTestRequest("A1", SelfTestType.Long), new SelfTestRequest("B2", SelfTestType.Long)], _agent.SelfTestStarts);
+        Assert.Equal("smart:A1\nsmart:B2", (await LastRunAsync(id)).Pending);
+
+        _agent.SetSelfTest("A1", SelfTestState.Passed);
+        await _coordinator.TickAsync(DateTime.UtcNow, Zone);
+        var run = await LastRunAsync(id);
+        Assert.Equal((TaskRunStatus.Running, "Self-test in progress.", "smart:B2"), (run.Status, run.Message, run.Pending));
+
+        _agent.SetSelfTest("B2", SelfTestState.Passed);
+        await _coordinator.TickAsync(DateTime.UtcNow, Zone);
+        run = await LastRunAsync(id);
+        Assert.Equal((TaskRunStatus.Success, "Self-test passed."), (run.Status, run.Message));
+    }
+
+    [Theory]
+    [InlineData(SelfTestState.Failed, TaskRunStatus.Failed, 1)]
+    [InlineData(SelfTestState.Aborted, TaskRunStatus.Interrupted, 0)]
+    [InlineData(SelfTestState.Unsupported, TaskRunStatus.Failed, 1)] // the result cannot be read
+    public async Task Le_resultat_d_un_autotest_decide_de_l_alerte(SelfTestState state, string status, int alerts)
+    {
+        var id = await AddSelfTestAsync("A1");
+        await _coordinator.RunNowAsync(id, "alice");
+        _agent.SetSelfTest("A1", state, "Completed: read failure");
+        await _coordinator.TickAsync(DateTime.UtcNow, Zone);
+
+        Assert.Equal(status, (await LastRunAsync(id)).Status);
+        Assert.Equal(alerts, (await _repo.GetActiveAlertsAsync()).Count);
+    }
+
+    [Fact]
+    public async Task Un_disque_incompatible_ou_absent_fait_echouer_la_tache_et_les_autres_sont_testes()
+    {
+        _agent.SetSelfTest("A1", SelfTestState.Unsupported);
+        var id = await AddSelfTestAsync("A1\nB2\nZ9");
+        await _coordinator.RunNowAsync(id, "alice");
+        Assert.Equal("B2", Assert.Single(_agent.SelfTestStarts).Serial);
+
+        _agent.SetSelfTest("B2", SelfTestState.Passed);
+        await _coordinator.TickAsync(DateTime.UtcNow, Zone);
+        var run = await LastRunAsync(id);
+        Assert.Equal(TaskRunStatus.Failed, run.Status);
+        Assert.Contains("A1", run.Message); // the first error remains the message
+        Assert.Contains("Z9", run.Details);
+    }
+
+    [Fact]
+    public async Task Un_disque_retire_pendant_son_test_fait_echouer_la_tache()
+    {
+        var id = await AddSelfTestAsync("A1");
+        await _coordinator.RunNowAsync(id, "alice");
+        _agent.SelfTests.Clear();
+        await _coordinator.TickAsync(DateTime.UtcNow, Zone);
+
+        Assert.Equal(TaskRunStatus.Failed, (await LastRunAsync(id)).Status);
+    }
+
+    [Fact]
+    public async Task Un_autotest_deja_en_cours_n_est_pas_relance()
+    {
+        _agent.SetSelfTest("A1", SelfTestState.Running);
+        var id = await AddSelfTestAsync("A1");
+        await _coordinator.RunNowAsync(id, "alice");
+
+        Assert.Equal(TaskRunStatus.Skipped, (await LastRunAsync(id)).Status);
+        Assert.Empty(_agent.SelfTestStarts);
+    }
+
+    [Fact]
+    public void Une_tache_d_autotest_exige_un_disque_et_un_type_connu()
+    {
+        var t = new ScheduledTaskRow { Name = "disques", Type = ScheduledTaskType.SelfTest, Targets = "WD-WCC4E1234567" };
+        Assert.Null(ScheduledTaskCoordinator.Validate(t));
+        t.TestType = "offline";
+        Assert.NotNull(ScheduledTaskCoordinator.Validate(t));
+        t.TestType = SelfTestType.Short;
+        t.Targets = "";
+        Assert.NotNull(ScheduledTaskCoordinator.Validate(t));
     }
 
     async Task<int> AddScriptAsync(DateTime? nextRun = null) =>

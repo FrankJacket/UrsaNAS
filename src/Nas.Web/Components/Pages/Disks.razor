@@ -22,6 +22,7 @@
 {
     var d = disks[i];
     var s = SmartOf(d);
+    var test = SelfTestOf(d);
     var number = i + 1; // copie locale : « i » est partagé par toute la boucle et vaudrait sa dernière valeur au moment du rendu
     <MudItem xs="12" lg="4" md="6">
     <MudPaper Class="pa-4" Outlined="true" Style="height:100%">
@@ -38,6 +39,8 @@
                 {
                     <MudMenuItem Disabled="@(d.UnallocatedBytes < (1L << 30))" OnClick="GrowSystem">@L["Extend the system partition"]</MudMenuItem>
                 }
+                <MudMenuItem Disabled="@(!CanTest(test))" OnClick="() => SelfTest(d, SelfTestType.Short)">@L["Short SMART self-test"]</MudMenuItem>
+                <MudMenuItem Disabled="@(!CanTest(test))" OnClick="() => SelfTest(d, SelfTestType.Long)">@L["Long SMART self-test"]</MudMenuItem>
                 <MudMenuItem Disabled="@(d.Busy is not null)" OnClick="() => Wipe(d)"><span style="color:var(--mud-palette-error)">@L["Erase"]</span></MudMenuItem>
             </MudMenu>
         </div>
@@ -68,6 +71,10 @@
             <DiskField Label="@L["Interface"]" Value="@(InterfaceOf(d))" />
             <DiskField Label="@L["Serial number"]" Value="@(d.Serial ?? "—")" />
             <DiskField Label="@L["Temperature"]" Value="@(Temp(s))" />
+            <div title="@(test?.State is SelfTestState.Failed or SelfTestState.Aborted ? test.Detail : null)">
+                <MudText Typo="Typo.caption" Style="color:var(--mud-palette-text-secondary)">@L["Self-test"]</MudText>
+                <MudText Typo="Typo.body1" Color="@SelfTestColor(test)" Style="font-weight:600">@SelfTestText(test)</MudText>
+            </div>
         </div>
 
         @* Partitions *@
@@ -123,6 +130,7 @@
 
     IReadOnlyList<DiskInfo> disks = [];
     IReadOnlyList<SmartInfo> smart = [];
+    IReadOnlyList<SelfTestStatus> selfTests = [];
     DateTime smartAt = DateTime.MinValue;
     string? error;
     bool loaded;
@@ -186,9 +194,51 @@
         if (DateTime.UtcNow - smartAt > TimeSpan.FromMinutes(1))
         {
             try { smart = await Agent.GetSmartAsync(); } catch (Exception e) when (e is AgentException or HttpRequestException) { }
+            try { selfTests = await Agent.GetSelfTestsAsync(); }
+            catch (Exception e) when (e is AgentException or HttpRequestException) { selfTests = []; }
             smartAt = DateTime.UtcNow;
         }
         loaded = true;
+    }
+
+    /// <summary>The disk's self-test state; null when it is unknown, as for a disk without a serial number.</summary>
+    SelfTestStatus? SelfTestOf(DiskInfo d) => selfTests.FirstOrDefault(x => x.Disk == d.Path && x.Serial == d.Serial);
+
+    static bool CanTest(SelfTestStatus? t) => t is not null && t.State is not (SelfTestState.Unsupported or SelfTestState.Running);
+
+    string SelfTestText(SelfTestStatus? t) => t?.State switch
+    {
+        SelfTestState.Unsupported => L["Not supported"],
+        SelfTestState.None => L["No result"],
+        // The disk gives what is left to do; not every kind of disk does.
+        SelfTestState.Running => t.RemainingPercent is { } left ? L["In progress ({0}%)", 100 - left] : L["In progress"],
+        SelfTestState.Passed => L["Passed"],
+        SelfTestState.Failed => L["Failed"],
+        SelfTestState.Aborted => L["Aborted"],
+        _ => "—",
+    };
+
+    static Color SelfTestColor(SelfTestStatus? t) => t?.State switch
+    {
+        SelfTestState.Running => Color.Info,
+        SelfTestState.Passed => Color.Success,
+        SelfTestState.Failed => Color.Error,
+        SelfTestState.Aborted => Color.Warning,
+        _ => Color.Default,
+    };
+
+    async Task SelfTest(DiskInfo d, string type)
+    {
+        if (d.Serial is not { Length: > 0 } serial) return;
+        try
+        {
+            await Ops.StartSelfTestAsync(serial, d.Path, type);
+            Snack.Add(type == SelfTestType.Long ? L["Long self-test of {0} started.", d.Path] : L["Short self-test of {0} started.", d.Path], Severity.Success);
+            smartAt = DateTime.MinValue; // read again right away, without waiting for the next minute
+            await LoadAsync();
+        }
+        catch (AgentException e) { Snack.Add(L.Translate(e.Message), Severity.Error); }
+        catch (HttpRequestException) { Snack.Add(L["Agent unreachable."], Severity.Error); }
     }
 
     async Task Done(IDialogReference dialog, string success)

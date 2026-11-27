@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.RegularExpressions;
 using Nas.Contracts;
 
 namespace Nas.Agent.Services;
@@ -65,6 +66,43 @@ public static class ZfsParser
         }
         return (string.Join(" — ", scan.Where(s => s.Length > 0)), errors, devices);
     }
+
+    /// <summary>
+    /// Reads the TRIM state that <c>zpool status -t</c> writes at the end of each disk line, for example “(untrimmed)” or
+    /// “(42% trimmed, started at …)”. Only disks have one. Those listed under “spares” and “cache” are skipped.
+    /// </summary>
+    public static IReadOnlyList<TrimDevice> ParseTrim(string text)
+    {
+        var devices = new List<TrimDevice>();
+        var inConfig = false;
+        var skipped = false;
+        foreach (var raw in text.Replace("\r\n", "\n").Split('\n'))
+        {
+            if (raw.StartsWith("config:", StringComparison.Ordinal)) { inConfig = true; continue; }
+            if (raw.StartsWith("errors:", StringComparison.Ordinal)) break;
+            var trimmed = raw.Trim();
+            if (!inConfig || trimmed.Length == 0) continue;
+            var columns = trimmed.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+            // A heading or the pool's own line is not indented after the leading tab.
+            if (raw.TrimStart('\t').Length == raw.TrimStart('\t').TrimStart(' ').Length) skipped = columns[0] is "spares" or "cache";
+            if (skipped) continue;
+
+            var m = TrimNote.Match(trimmed);
+            if (!m.Success) continue;
+            var note = m.Groups["note"].Value;
+            var state = note == "untrimmed" ? TrimState.Untrimmed
+                : note == "trim unsupported" ? TrimState.Unsupported
+                : note.Contains("suspended,", StringComparison.Ordinal) ? TrimState.Suspended
+                : note.Contains("completed at", StringComparison.Ordinal) ? TrimState.Completed
+                : TrimState.Running;
+            var sign = note.IndexOf('%');
+            int? percent = sign > 0 && int.TryParse(note.AsSpan(0, sign), NumberStyles.None, CultureInfo.InvariantCulture, out var done) ? done : null;
+            devices.Add(new TrimDevice(columns[0], columns.Length > 1 && columns[1] is "ONLINE" or "DEGRADED", state, percent));
+        }
+        return devices;
+    }
+
+    static readonly Regex TrimNote = new(@"\((?<note>untrimmed|trim unsupported|trimming|\d+% trimmed[^)]*)\)", RegexOptions.CultureInvariant);
 }
 
 /// <summary>
@@ -140,6 +178,25 @@ public sealed class ZfsService(ICommandRunner run, IDiskProvider disks, IConfigu
     {
         if (Rules.ValidatePoolName(name) is { } e) throw new OperationException(e);
         Check(await run.RunAsync("zpool", ["scrub", name], ct: ct), "Scrubbing the pool");
+    }
+
+    public async Task<IReadOnlyList<PoolTrimStatus>> ListTrimAsync(CancellationToken ct = default)
+    {
+        var list = Check(await run.RunAsync("zpool", ZfsParser.PoolListArgs, ct: ct), "Listing pools");
+        var result = new List<PoolTrimStatus>();
+        foreach (var p in ZfsParser.ParsePoolList(list))
+        {
+            // A failure is reported: a pool left out would look as if it no longer existed.
+            var status = Check(await run.RunAsync("zpool", ["status", "-t", p.Name], ct: ct), "Reading the TRIM status");
+            result.Add(new PoolTrimStatus(p.Name, ZfsParser.ParseTrim(status)));
+        }
+        return result;
+    }
+
+    public async Task TrimAsync(string name, CancellationToken ct = default)
+    {
+        if (Rules.ValidatePoolName(name) is { } e) throw new OperationException(e);
+        Check(await run.RunAsync("zpool", ["trim", name], ct: ct), "Trimming the pool");
     }
 
     public async Task<IReadOnlyList<DatasetInfo>> ListDatasetsAsync(CancellationToken ct = default) =>

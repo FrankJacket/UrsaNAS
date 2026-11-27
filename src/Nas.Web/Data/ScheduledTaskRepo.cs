@@ -6,7 +6,7 @@ namespace Nas.Web.Data;
 
 public static class ScheduledTaskType
 {
-    public const string Snapshot = "snapshot", Scrub = "scrub", Script = "script";
+    public const string Snapshot = "snapshot", Scrub = "scrub", Script = "script", Trim = "trim", SelfTest = "selftest";
 }
 
 public static class TaskRunStatus
@@ -20,7 +20,7 @@ public sealed class ScheduledTaskRow
     public int Id { get; set; }
     public string Name { get; set; } = "";
     public string Type { get; set; } = ScheduledTaskType.Snapshot;
-    /// <summary>One target per line: datasets (snapshots) or pools (scrub).</summary>
+    /// <summary>One target per line: datasets (snapshots), pools (scrub, TRIM) or disk serial numbers (self-tests).</summary>
     public string Targets { get; set; } = "";
     /// <summary>Snapshots: how many to keep for each dataset.</summary>
     public int Keep { get; set; } = 14;
@@ -34,6 +34,8 @@ public sealed class ScheduledTaskRow
     /// <summary>Scripts: “root” or a NAS user; nothing is selected by default.</summary>
     public string RunAs { get; set; } = "";
     public int TimeoutMinutes { get; set; } = ScriptRules.DefaultTimeoutMinutes;
+    /// <summary>Self-tests: short or long (<see cref="SelfTestType"/>).</summary>
+    public string TestType { get; set; } = SelfTestType.Short;
     /// <summary>JSON of <see cref="ScheduleRule"/>.</summary>
     public string Schedule { get; set; } = JsonSerializer.Serialize(new ScheduleRule());
     /// <summary>Run once on return after missed occurrences.</summary>
@@ -67,7 +69,10 @@ public sealed class ScheduledRunRow
     public string? Message { get; set; }
     /// <summary>One line per processed target.</summary>
     public string? Details { get; set; }
-    /// <summary>Operation that goes on after being started: the pools whose scrub is still awaited (one per line), or “script:id”.</summary>
+    /// <summary>
+    /// Operation that goes on after being started, one line per target still awaited: a scrubbed pool, “trim:pool”,
+    /// “smart:serial”, or the single “script:id”.
+    /// </summary>
     public string Pending { get; set; } = "";
     /// <summary>Results already known while waiting: they count in the final result.</summary>
     public bool HasError { get; set; }
@@ -80,7 +85,7 @@ public sealed record TaskHealth(int TaskId, string Name, bool Enabled, string? L
 
 public class ScheduledTaskRepo(Db db)
 {
-    const string TaskColumns = "Id,Name,Type,Targets,Keep,SnapshotTag,Schedule,CatchUp,Enabled,CreatedUtc,NextRunUtc,Script,RunAs,TimeoutMinutes";
+    const string TaskColumns = "Id,Name,Type,Targets,Keep,SnapshotTag,Schedule,CatchUp,Enabled,CreatedUtc,NextRunUtc,Script,RunAs,TimeoutMinutes,TestType";
     public const int KeptRuns = 50;
 
     public async Task<List<ScheduledTaskRow>> GetTasksAsync()
@@ -101,13 +106,13 @@ public class ScheduledTaskRepo(Db db)
         using var c = db.Open();
         if (t.Id == 0)
             return await c.ExecuteScalarAsync<int>("""
-                INSERT INTO ScheduledTasks(Name,Type,Targets,Keep,SnapshotTag,Schedule,CatchUp,Enabled,CreatedUtc,NextRunUtc,Script,RunAs,TimeoutMinutes)
-                VALUES(@Name,@Type,@Targets,@Keep,@SnapshotTag,@Schedule,@CatchUp,@Enabled,@CreatedUtc,@NextRunUtc,@Script,@RunAs,@TimeoutMinutes);
+                INSERT INTO ScheduledTasks(Name,Type,Targets,Keep,SnapshotTag,Schedule,CatchUp,Enabled,CreatedUtc,NextRunUtc,Script,RunAs,TimeoutMinutes,TestType)
+                VALUES(@Name,@Type,@Targets,@Keep,@SnapshotTag,@Schedule,@CatchUp,@Enabled,@CreatedUtc,@NextRunUtc,@Script,@RunAs,@TimeoutMinutes,@TestType);
                 SELECT last_insert_rowid();
                 """, t);
         await c.ExecuteAsync("""
             UPDATE ScheduledTasks SET Name=@Name,Type=@Type,Targets=@Targets,Keep=@Keep,Schedule=@Schedule,CatchUp=@CatchUp,Enabled=@Enabled,NextRunUtc=@NextRunUtc,
-              Script=@Script,RunAs=@RunAs,TimeoutMinutes=@TimeoutMinutes WHERE Id=@Id
+              Script=@Script,RunAs=@RunAs,TimeoutMinutes=@TimeoutMinutes,TestType=@TestType WHERE Id=@Id
             """, t);
         return t.Id;
     }

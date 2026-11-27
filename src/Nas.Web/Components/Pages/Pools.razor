@@ -21,6 +21,7 @@
 @foreach (var p in pools)
 {
     var percent = p.SizeBytes == 0 ? 0 : 100.0 * p.AllocBytes / p.SizeBytes;
+    var trim = TrimOf(p);
     <MudCard Class="mb-4">
         <MudCardHeader>
             <CardHeaderContent>
@@ -31,6 +32,9 @@
             </CardHeaderContent>
             <CardHeaderActions>
                 <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.FactCheck" OnClick="() => Scrub(p)">@L["Scrub"]</MudButton>
+                <MudTooltip Text="@(trim is { CanStart: false } ? trim.Text : L["Tells the SSDs of the pool which space is no longer used."])">
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.CleaningServices" Disabled="@(trim is { CanStart: false })" OnClick="() => Trim(p)">@L["TRIM"]</MudButton>
+                </MudTooltip>
                 <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="() => Destroy(p)">@L["Destroy"]</MudButton>
             </CardHeaderActions>
         </MudCardHeader>
@@ -40,6 +44,10 @@
             @if (!string.IsNullOrEmpty(p.Scan))
             {
                 <MudText Typo="Typo.body2" Class="mb-1">@L["Scan: {0}", p.Scan]</MudText>
+            }
+            @if (trim is not null)
+            {
+                <MudText Typo="Typo.body2" Class="mb-1">@trim.Text</MudText>
             }
             @if (!string.IsNullOrEmpty(p.Errors))
             {
@@ -67,6 +75,7 @@
 
     IReadOnlyList<PoolInfo> pools = [];
     IReadOnlyList<DiskInfo> disks = [];
+    IReadOnlyList<PoolTrimStatus> trims = [];
     string? error;
     bool loaded;
 
@@ -82,7 +91,41 @@
         }
         catch (AgentException e) { error = L.Translate(e.Message); }
         catch (HttpRequestException) { error = L["Agent unreachable: is the ursanas-agent service running?"]; }
+        // Kept apart: without it, the pools are still shown, only the TRIM line is missing.
+        try { trims = await Agent.GetTrimStatusAsync(); }
+        catch (Exception e) when (e is AgentException or HttpRequestException) { trims = []; }
         loaded = true;
+    }
+
+    sealed record TrimLine(string Text, bool CanStart);
+
+    /// <summary>The TRIM state of a pool in words; null when it is unknown.</summary>
+    TrimLine? TrimOf(PoolInfo p)
+    {
+        if (trims.FirstOrDefault(t => t.Pool == p.Name) is not { } status) return null;
+        var online = status.Devices.Where(d => d.Online).ToList();
+        var supported = online.Where(d => d.State != TrimState.Unsupported).ToList();
+        if (supported.Count == 0)
+            return online.Count == 0 ? null : new(L["TRIM: not supported by the disks of this pool"], false);
+        if (ScheduledTaskCoordinator.ReadTrim(status) == TrimOutcome.Running)
+        {
+            var done = (int)supported.Average(d => d.State == TrimState.Completed ? 100 : d.Percent ?? 0);
+            return new(supported.Any(d => d.State == TrimState.Running) ? L["TRIM: in progress ({0}%)", done] : L["TRIM: paused ({0}%)", done], false);
+        }
+        if (supported.All(d => d.State == TrimState.Completed)) return new(L["TRIM: completed"], true);
+        return new(supported.All(d => d.State == TrimState.Untrimmed) ? L["TRIM: not done"] : L["TRIM: not done on every disk"], true);
+    }
+
+    async Task Trim(PoolInfo p)
+    {
+        try
+        {
+            await Ops.TrimPoolAsync(p.Name);
+            Snack.Add(L["TRIM of {0} started.", p.Name], Severity.Success);
+            await LoadAsync();
+        }
+        catch (AgentException e) { Snack.Add(L.Translate(e.Message), Severity.Error); }
+        catch (HttpRequestException) { Snack.Add(L["Agent unreachable."], Severity.Error); }
     }
 
     static Color HealthColor(string h) => h switch { "ONLINE" => Color.Success, "DEGRADED" => Color.Warning, _ => Color.Error };

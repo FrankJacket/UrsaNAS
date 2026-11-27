@@ -303,6 +303,21 @@ public class AgentClient(HttpClient http)
     public async Task AcknowledgeScriptAsync(string id, CancellationToken ct = default) =>
         await EnsureOkAsync(await http.DeleteAsync($"scripts/runs/{Uri.EscapeDataString(id)}", ct), ct);
 
+    // ---- SMART self-tests and TRIM
+    public Task<IReadOnlyList<SelfTestStatus>> GetSelfTestsAsync(IEnumerable<string>? serials = null, CancellationToken ct = default)
+    {
+        var query = string.Join('&', (serials ?? []).Select(s => "serial=" + Uri.EscapeDataString(s)));
+        return GetListAsync<SelfTestStatus>(query.Length == 0 ? "smart/selftests" : "smart/selftests?" + query, ct);
+    }
+
+    public async Task StartSelfTestAsync(SelfTestRequest req, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PostAsJsonAsync("smart/selftests", req, ct), ct);
+
+    public Task<IReadOnlyList<PoolTrimStatus>> GetTrimStatusAsync(CancellationToken ct = default) => GetListAsync<PoolTrimStatus>("zfs/trim", ct);
+
+    public async Task TrimPoolAsync(string name, CancellationToken ct = default) =>
+        await EnsureOkAsync(await http.PostAsync($"zfs/pools/{Uri.EscapeDataString(name)}/trim", null, ct), ct);
+
     // ---- ZFS
     public Task<IReadOnlyList<PoolInfo>> GetPoolsAsync(CancellationToken ct = default) => GetListAsync<PoolInfo>("zfs/pools", ct);
     public Task<IReadOnlyList<DatasetInfo>> GetDatasetsAsync(CancellationToken ct = default) => GetListAsync<DatasetInfo>("zfs/datasets", ct);

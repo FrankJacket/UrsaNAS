@@ -434,6 +434,9 @@ public class NasOperations(AgentClient agent, Repo repo, IMailSender mail, Authe
     public Task ScrubPoolAsync(string name) =>
         Audited(() => agent.ScrubPoolAsync(name), "Scrub started", name);
 
+    public Task TrimPoolAsync(string name) =>
+        Audited(() => agent.TrimPoolAsync(name), "TRIM started", name);
+
     public async Task CreateDatasetAsync(string name)
     {
         if (Rules.ValidateDatasetName(name) is { } e) throw new AgentException(e);

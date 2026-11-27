@@ -88,6 +88,8 @@
     string TypeText(string type) => type switch
     {
         ScheduledTaskType.Scrub => L["Pool scrub"],
+        ScheduledTaskType.Trim => L["Pool TRIM"],
+        ScheduledTaskType.SelfTest => L["SMART self-test"],
         ScheduledTaskType.Script => L["Custom script"],
         _ => L["ZFS snapshots"],
     };
@@ -115,9 +117,13 @@
     async Task Delete(ScheduledTaskRow task)
     {
         var ok = await Dialogs.ShowMessageBoxAsync(L["Delete task {0}?", task.Name],
-            task.Type == ScheduledTaskType.Script
-                ? L["The task, its script and its history are removed."]
-                : L["The task and its history are removed. Snapshots it already created are kept, and a scrub already started goes on."],
+            task.Type switch
+            {
+                ScheduledTaskType.Script => L["The task, its script and its history are removed."],
+                ScheduledTaskType.Trim => L["The task and its history are removed. A TRIM already started goes on."],
+                ScheduledTaskType.SelfTest => L["The task and its history are removed. A self-test already started goes on."],
+                _ => L["The task and its history are removed. Snapshots it already created are kept, and a scrub already started goes on."],
+            },
             yesText: L["Delete"], cancelText: L["Cancel"]);
         if (ok == true) await Run(() => Ops.DeleteAsync(task.Id), L["Task deleted."]);
     }

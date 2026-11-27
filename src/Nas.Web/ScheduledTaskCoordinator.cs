@@ -8,8 +8,10 @@ namespace Nas.Web;
 
 public enum ScrubState { Running, Succeeded, Errors, Cancelled, Superseded }
 
+public enum TrimOutcome { Running, Completed, Cancelled, Unknown }
+
 /// <summary>
-/// Runs scheduled tasks: starts those that are due, follows scrubs and scripts until they end and records each result.
+/// Runs scheduled tasks: starts those that are due, follows scrubs, TRIMs, self-tests and scripts until they end and records each result.
 /// No dependency on the signed-in user (the scheduler uses it too): the actor is passed as a parameter.
 /// </summary>
 public class ScheduledTaskCoordinator(AgentClient agent, Repo repo, ScheduledTaskRepo tasks, AlertService alerts)
@@ -18,9 +20,14 @@ public class ScheduledTaskCoordinator(AgentClient agent, Repo repo, ScheduledTas
     public static readonly TimeSpan Grace = TimeSpan.FromMinutes(5);
 
     const string InProgress = "Scrub in progress.";
+    const string TrimInProgress = "TRIM in progress.";
+    const string SelfTestInProgress = "Self-test in progress.";
     const string ScriptInProgress = "Script in progress.";
-    /// <summary>Prefix of <see cref="ScheduledRunRow.Pending"/> for a script; a pool name never contains “:”.</summary>
-    public const string ScriptPrefix = "script:";
+    /// <summary>
+    /// Prefixes of <see cref="ScheduledRunRow.Pending"/>: one script, or one line per pool being trimmed or disk being tested.
+    /// A line without a prefix is a pool being scrubbed (a pool name never contains “:”).
+    /// </summary>
+    public const string ScriptPrefix = "script:", TrimPrefix = "trim:", SelfTestPrefix = "smart:";
 
     // Static: the interface and the scheduler must not start the same task at the same time.
     static readonly SemaphoreSlim Gate = new(1, 1);
@@ -30,12 +37,24 @@ public class ScheduledTaskCoordinator(AgentClient agent, Repo repo, ScheduledTas
         if (t.Name.Trim().Length is 0 or > 100) return Msg.F("Enter a name (100 characters at most).");
         if (t.Type == ScheduledTaskType.Script)
             return ScriptRules.Validate(t.Script, t.RunAs, t.TimeoutMinutes) ?? t.Rule().Validate();
-        if (t.Type is not (ScheduledTaskType.Snapshot or ScheduledTaskType.Scrub)) return Msg.F("Unknown task type.");
+        if (t.Type is not (ScheduledTaskType.Snapshot or ScheduledTaskType.Scrub or ScheduledTaskType.Trim or ScheduledTaskType.SelfTest))
+            return Msg.F("Unknown task type.");
         var targets = t.TargetList();
         if (targets.Length == 0)
-            return t.Type == ScheduledTaskType.Snapshot ? Msg.F("Choose at least one dataset.") : Msg.F("Choose at least one pool.");
-        foreach (var target in targets)
-            if ((t.Type == ScheduledTaskType.Snapshot ? Rules.ValidateDatasetName(target) : Rules.ValidatePoolName(target)) is { } e) return e;
+            return t.Type switch
+            {
+                ScheduledTaskType.Snapshot => Msg.F("Choose at least one dataset."),
+                ScheduledTaskType.SelfTest => Msg.F("Choose at least one disk."),
+                _ => Msg.F("Choose at least one pool."),
+            };
+        if (t.Type == ScheduledTaskType.SelfTest)
+        {
+            if (targets.Any(s => s.Length > 100 || s.Any(char.IsControl))) return Msg.F("Invalid disk serial number.");
+            if (t.TestType is not (SelfTestType.Short or SelfTestType.Long)) return Msg.F("Unknown self-test type.");
+        }
+        else
+            foreach (var target in targets)
+                if ((t.Type == ScheduledTaskType.Snapshot ? Rules.ValidateDatasetName(target) : Rules.ValidatePoolName(target)) is { } e) return e;
         if (t.Type == ScheduledTaskType.Snapshot && t.Keep is < 1 or > 1000) return Msg.F("Keep between 1 and 1000 snapshots.");
         return t.Rule().Validate();
     }
@@ -127,6 +146,8 @@ public class ScheduledTaskCoordinator(AgentClient agent, Repo repo, ScheduledTas
         {
             if (t.Type == ScheduledTaskType.Snapshot) await RunSnapshotsAsync(t, run, lines, ct);
             else if (t.Type == ScheduledTaskType.Scrub) await StartScrubsAsync(t, run, lines, ct);
+            else if (t.Type == ScheduledTaskType.Trim) await StartTrimsAsync(t, run, lines, ct);
+            else if (t.Type == ScheduledTaskType.SelfTest) await StartSelfTestsAsync(t, run, lines, ct);
             else if (t.Type == ScheduledTaskType.Script) await StartScriptAsync(t, run, ct);
             else Fail(run, lines, Msg.F("Unknown task type."));
         }
@@ -136,7 +157,8 @@ public class ScheduledTaskCoordinator(AgentClient agent, Repo repo, ScheduledTas
         run.Details = lines.Count == 0 ? null : string.Join('\n', lines);
         if (run.Pending.Length > 0)
         {
-            run.Message ??= InProgress; // an error already met while starting remains the message
+            // An error already met while starting remains the message.
+            run.Message ??= t.Type == ScheduledTaskType.Trim ? TrimInProgress : t.Type == ScheduledTaskType.SelfTest ? SelfTestInProgress : InProgress;
             await tasks.UpdateRunAsync(run);
         }
         else await FinishAsync(run);
@@ -234,6 +256,88 @@ public class ScheduledTaskCoordinator(AgentClient agent, Repo repo, ScheduledTas
         return clean ? ScrubState.Succeeded : ScrubState.Errors;
     }
 
+    async Task StartTrimsAsync(ScheduledTaskRow t, ScheduledRunRow run, List<string> lines, CancellationToken ct)
+    {
+        var pools = await agent.GetTrimStatusAsync(ct);
+        var started = new List<string>();
+        foreach (var name in t.TargetList())
+        {
+            var pool = pools.FirstOrDefault(p => p.Pool == name);
+            if (pool is null) { Fail(run, lines, Msg.F("Pool “{0}” does not exist.", name)); continue; }
+            if (ReadTrim(pool) == TrimOutcome.Running)
+            {
+                lines.Add(Msg.F("Pool {0}: a TRIM is already running.", name));
+                continue;
+            }
+            var online = pool.Devices.Where(d => d.Online).ToList();
+            if (online.Count > 0 && online.All(d => d.State == TrimState.Unsupported))
+            {
+                Fail(run, lines, Msg.F("Pool {0}: none of its disks supports TRIM.", name));
+                continue;
+            }
+            try
+            {
+                await agent.TrimPoolAsync(name, ct);
+                started.Add(TrimPrefix + name);
+                lines.Add(Msg.F("Pool {0}: TRIM started.", name));
+            }
+            catch (AgentException e) { Fail(run, lines, Msg.F("Pool {0}: {1}", name, e.Message)); }
+            run.Pending = string.Join('\n', started); // updated as we go, like for scrubs
+        }
+        if (started.Count == 0 && !run.HasError)
+        {
+            run.Status = TaskRunStatus.Skipped;
+            run.Message = "A TRIM is already running.";
+        }
+    }
+
+    /// <summary>
+    /// Reads the TRIM state of a pool's disks. After a successful <c>zpool trim</c>, each disk that supports it shows its progress,
+    /// then its completion; a cancelled TRIM shows “untrimmed” again.
+    /// </summary>
+    public static TrimOutcome ReadTrim(PoolTrimStatus pool)
+    {
+        var devices = pool.Devices.Where(d => d.Online && d.State != TrimState.Unsupported).ToList();
+        if (devices.Any(d => d.State is TrimState.Running or TrimState.Suspended)) return TrimOutcome.Running;
+        if (devices.Count == 0) return TrimOutcome.Unknown;
+        return devices.All(d => d.State == TrimState.Completed) ? TrimOutcome.Completed : TrimOutcome.Cancelled;
+    }
+
+    /// <summary>How a disk is named in messages: its current name, then the serial number the task knows it by.</summary>
+    static string DiskLabel(SelfTestStatus s) => $"{s.Disk.Replace("/dev/", "")} ({s.Serial})";
+
+    async Task StartSelfTestsAsync(ScheduledTaskRow t, ScheduledRunRow run, List<string> lines, CancellationToken ct)
+    {
+        var serials = t.TargetList();
+        var disks = await agent.GetSelfTestsAsync(serials, ct);
+        var started = new List<string>();
+        foreach (var serial in serials)
+        {
+            var disk = disks.FirstOrDefault(d => d.Serial == serial);
+            if (disk is null) { Fail(run, lines, Msg.F("Disk {0}: not found. It may have been removed or replaced.", serial)); continue; }
+            var label = DiskLabel(disk);
+            if (disk.State == SelfTestState.Unsupported) { Fail(run, lines, Msg.F("Disk {0}: this disk does not support self-tests.", label)); continue; }
+            if (disk.State == SelfTestState.Running)
+            {
+                lines.Add(Msg.F("Disk {0}: a self-test is already running.", label));
+                continue;
+            }
+            try
+            {
+                await agent.StartSelfTestAsync(new SelfTestRequest(serial, t.TestType), ct);
+                started.Add(SelfTestPrefix + serial);
+                lines.Add(Msg.F(t.TestType == SelfTestType.Long ? "Disk {0}: long self-test started." : "Disk {0}: short self-test started.", label));
+            }
+            catch (AgentException e) { Fail(run, lines, Msg.F("Disk {0}: {1}", label, e.Message)); }
+            run.Pending = string.Join('\n', started);
+        }
+        if (started.Count == 0 && !run.HasError)
+        {
+            run.Status = TaskRunStatus.Skipped;
+            run.Message = "A self-test is already running.";
+        }
+    }
+
     /// <summary>Starts a script. Its identifier is saved before the call: a web interface stopped at that moment will find it again.</summary>
     async Task StartScriptAsync(ScheduledTaskRow t, ScheduledRunRow run, CancellationToken ct)
     {
@@ -273,9 +377,11 @@ public class ScheduledTaskCoordinator(AgentClient agent, Repo repo, ScheduledTas
             await FinishAsync(run);
             open.Remove(run);
         }
-        // Kept apart: a failing ZFS must not hold back script results.
+        // Kept apart: a failing ZFS or smartctl must not hold back the other results.
         await SyncScriptsAsync(open.Where(r => ScriptId(r) is not null).ToList(), ct);
-        await SyncScrubsAsync(open.Where(r => ScriptId(r) is null).ToList(), ct);
+        await SyncTrimsAsync(open.Where(r => r.Pending.StartsWith(TrimPrefix, StringComparison.Ordinal)).ToList(), ct);
+        await SyncSelfTestsAsync(open.Where(r => r.Pending.StartsWith(SelfTestPrefix, StringComparison.Ordinal)).ToList(), ct);
+        await SyncScrubsAsync(open.Where(r => !r.Pending.Contains(':')).ToList(), ct);
     }
 
     async Task SyncScriptsAsync(List<ScheduledRunRow> open, CancellationToken ct)
@@ -326,46 +432,104 @@ public class ScheduledTaskCoordinator(AgentClient agent, Repo repo, ScheduledTas
 
     async Task SyncScrubsAsync(List<ScheduledRunRow> open, CancellationToken ct)
     {
-        IReadOnlyList<PoolInfo>? pools = null;
-        foreach (var run in open)
-        {
-            var pending = run.Pending.Split('\n', StringSplitOptions.RemoveEmptyEntries).ToList();
-            if (pools is null)
-            {
-                try { pools = await agent.GetPoolsAsync(ct); }
-                catch (AgentException) { return; } // unknown state: we will try again
-            }
+        if (open.Count == 0) return;
+        IReadOnlyList<PoolInfo> pools;
+        try { pools = await agent.GetPoolsAsync(ct); }
+        catch (AgentException) { return; } // unknown state: we will try again
 
-            var lines = run.Details is null ? new List<string>() : run.Details.Split('\n').ToList();
-            var before = pending.Count;
-            if (run.Message == InProgress) run.Message = null; // the first error, if any, must be able to take its place
-            foreach (var name in pending.ToList())
+        foreach (var run in open)
+            await FollowAsync(run, InProgress, "Scrub completed without errors.", (name, lines) =>
             {
                 var pool = pools.FirstOrDefault(p => p.Name == name);
                 if (pool is null) Fail(run, lines, Msg.F("Pool “{0}” does not exist.", name));
                 else switch (ReadScrub(pool.Scan, pool.Errors))
                 {
-                    case ScrubState.Running: continue;
+                    case ScrubState.Running: return false;
                     case ScrubState.Succeeded: lines.Add(Msg.F("Pool {0}: scrub completed without errors.", name)); break;
                     case ScrubState.Errors: Fail(run, lines, Msg.F("Pool {0}: the scrub found errors. {1}", name, pool.Scan)); break;
                     case ScrubState.Cancelled: run.HasCancel = true; lines.Add(Msg.F("Pool {0}: the scrub was cancelled.", name)); break;
                     default: run.HasInterrupt = true; lines.Add(Msg.F("Pool {0}: the end of the scrub could not be observed.", name)); break;
                 }
-                pending.Remove(name);
-            }
-            if (pending.Count == before) continue;
-            run.Pending = string.Join('\n', pending);
-            run.Details = string.Join('\n', lines);
-            if (pending.Count > 0)
+                return true;
+            });
+    }
+
+    async Task SyncTrimsAsync(List<ScheduledRunRow> open, CancellationToken ct)
+    {
+        if (open.Count == 0) return;
+        IReadOnlyList<PoolTrimStatus> pools;
+        try { pools = await agent.GetTrimStatusAsync(ct); }
+        catch (AgentException) { return; }
+
+        foreach (var run in open)
+            await FollowAsync(run, TrimInProgress, "TRIM completed.", (line, lines) =>
             {
-                run.Message ??= InProgress;
-                await tasks.UpdateRunAsync(run);
-            }
-            else
+                var name = line[TrimPrefix.Length..];
+                var pool = pools.FirstOrDefault(p => p.Pool == name);
+                if (pool is null) Fail(run, lines, Msg.F("Pool “{0}” does not exist.", name));
+                else switch (ReadTrim(pool))
+                {
+                    case TrimOutcome.Running: return false;
+                    case TrimOutcome.Completed: lines.Add(Msg.F("Pool {0}: TRIM completed.", name)); break;
+                    case TrimOutcome.Cancelled: run.HasCancel = true; lines.Add(Msg.F("Pool {0}: the TRIM was cancelled.", name)); break;
+                    default: run.HasInterrupt = true; lines.Add(Msg.F("Pool {0}: the end of the TRIM could not be observed.", name)); break;
+                }
+                return true;
+            });
+    }
+
+    async Task SyncSelfTestsAsync(List<ScheduledRunRow> open, CancellationToken ct)
+    {
+        if (open.Count == 0) return;
+        // Only the disks being tested are queried.
+        var serials = open.SelectMany(r => r.Pending.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            .Select(line => line[SelfTestPrefix.Length..]).Distinct().ToList();
+        IReadOnlyList<SelfTestStatus> disks;
+        try { disks = await agent.GetSelfTestsAsync(serials, ct); }
+        catch (AgentException) { return; }
+
+        foreach (var run in open)
+            await FollowAsync(run, SelfTestInProgress, "Self-test passed.", (line, lines) =>
             {
-                run.Message ??= run.HasCancel ? "Cancelled." : run.HasInterrupt ? "Interrupted." : "Scrub completed without errors.";
-                await FinishAsync(run);
-            }
+                var serial = line[SelfTestPrefix.Length..];
+                var disk = disks.FirstOrDefault(d => d.Serial == serial);
+                if (disk is null) Fail(run, lines, Msg.F("Disk {0}: not found. It may have been removed or replaced.", serial));
+                else switch (disk.State)
+                {
+                    case SelfTestState.Running: return false;
+                    case SelfTestState.Passed: lines.Add(Msg.F("Disk {0}: self-test passed.", DiskLabel(disk))); break;
+                    case SelfTestState.Failed: Fail(run, lines, Msg.F("Disk {0}: the self-test failed ({1}).", DiskLabel(disk), disk.Detail ?? "?")); break;
+                    case SelfTestState.Aborted: run.HasInterrupt = true; lines.Add(Msg.F("Disk {0}: the self-test was aborted ({1}).", DiskLabel(disk), disk.Detail ?? "?")); break;
+                    default: Fail(run, lines, Msg.F("Disk {0}: the result of the self-test cannot be read.", DiskLabel(disk))); break;
+                }
+                return true;
+            });
+    }
+
+    /// <summary>
+    /// Concludes the targets of a run that have ended. <paramref name="conclude"/> returns false for a target still in progress,
+    /// otherwise it adds the target's result to the lines. The run ends with its last target.
+    /// </summary>
+    async Task FollowAsync(ScheduledRunRow run, string inProgress, string success, Func<string, List<string>, bool> conclude)
+    {
+        var pending = run.Pending.Split('\n', StringSplitOptions.RemoveEmptyEntries).ToList();
+        var lines = run.Details is null ? new List<string>() : run.Details.Split('\n').ToList();
+        var before = pending.Count;
+        if (run.Message == inProgress) run.Message = null; // the first error, if any, must be able to take its place
+        foreach (var target in pending.ToList())
+            if (conclude(target, lines)) pending.Remove(target);
+        if (pending.Count == before) return; // nothing is saved, so the cleared message does not matter
+        run.Pending = string.Join('\n', pending);
+        run.Details = string.Join('\n', lines);
+        if (pending.Count > 0)
+        {
+            run.Message ??= inProgress;
+            await tasks.UpdateRunAsync(run);
+        }
+        else
+        {
+            run.Message ??= run.HasCancel ? "Cancelled." : run.HasInterrupt ? "Interrupted." : success;
+            await FinishAsync(run);
         }
     }
 

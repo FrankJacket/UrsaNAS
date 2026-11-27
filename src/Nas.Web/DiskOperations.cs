@@ -56,6 +56,13 @@ public class DiskOperations(AgentClient agent, Repo repo, AuthenticationStatePro
         await repo.AuditAsync(await ActorAsync(), "Partition unmounted", mountPoint);
     }
 
+    /// <summary>The disk is designated by its serial number; the path only makes the activity log readable.</summary>
+    public async Task StartSelfTestAsync(string serial, string disk, string type)
+    {
+        await agent.StartSelfTestAsync(new SelfTestRequest(serial, type));
+        await repo.AuditAsync(await ActorAsync(), "SMART self-test started", $"{disk} ({serial}, {type})");
+    }
+
     public async Task GrowSystemAsync()
     {
         await agent.GrowSystemDiskAsync();
